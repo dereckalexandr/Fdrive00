@@ -4,24 +4,24 @@ Aplicación React (Vite) para gestionar producción mensual de ejecutivos,
 inspecciones y tasaciones de vehículos, y pre liquidaciones, con perfiles
 de Administrador, Ejecutivo e Inspector.
 
-## ⚠️ Léeme primero: limitación de almacenamiento
+## ⚠️ Léeme primero: almacenamiento
 
 Este proyecto nació como un *artifact* de Claude, donde los datos se
 guardaban con una API propia de Claude (`window.storage`). Esa API no
-existe fuera de Claude, así que aquí fue reemplazada por un **shim**
-(`src/storage-shim.js`) que usa `localStorage` del navegador.
+existe fuera de Claude, así que aquí fue reemplazada por dos posibles
+implementaciones, intercambiables sin tocar `App.jsx`:
 
-Esto significa que, tal como está, la app funciona perfectamente para
-**probarla o usarla tú solo/a en un mismo navegador**, pero:
+- **`src/storage-shim.js`** — usa `localStorage` del navegador. Sirve
+  para pruebas rápidas, pero **no comparte datos entre dispositivos**.
+- **`src/firebase-storage.js`** — usa **Firebase Firestore**, una base
+  de datos real en la nube. Con esto, el administrador y todos los
+  ejecutivos/inspectores SÍ ven la misma información, desde cualquier
+  dispositivo. **Esta es la opción recomendada para uso real.**
 
-- Los datos **no se comparten** entre distintos dispositivos o navegadores.
-- El administrador y los ejecutivos/inspectores deben usar el **mismo
-  navegador, en el mismo computador**, para ver los mismos datos.
-- Si limpias el caché del navegador, se pierden los datos.
-
-Para un uso real con varias personas en distintos dispositivos, necesitas
-reemplazar `src/storage-shim.js` por llamadas a un backend real (ver
-sección "Siguiente paso: backend real" más abajo).
+`src/main.jsx` detecta automáticamente cuál usar: si encuentra las
+variables de entorno de Firebase (`VITE_FIREBASE_*`), usa Firestore;
+si no las encuentra, cae de vuelta a `localStorage` y te avisa por la
+consola del navegador.
 
 ## Requisitos
 
@@ -41,6 +41,97 @@ npm run dev
 Esto abrirá la app en `http://localhost:5173` (o el puerto que indique
 la terminal). Ábrela en tu navegador y pruébala normalmente: crea
 ejecutivos, inspectores, carga producción, genera pre liquidaciones, etc.
+
+## Configurar Firebase (recomendado, paso a paso)
+
+### 1. Crear el proyecto en Firebase
+
+1. Entra a [console.firebase.google.com](https://console.firebase.google.com)
+   con tu cuenta de Google.
+2. "Agregar proyecto" → ponle un nombre (ej. "drive-futuro") → puedes
+   desactivar Google Analytics (no lo necesitas) → "Crear proyecto".
+
+### 2. Crear la base de datos Firestore
+
+1. En el menú lateral del proyecto: **Compilación → Firestore Database**.
+2. "Crear base de datos".
+3. Elige la ubicación del servidor (cualquiera cercana a Chile, ej.
+   `southamerica-east1`) → Siguiente.
+4. Modo de seguridad: elige **"Modo de producción"** (no "modo de
+   prueba"). Vamos a configurar las reglas manualmente en el paso 5.
+
+### 3. Registrar una app web y obtener las credenciales
+
+1. En la página principal del proyecto (ícono de engranaje ⚙️ arriba a
+   la izquierda → "Configuración del proyecto").
+2. Baja hasta "Tus apps" → clic en el ícono `</>` (Web).
+3. Ponle un apodo (ej. "drive-futuro-web") → "Registrar app" (no hace
+   falta activar Firebase Hosting, ya usamos Vercel).
+4. Firebase te muestra un bloque `firebaseConfig = { apiKey: "...", ... }`.
+   **Copia esos valores**, los vas a necesitar en el paso 4.
+
+### 4. Configurar las variables de entorno
+
+**Para desarrollo local:**
+1. Copia el archivo `.env.example` y renómbralo a `.env.local`.
+2. Pega ahí los valores que copiaste de Firebase, uno por línea:
+   ```
+   VITE_FIREBASE_API_KEY=AIza...
+   VITE_FIREBASE_AUTH_DOMAIN=drive-futuro-xxxx.firebaseapp.com
+   VITE_FIREBASE_PROJECT_ID=drive-futuro-xxxx
+   VITE_FIREBASE_STORAGE_BUCKET=drive-futuro-xxxx.appspot.com
+   VITE_FIREBASE_MESSAGING_SENDER_ID=123456789
+   VITE_FIREBASE_APP_ID=1:123456789:web:abc123
+   ```
+3. Corre `npm run dev` — en la consola del navegador debería aparecer
+   "Almacenamiento: Firebase Firestore" en vez del aviso de localStorage.
+
+**Para producción en Vercel:**
+1. Entra a tu proyecto en Vercel → **Settings → Environment Variables**.
+2. Agrega, una por una, las mismas 6 variables de arriba (mismo nombre,
+   mismo valor). Selecciónalas para los tres ambientes (Production,
+   Preview, Development).
+3. Ve a **Deployments** → abre el último deployment → menú "···" →
+   **Redeploy** (las variables de entorno solo se aplican en un
+   deployment nuevo, no en los ya existentes).
+
+### 5. Configurar las reglas de seguridad de Firestore
+
+Por defecto, en "modo de producción" Firestore bloquea todo acceso.
+Necesitas reglas que permitan leer/escribir la colección que usa la app.
+
+1. En Firebase Console: **Firestore Database → Reglas**.
+2. Reemplaza el contenido por:
+   ```
+   rules_version = '2';
+   service cloud.firestore {
+     match /databases/{database}/documents {
+       match /kv_store/{document} {
+         allow read, write: if true;
+       }
+     }
+   }
+   ```
+3. "Publicar".
+
+   ⚠️ **Importante sobre seguridad**: esta regla (`allow read, write: if
+   true`) permite que cualquiera que conozca la URL de tu Firestore
+   pueda leer y modificar los datos directamente, sin pasar por tu app
+   ni por la clave de administrador. Es aceptable para partir y probar,
+   pero para un uso real con datos sensibles (RUT, sueldos, AFP) el
+   siguiente paso recomendado es agregar **Firebase Authentication** y
+   restringir las reglas para que solo usuarios autenticados puedan
+   leer/escribir. Este es un paso adicional que no cubre esta guía,
+   pero es el que seguiría después de validar que todo funciona.
+
+### 6. Probar
+
+1. Local: `npm run dev`, entra como administrador, crea un ejecutivo.
+2. Abre la consola de Firebase → Firestore Database → deberías ver la
+   colección `kv_store` con un documento nuevo (la clave `vendors`).
+3. Abre la misma URL desde **otro navegador o dispositivo** — deberías
+   ver el mismo ejecutivo. Si es así, ¡la base de datos compartida ya
+   está funcionando!
 
 ## Compilar para producción
 
@@ -127,43 +218,39 @@ no del código. Revisa esto en orden:
 3. Crea los perfiles de ejecutivos e inspectores desde el panel
    administrador; cada uno recibe un enlace/código de acceso propio.
 
-## Siguiente paso: backend real (recomendado para producción)
+## Reforzar la seguridad más adelante (opcional)
 
-Si vas a usar esta plataforma con varias personas en distintos
-dispositivos (lo normal para una empresa), `localStorage` no es
-suficiente. Los pasos generales son:
+Con Firebase ya conectado, los datos quedan compartidos y persistentes.
+Los siguientes refuerzos quedan pendientes si más adelante quieres
+subir el nivel de seguridad:
 
-1. Elegir una base de datos con backend gestionado, por ejemplo
-   [Supabase](https://supabase.com) (Postgres + autenticación incluida)
-   o [Firebase](https://firebase.google.com).
-2. Crear tablas/colecciones equivalentes a las claves que usa hoy la
-   app: `vendors`, `inspectors`, `records`, `afp_config`, `uf_valor`,
-   `admin_auth`, más las inspecciones y tasaciones guardadas con
-   prefijo `inspeccion::` y `tasacion::`.
-3. Reemplazar las funciones dentro de `src/App.jsx` que llaman a
-   `window.storage.get/set/list/delete` (son fáciles de ubicar, buscan
-   ese texto) por llamadas a la API de esa base de datos.
-4. Mover la autenticación de administrador a ese backend, para que la
-   clave nunca quede visible en el código que se descarga al navegador.
-5. (Opcional) agregar envío real de correos de verificación/recuperación
-   con un servicio como SendGrid, Postmark o Resend, ya que en el
-   navegador no es posible enviar correos directamente.
+1. Agregar **Firebase Authentication** y restringir las reglas de
+   Firestore a usuarios autenticados (hoy son abiertas, ver paso 5 de
+   la configuración de Firebase más arriba).
+2. Mover la autenticación de administrador (hoy es un hash guardado en
+   Firestore, validado en el navegador) a una función de backend
+   (ej. Cloud Functions de Firebase), para que la lógica de validación
+   no viva en el código que descarga el navegador.
+3. Agregar envío real de correos de verificación/recuperación con un
+   servicio como SendGrid, Postmark o Resend (hoy la recuperación es
+   por código, ya que el navegador no puede enviar correos directamente).
 
 ## Estructura del proyecto
 
 ```
 drive-futuro/
-├── index.html          # Punto de entrada HTML
+├── index.html            # Punto de entrada HTML
 ├── package.json
 ├── vite.config.js
 ├── tailwind.config.js
 ├── postcss.config.js
-├── vercel.json          # Config explícita de build/output para Vercel
+├── vercel.json            # Config explícita de build/output para Vercel
+├── .env.example           # Variables de entorno de Firebase (plantilla)
 ├── src/
-│   ├── main.jsx         # Monta la app e instala el shim de almacenamiento
-│   ├── App.jsx          # Toda la plataforma (componente principal)
-│   ├── storage-shim.js  # Reemplazo de window.storage usando localStorage
-│   └── index.css        # Estilos base + Tailwind
+│   ├── main.jsx            # Monta la app; elige Firebase o localStorage
+│   ├── App.jsx              # Toda la plataforma (componente principal)
+│   ├── firebase-storage.js  # Almacenamiento real con Firestore
+│   ├── storage-shim.js      # Respaldo con localStorage (sin Firebase)
+│   └── index.css            # Estilos base + Tailwind
 └── README.md
 ```
-# Fdrive02
