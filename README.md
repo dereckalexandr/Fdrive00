@@ -159,11 +159,15 @@ del propietario" (`src/cav-parser.js`).
   Si tus CAV suelen ser escaneados, esta extracción no va a encontrar
   nada — se necesitaría agregar reconocimiento óptico de caracteres
   (OCR), que es un paso adicional no incluido todavía.
-- Las etiquetas de campo que busca (`CAV_FIELD_DEFS` dentro de
-  `src/cav-parser.js`) son una mejor aproximación, ya que no se
-  construyeron a partir de un CAV real. Prueba con un documento real y,
-  si algún campo no se detecta bien, agrega la variante de etiqueta
-  exacta que use tu documento en ese archivo.
+- Las etiquetas que busca (`CAV_FIELD_DEFS` en `src/cav-fields.js`) se
+  calibraron con un CAV real del Registro Civil, donde cada etiqueta y su
+  valor vienen en líneas consecutivas (también se acepta el valor en la
+  misma línea). Un CAV de ese formato no trae N° de serie ni VIN
+  (solo chasis), así que esos campos quedan vacíos. Si otro documento no
+  se detecta bien, pruébalo sin abrir la app con
+  `node scripts/probar-cav.mjs "ruta.pdf" --texto` (oculta nombre y RUN
+  por defecto; `--mostrar` los incluye) y agrega la variante de etiqueta
+  que falte. Las pruebas automáticas están en `tests/` (`npm test`).
 - Solo completa campos que estén **vacíos** — si el inspector ya
   escribió algo a mano, no lo sobrescribe.
 
