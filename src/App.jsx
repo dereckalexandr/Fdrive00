@@ -612,6 +612,12 @@ const CHECKLIST_SECTIONS = [
     items: [
       { id: "tablero_instrumentos", label: "Tablero instrumentos" },
       { id: "tapiceria", label: "Tapicería" },
+      { id: "frente_vehiculo", label: "Frente vehículo" },
+      { id: "costado_piloto", label: "Costado piloto" },
+      { id: "costado_copiloto", label: "Costado copiloto" },
+      { id: "posterior_vehiculo", label: "Posterior vehículo" },
+      { id: "parabrisas_carroceria", label: "Parabrisas" },
+      { id: "vidrios_general", label: "Vidrios general" },
     ],
   },
   {
