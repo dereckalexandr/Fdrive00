@@ -102,3 +102,25 @@ test("pdfFileName es seguro para archivos", () => {
   assert.equal(pdfFileName("Inspeccion", { inscripcion: "TTHY.51-1", fecha: "2026-10-06" }), "Inspeccion_TTHY511_2026-10-06.pdf");
   assert.equal(pdfFileName("Tasacion", {}), "Tasacion_sin-patente_sin-fecha.pdf");
 });
+
+test("tasación: subtotal por módulo y total general en el PDF", async () => {
+  const rec = {
+    fecha: "2026-10-06", vehiculo: "KIA RIO", patente: "WXYZ99", valorComercial: 9000000,
+    checklist: {
+      capot: { estado: "Repintado", valor: 150000 },
+      puerta: { estado: "Bueno", valor: 25000 },
+      motor_1: { nombre: "Correa", estado: "Regular", valor: 80000 },
+      motor_2: { nombre: "Bujías", estado: "Malo", valor: 45000 },
+    },
+  };
+  const all = (await readPdf(buildTasacionPdf(rec, { sections: T_SECTIONS, getItems, fmt }))).join(" ").replace(/\s+/g, " ");
+  assert.ok(all.includes("Subtotal Carrocería $175.000"), "subtotal de Carrocería");
+  assert.ok(all.includes("Subtotal Motor $125.000"), "subtotal de Motor");
+  assert.ok(!all.includes("Subtotal Frenos"), "un módulo sin registros no muestra subtotal");
+  assert.ok(all.includes("Total valorizaciones $300.000"), "total general = suma de subtotales");
+});
+
+test("tasación sin valores: total $0 y el PDF sigue siendo válido", async () => {
+  const pages = await readPdf(buildTasacionPdf({ fecha: "2026-10-06", checklist: {} }, { sections: T_SECTIONS, getItems, fmt }));
+  assert.ok(pages.join(" ").replace(/\s+/g, " ").includes("Total valorizaciones $0"));
+});

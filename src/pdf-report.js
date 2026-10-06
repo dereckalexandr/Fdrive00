@@ -11,6 +11,8 @@
  * ----------------------------------------------------------------
  */
 
+import { computeTasacionTotals } from "./tasacion-totals.js";
+
 const PAGE_W = 595;
 const PAGE_H = 842;
 const MARGIN = 44;
@@ -189,6 +191,17 @@ class PdfDoc {
     this.y -= 6;
   }
 
+  /** Línea de subtotal/total con el monto alineado a la derecha. */
+  totalLine(label, value, { big = false } = {}) {
+    const size = big ? 12 : 10;
+    this.ensure(big ? 44 : 22);
+    if (big) { this.y -= 4; this.line(MARGIN, this.y, PAGE_W - MARGIN, this.y, 0.4); this.y -= 6; }
+    const base = this.y - (big ? 12 : 10);
+    this.text(MARGIN + 6, base, label, { size, bold: true });
+    this.text(PAGE_W - MARGIN - 6 - textWidth(value, size, true), base, value, { size, bold: true });
+    this.y -= big ? 24 : 18;
+  }
+
   /** Devuelve el PDF como Uint8Array (bytes Latin-1). */
   build() {
     const total = this.pages.length;
@@ -288,6 +301,7 @@ export function buildTasacionPdf(record, { sections, getItems, fmt, inspectorNom
   ]);
   if (record.observaciones) pdf.paragraph("OBSERVACIONES", record.observaciones);
 
+  const totals = computeTasacionTotals(record.checklist, sections, getItems);
   const cols = [{ title: "Pieza", w: 230 }, { title: "Estado", w: 120 }, { title: "Valorización", w: CONTENT_W - 350, align: "right" }];
   for (const section of sections) {
     pdf.sectionBar(section.title);
@@ -309,8 +323,11 @@ export function buildTasacionPdf(record, { sections, getItems, fmt, inspectorNom
       pdf.gap(18);
     } else {
       pdf.table(cols, rows);
+      pdf.totalLine(`Subtotal ${section.title.replace(/^\d+\.\s*/, "")}`, fmt(totals.bySection[section.id]));
     }
   }
+  pdf.gap(6);
+  pdf.totalLine("Total valorizaciones", fmt(totals.total), { big: true });
   return pdf.build();
 }
 

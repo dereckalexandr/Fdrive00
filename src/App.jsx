@@ -12,6 +12,7 @@ import {
 import { extractPdfText, parseCavFields } from "./cav-parser.js";
 import { buildInspeccionPdf, buildTasacionPdf, pdfFileName } from "./pdf-report.js";
 import { saveDraft, loadDraft, clearDraft, isMeaningful } from "./drafts.js";
+import { computeTasacionTotals } from "./tasacion-totals.js";
 
 /* =========================================================
    TRAMOS Y CÁLCULOS
@@ -872,7 +873,7 @@ function PdfDropzone({ fileName, fileData, onFileLoaded, onRemove, readOnly = fa
 }
 
 /* ---------- Módulos plegables (agrupan cada parte del formulario) ---------- */
-function Module({ id, title, badge, accent = "border-sky-600", open, onToggle, children }) {
+function Module({ id, title, badge, meta, accent = "border-sky-600", open, onToggle, children }) {
   return (
     <div className={`bg-white border border-stone-200 border-l-4 ${accent}`}>
       <button
@@ -881,7 +882,10 @@ function Module({ id, title, badge, accent = "border-sky-600", open, onToggle, c
         aria-expanded={open}
         className="w-full flex items-center justify-between gap-3 px-4 py-3 md:px-5 md:py-4 text-left min-h-[52px]"
       >
-        <h3 className="font-serif text-lg text-stone-900">{title}</h3>
+        <div>
+          <h3 className="font-serif text-lg text-stone-900">{title}</h3>
+          {meta && <p className="text-xs font-mono text-stone-500 mt-0.5">{meta}</p>}
+        </div>
         <span className="flex items-center gap-3 shrink-0">
           {badge && (
             <span className={`text-xs px-2 py-0.5 border ${badge.done ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-stone-50 text-stone-500 border-stone-200"}`}>
@@ -892,6 +896,26 @@ function Module({ id, title, badge, accent = "border-sky-600", open, onToggle, c
         </span>
       </button>
       {open && <div className="px-4 md:px-5 pb-5">{children}</div>}
+    </div>
+  );
+}
+const sectionName = (title) => String(title).replace(/^\d+\.\s*/, "");
+function SubtotalRow({ title, value }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3 border-t border-stone-200 pt-3 mt-4">
+      <span className="text-sm text-stone-600">Subtotal {sectionName(title)}</span>
+      <span className="font-mono text-lg text-stone-900">{clp(value)}</span>
+    </div>
+  );
+}
+function TotalCard({ value }) {
+  return (
+    <div className="bg-stone-900 text-stone-100 px-4 py-4 md:px-5 flex items-baseline justify-between gap-3">
+      <div>
+        <p className="text-xs uppercase tracking-widest text-stone-400">Total valorizaciones</p>
+        <p className="text-xs text-stone-400 mt-0.5">Suma de los subtotales de todos los módulos</p>
+      </div>
+      <span className="font-mono text-2xl">{clp(value)}</span>
     </div>
   );
 }
@@ -1060,6 +1084,7 @@ function TasacionForm({ record, onFieldChange, onChecklistChange, readOnly = fal
 
   const moduleIds = ["datos", ...TASACION_SECTIONS.map((s) => s.id)];
   const modules = useModules(moduleIds, readOnly ? moduleIds : ["datos"]);
+  const totals = computeTasacionTotals(record.checklist, TASACION_SECTIONS, getTasacionSectionItems);
   const datosDone = TASACION_DATOS_KEYS.filter((k) => (k === "valorComercial" ? toNum(record[k]) > 0 : hasText(record[k]))).length;
 
   return (
@@ -1100,12 +1125,14 @@ function TasacionForm({ record, onFieldChange, onChecklistChange, readOnly = fal
         </div>
       </Module>
 
-      <TasacionChecklist checklist={record.checklist || {}} onItemChange={onChecklistChange} readOnly={readOnly} modules={modules} />
+      <TasacionChecklist checklist={record.checklist || {}} onItemChange={onChecklistChange} readOnly={readOnly} modules={modules} totals={totals} />
+
+      <TotalCard value={totals.total} />
     </div>
   );
 }
 
-function TasacionChecklist({ checklist, onItemChange, readOnly = false, modules }) {
+function TasacionChecklist({ checklist, onItemChange, readOnly = false, modules, totals }) {
   return (
     <>
       {TASACION_SECTIONS.map((section) => {
@@ -1114,11 +1141,13 @@ function TasacionChecklist({ checklist, onItemChange, readOnly = false, modules 
           const st = checklist[it.id];
           return st && (section.type === "dynamic" ? (st.nombre || st.estado || toNum(st.valor) > 0) : st.estado);
         }).length;
+        const subtotal = totals.bySection[section.id] || 0;
+        const meta = subtotal > 0 ? `Subtotal ${clp(subtotal)}` : null;
         const badge = section.type === "dynamic" ? { text: `${done} fila${done === 1 ? "" : "s"}`, done: done > 0 } : countBadge(done, items.length);
 
         if (section.type === "dynamic") {
           return (
-            <Module key={section.id} id={section.id} title={section.title} accent="border-violet-600" open={modules.open[section.id]} onToggle={modules.toggle} badge={badge}>
+            <Module key={section.id} id={section.id} title={section.title} accent="border-violet-600" open={modules.open[section.id]} onToggle={modules.toggle} badge={badge} meta={meta}>
               <div className="flex flex-col">
                 {items.map((item) => {
                   const state = checklist[item.id] || { nombre: "", estado: "", valor: 0 };
@@ -1162,12 +1191,13 @@ function TasacionChecklist({ checklist, onItemChange, readOnly = false, modules 
                   );
                 })}
               </div>
+              <SubtotalRow title={section.title} value={subtotal} />
             </Module>
           );
         }
 
         return (
-          <Module key={section.id} id={section.id} title={section.title} accent="border-violet-600" open={modules.open[section.id]} onToggle={modules.toggle} badge={badge}>
+          <Module key={section.id} id={section.id} title={section.title} accent="border-violet-600" open={modules.open[section.id]} onToggle={modules.toggle} badge={badge} meta={meta}>
             <div className="flex flex-col gap-4">
               {items.map((item) => {
                 const state = checklist[item.id] || { nombre: "", estado: "", valor: 0 };
@@ -1217,6 +1247,7 @@ function TasacionChecklist({ checklist, onItemChange, readOnly = false, modules 
                 );
               })}
             </div>
+            <SubtotalRow title={section.title} value={subtotal} />
           </Module>
         );
       })}
@@ -2257,6 +2288,7 @@ function InspectorDashboard({ inspector, onExit }) {
     const h = key && inspeccionPorKey(key);
     return h ? `inspección del ${h.data.fecha} (${[h.data.marca, h.data.modelo].filter(Boolean).join(" ") || "sin marca"} · ${h.data.inscripcion || "sin patente"})` : "";
   };
+  const totalesTasacion = computeTasacionTotals(tasacion.checklist, TASACION_SECTIONS, getTasacionSectionItems);
   const tasadas = new Set(historialTasaciones.map((t) => t.data.inspeccionId).filter(Boolean));
 
   const tabBtn = (id, label) => (
@@ -2416,7 +2448,10 @@ function InspectorDashboard({ inspector, onExit }) {
 
               <div className={barClass}>
                 <div className="flex flex-col md:flex-row md:items-center md:justify-end gap-2 md:gap-3">
-                  <span className="text-xs text-stone-500 md:mr-auto">{saveMsgTasacion || draftNoteTas}</span>
+                  <span className="text-xs text-stone-500 md:mr-auto">
+                    <strong className="text-stone-800">Total valorizaciones {clp(totalesTasacion.total)}</strong>
+                    {(saveMsgTasacion || draftNoteTas) && <> · {saveMsgTasacion || draftNoteTas}</>}
+                  </span>
                   <div className="flex gap-2">
                     <button onClick={() => handlePdfTasacion({ ...tasacion, inspectorNombre: inspector.nombre })} className="flex-1 md:flex-none border border-stone-300 bg-white text-stone-700 px-4 py-3 md:py-2 text-sm hover:bg-stone-50">PDF</button>
                     <button onClick={handleSaveTasacion} className="flex-[2] md:flex-none bg-stone-900 text-white px-4 py-3 md:py-2 text-sm font-medium hover:bg-stone-800">
@@ -2441,7 +2476,7 @@ function InspectorDashboard({ inspector, onExit }) {
                           <span className="font-mono text-sm text-stone-900">{clp(h.data.valorComercial)}</span>
                         </div>
                         <div className="text-xs text-stone-500">
-                          {h.data.fecha} · <span className="font-mono">{h.data.patente || "—"}</span>
+                          {h.data.fecha} · <span className="font-mono">{h.data.patente || "—"}</span> · Valorizaciones {clp(computeTasacionTotals(h.data.checklist, TASACION_SECTIONS, getTasacionSectionItems).total)}
                           {h.data.editadoEl ? " · editada" : ""}
                           {h.data.inspeccionId ? " · desde inspección" : ""}
                         </div>
