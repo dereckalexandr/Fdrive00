@@ -11,7 +11,7 @@
  * ----------------------------------------------------------------
  */
 
-import { computeTasacionTotals } from "./tasacion-totals.js";
+import { computeTasacionTotals, computeValorFinal } from "./tasacion-totals.js";
 
 const PAGE_W = 595;
 const PAGE_H = 842;
@@ -192,13 +192,13 @@ class PdfDoc {
   }
 
   /** Línea de subtotal/total con el monto alineado a la derecha. */
-  totalLine(label, value, { big = false } = {}) {
+  totalLine(label, value, { big = false, bold = true } = {}) {
     const size = big ? 12 : 10;
     this.ensure(big ? 44 : 22);
     if (big) { this.y -= 4; this.line(MARGIN, this.y, PAGE_W - MARGIN, this.y, 0.4); this.y -= 6; }
     const base = this.y - (big ? 12 : 10);
-    this.text(MARGIN + 6, base, label, { size, bold: true });
-    this.text(PAGE_W - MARGIN - 6 - textWidth(value, size, true), base, value, { size, bold: true });
+    this.text(MARGIN + 6, base, label, { size, bold });
+    this.text(PAGE_W - MARGIN - 6 - textWidth(value, size, bold), base, value, { size, bold });
     this.y -= big ? 24 : 18;
   }
 
@@ -297,37 +297,49 @@ export function buildTasacionPdf(record, { sections, getItems, fmt, inspectorNom
     ["PROPIETARIO", record.propietario], ["VEHÍCULO", record.vehiculo],
     ["PATENTE", record.patente], ["AÑO", record.anio],
     ["KILOMETRAJE", record.kilometraje], ["ESTADO GENERAL", record.estadoGeneral],
-    ["VALOR COMERCIAL ESTIMADO", fmt(record.valorComercial || 0)],
   ]);
   if (record.observaciones) pdf.paragraph("OBSERVACIONES", record.observaciones);
 
-  const totals = computeTasacionTotals(record.checklist, sections, getItems);
+  const checklist = record.checklist || {};
+  const totals = computeTasacionTotals(checklist, sections, getItems);
+  const final = computeValorFinal(record.valorComercial, totals.total);
   const cols = [{ title: "Pieza", w: 230 }, { title: "Estado", w: 120 }, { title: "Valorización", w: CONTENT_W - 350, align: "right" }];
+
+  // Resumen: solo las piezas que tienen valorización.
+  pdf.ensure(40);
+  pdf.text(MARGIN, pdf.y - 6, "Resumen: se listan solo las piezas con valorización.", { size: 8.5, gray: 0.5 });
+  pdf.gap(16);
+  let listed = 0;
   for (const section of sections) {
-    pdf.sectionBar(section.title);
-    const checklist = record.checklist || {};
     const rows = [];
     for (const it of getItems(section)) {
       const st = checklist[it.id] || {};
-      if (section.type === "dynamic") {
-        if (!st.nombre && !st.estado && !Number(st.valor)) continue; // solo las filas completadas
-        rows.push([st.nombre || "", st.estado || "", Number(st.valor) ? fmt(Number(st.valor)) : ""]);
-      } else {
-        rows.push([it.label, st.estado || "", Number(st.valor) ? fmt(Number(st.valor)) : ""]);
-        if (it.extra && st[it.extra.id]) rows.push([`   ${it.extra.label}`, st[it.extra.id], ""]);
-      }
+      const valor = Number(st.valor);
+      if (!Number.isFinite(valor) || valor === 0) continue;
+      const dynamic = section.type === "dynamic";
+      let estado = st.estado || "";
+      if (!dynamic && it.extra && st[it.extra.id]) estado = [estado, `${it.extra.label}: ${st[it.extra.id]}`].filter(Boolean).join(" · ");
+      rows.push([dynamic ? (st.nombre || "(sin nombre)") : it.label, estado, fmt(valor)]);
     }
-    if (rows.length === 0) {
-      pdf.ensure(16);
-      pdf.text(MARGIN + 6, pdf.y - 4, "Sin registros.", { size: 9.5, gray: 0.5 });
-      pdf.gap(18);
-    } else {
-      pdf.table(cols, rows);
-      pdf.totalLine(`Subtotal ${section.title.replace(/^\d+\.\s*/, "")}`, fmt(totals.bySection[section.id]));
-    }
+    if (rows.length === 0) continue;
+    listed++;
+    pdf.sectionBar(section.title);
+    pdf.table(cols, rows);
+    pdf.totalLine(`Subtotal ${section.title.replace(/^\d+\.\s*/, "")}`, fmt(totals.bySection[section.id]));
   }
-  pdf.gap(6);
-  pdf.totalLine("Total valorizaciones", fmt(totals.total), { big: true });
+  if (listed === 0) {
+    pdf.ensure(20);
+    pdf.text(MARGIN + 6, pdf.y - 4, "Sin piezas con valorización.", { size: 9.5, gray: 0.5 });
+    pdf.gap(20);
+  }
+
+  // Cierre: valor comercial menos el total de valorizaciones.
+  pdf.gap(8);
+  pdf.ensure(120);
+  pdf.sectionBar("Resumen de valorización");
+  pdf.totalLine("Valor comercial estimado", fmt(final.valorComercial));
+  pdf.totalLine("Menos: Total valorizaciones", fmt(final.total));
+  pdf.totalLine("Valor final", fmt(final.final), { big: true });
   return pdf.build();
 }
 

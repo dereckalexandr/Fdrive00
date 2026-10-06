@@ -30,3 +30,13 @@ export function computeTasacionTotals(checklist, sections, getItems) {
   }
   return { bySection, total };
 }
+
+/**
+ * Valor final de la tasación = valor comercial estimado − total de valorizaciones.
+ * Puede ser negativo si las valorizaciones superan al valor comercial.
+ */
+export function computeValorFinal(valorComercial, totalValorizaciones) {
+  const vc = num(valorComercial);
+  const total = num(totalValorizaciones);
+  return { valorComercial: vc, total, final: vc - total };
+}

@@ -81,21 +81,48 @@ const T_SECTIONS = [
 const getItems = (s) => (s.type === "dynamic" ? Array.from({ length: s.slots }, (_, i) => ({ id: `${s.id}_${i + 1}` })) : s.items);
 const fmt = (n) => `$${Number(n).toLocaleString("es-CL")}`;
 
-test("informe de tasación: datos, valores y filas dinámicas solo si están completas", async () => {
+test("informe de tasación: datos del vehículo y solo las piezas con valorización", async () => {
   const rec = {
     fecha: "2026-10-06", propietario: "JUAN PEREZ", vehiculo: "TOYOTA FORTUNER", patente: "ABCD12", anio: "2025",
     kilometraje: "45000", estadoGeneral: "Bueno", valorComercial: 25000000, observaciones: "Vehículo en buen estado general.",
     checklist: {
       capot: { estado: "Repintado", valor: 150000 },
-      puerta: { estado: "Bueno", valor: 0, vidrio: "No original" },
+      puerta: { estado: "Bueno", valor: 20000, vidrio: "No original" },
       motor_1: { nombre: "Correa de distribución", estado: "Regular", valor: 80000 },
+      motor_2: { nombre: "Bujías (sin valor)", estado: "Malo", valor: 0 },
     },
   };
   const pages = await readPdf(buildTasacionPdf(rec, { sections: T_SECTIONS, getItems, fmt, inspectorNombre: "Ana Soto" }));
   const all = pages.join(" ");
-  for (const s of ["Informe de tasación", "TOYOTA FORTUNER", "$25.000.000", "Repintado", "$150.000", "No original", "Correa de distribución", "$80.000", "Sin registros"]) {
+  for (const s of ["Informe de tasación", "TOYOTA FORTUNER", "Repintado", "$150.000", "Vidrio: No original", "Correa de distribución", "$80.000"]) {
     assert.ok(all.includes(s), `falta "${s}"`);
   }
+  // resumen: lo que no tiene valorización no aparece
+  assert.ok(!all.includes("Bujías"), "una fila sin valorización no debe listarse");
+  assert.ok(!all.includes("Sin registros"));
+});
+
+test("tasación: el valor comercial va al final y se le resta el total de valorizaciones", async () => {
+  const rec = {
+    fecha: "2026-10-06", vehiculo: "KIA RIO", valorComercial: 9000000,
+    checklist: { capot: { estado: "Repintado", valor: 150000 }, motor_1: { nombre: "Correa", valor: 50000 } },
+  };
+  const pages = await readPdf(buildTasacionPdf(rec, { sections: T_SECTIONS, getItems, fmt }));
+  const all = pages.join(" ").replace(/\s+/g, " ");
+  const iResumen = all.indexOf("Resumen de valorización");
+  assert.ok(iResumen > 0, "falta el bloque final");
+  const cierre = all.slice(iResumen);
+  assert.ok(cierre.includes("Valor comercial estimado $9.000.000"));
+  assert.ok(cierre.includes("Menos: Total valorizaciones $200.000"));
+  assert.ok(cierre.includes("Valor final $8.800.000"));
+  // el valor comercial ya no se repite en el encabezado: solo aparece en el cierre
+  assert.equal(all.split("$9.000.000").length - 1, 1);
+});
+
+test("tasación: si las valorizaciones superan el valor comercial, el valor final es negativo", async () => {
+  const rec = { fecha: "2026-10-06", valorComercial: 100000, checklist: { capot: { valor: 150000 } } };
+  const all = (await readPdf(buildTasacionPdf(rec, { sections: T_SECTIONS, getItems, fmt }))).join(" ").replace(/\s+/g, " ");
+  assert.ok(/Valor final \$?-\$?50\.000/.test(all), "valor final negativo"); // "$-50.000" (fmt de la prueba) o "-$50.000" (clp de la app)
 });
 
 test("pdfFileName es seguro para archivos", () => {
@@ -117,10 +144,13 @@ test("tasación: subtotal por módulo y total general en el PDF", async () => {
   assert.ok(all.includes("Subtotal Carrocería $175.000"), "subtotal de Carrocería");
   assert.ok(all.includes("Subtotal Motor $125.000"), "subtotal de Motor");
   assert.ok(!all.includes("Subtotal Frenos"), "un módulo sin registros no muestra subtotal");
-  assert.ok(all.includes("Total valorizaciones $300.000"), "total general = suma de subtotales");
+  assert.ok(all.includes("Menos: Total valorizaciones $300.000"), "total general = suma de subtotales");
+  assert.ok(all.includes("Valor final $8.700.000"), "9.000.000 - 300.000");
 });
 
 test("tasación sin valores: total $0 y el PDF sigue siendo válido", async () => {
   const pages = await readPdf(buildTasacionPdf({ fecha: "2026-10-06", checklist: {} }, { sections: T_SECTIONS, getItems, fmt }));
-  assert.ok(pages.join(" ").replace(/\s+/g, " ").includes("Total valorizaciones $0"));
+  const all = pages.join(" ").replace(/\s+/g, " ");
+  assert.ok(all.includes("Total valorizaciones $0"));
+  assert.ok(all.includes("Sin piezas con valorización"));
 });

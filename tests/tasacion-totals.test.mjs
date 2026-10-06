@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { computeTasacionTotals } from "../src/tasacion-totals.js";
+import { computeTasacionTotals, computeValorFinal } from "../src/tasacion-totals.js";
 
 const SECTIONS = [
   { id: "carr", type: "fixed", items: [{ id: "capot" }, { id: "puerta" }] },
@@ -37,4 +37,19 @@ test("ítems que ya no existen en el checklist no suman", () => {
 
 test("sin checklist devuelve ceros", () => {
   assert.deepEqual(computeTasacionTotals(undefined, SECTIONS, getItems), { bySection: { carr: 0, motor: 0, vacia: 0 }, total: 0 });
+});
+
+test("valor final = valor comercial − total de valorizaciones", () => {
+  assert.deepEqual(computeValorFinal(9000000, 300000), { valorComercial: 9000000, total: 300000, final: 8700000 });
+});
+
+test("valor final con datos vacíos o inválidos", () => {
+  assert.equal(computeValorFinal("", 0).final, 0);
+  assert.equal(computeValorFinal(undefined, 50000).final, -50000);
+  assert.equal(computeValorFinal("abc", "x").final, 0);
+  assert.equal(computeValorFinal("2500000", 500000).final, 2000000); // número guardado como texto
+});
+
+test("valor final negativo cuando las valorizaciones superan el valor comercial", () => {
+  assert.equal(computeValorFinal(100000, 150000).final, -50000);
 });

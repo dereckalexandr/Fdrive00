@@ -12,7 +12,7 @@ import {
 import { extractPdfText, parseCavFields } from "./cav-parser.js";
 import { buildInspeccionPdf, buildTasacionPdf, pdfFileName } from "./pdf-report.js";
 import { saveDraft, loadDraft, clearDraft, isMeaningful } from "./drafts.js";
-import { computeTasacionTotals } from "./tasacion-totals.js";
+import { computeTasacionTotals, computeValorFinal } from "./tasacion-totals.js";
 
 /* =========================================================
    TRAMOS Y CÁLCULOS
@@ -906,6 +906,18 @@ function SubtotalRow({ title, value }) {
       <span className="text-sm text-stone-600">Subtotal {sectionName(title)}</span>
       <span className="font-mono text-lg text-stone-900">{clp(value)}</span>
     </div>
+  );
+}
+// Valor comercial estimado − total de valorizaciones = valor final (historial de tasaciones).
+function ValorFinalResumen({ record }) {
+  const totals = computeTasacionTotals(record.checklist, TASACION_SECTIONS, getTasacionSectionItems);
+  const vf = computeValorFinal(record.valorComercial, totals.total);
+  return (
+    <dl className="mt-2 text-xs text-stone-600 max-w-xs">
+      <div className="flex justify-between gap-3"><dt>Valor comercial estimado</dt><dd className="font-mono">{clp(vf.valorComercial)}</dd></div>
+      <div className="flex justify-between gap-3"><dt>Menos: Total valorizaciones</dt><dd className="font-mono">{clp(vf.total)}</dd></div>
+      <div className="flex justify-between gap-3 border-t border-stone-300 mt-1 pt-1 text-sm font-semibold text-stone-900"><dt>Valor final</dt><dd className="font-mono">{clp(vf.final)}</dd></div>
+    </dl>
   );
 }
 function TotalCard({ value }) {
@@ -2473,13 +2485,13 @@ function InspectorDashboard({ inspector, onExit }) {
                       <li key={h.id} className="border-b border-stone-100 py-3">
                         <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5">
                           <span className="text-stone-900">{h.data.vehiculo || "—"}</span>
-                          <span className="font-mono text-sm text-stone-900">{clp(h.data.valorComercial)}</span>
                         </div>
                         <div className="text-xs text-stone-500">
-                          {h.data.fecha} · <span className="font-mono">{h.data.patente || "—"}</span> · Valorizaciones {clp(computeTasacionTotals(h.data.checklist, TASACION_SECTIONS, getTasacionSectionItems).total)}
+                          {h.data.fecha} · <span className="font-mono">{h.data.patente || "—"}</span>
                           {h.data.editadoEl ? " · editada" : ""}
                           {h.data.inspeccionId ? " · desde inspección" : ""}
                         </div>
+                        <ValorFinalResumen record={h.data} />
                         <RecordActions>
                           <ActionLink onClick={() => setViewingTasacion(h)}>Ver</ActionLink>
                           <ActionLink onClick={() => startEditTasacion(h)}>Editar</ActionLink>
