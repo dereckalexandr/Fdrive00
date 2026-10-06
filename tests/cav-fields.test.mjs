@@ -54,8 +54,9 @@ test("campos que el CAV no trae no se inventan", () => {
 
 test("no confunde campos no capturados con los capturados (Número poliza, Número, Año)", () => {
   const f = parseCavFields(CAV_ETIQUETA_Y_VALOR_EN_LINEAS_SEPARADAS);
-  for (const v of Object.values(f)) {
-    assert.ok(!/1\.234\.567|123456 de fecha|2025/.test(v), `valor contaminado: ${v}`);
+  for (const [k, v] of Object.entries(f)) {
+    if (k === "anio") continue; // "2025" es justamente el año
+    assert.ok(!/1\.234\.567|123456 de fecha|2025/.test(v), `valor contaminado en ${k}: ${v}`);
   }
 });
 
@@ -111,4 +112,15 @@ test("texto vacío o nulo", () => {
 test("respaldo del RUN por patrón si no hay etiqueta", () => {
   const f = parseCavFields("Propietario\nJUAN PEREZ 12.345.678-5 otra cosa");
   assert.equal(f.propietarioRun, "12.345.678-5");
+});
+
+test("año del vehículo (viene en la misma línea que el tipo de vehículo)", () => {
+  const f = parseCavFields(CAV_ETIQUETA_Y_VALOR_EN_LINEAS_SEPARADAS);
+  assert.equal(f.anio, "2025");
+});
+
+test("año en su propia línea o en la misma que otro campo", () => {
+  assert.equal(parseCavFields("Año : 2019").anio, "2019");
+  assert.equal(parseCavFields("Año   :  \n2018").anio, "2018");
+  assert.equal(parseCavFields("Marca : KIA Año : 2020 Modelo : RIO").anio, "2020");
 });

@@ -10,6 +10,8 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { extractPdfText, parseCavFields } from "./cav-parser.js";
+import { buildInspeccionPdf, buildTasacionPdf, pdfFileName } from "./pdf-report.js";
+import { saveDraft, loadDraft, clearDraft, isMeaningful } from "./drafts.js";
 
 /* =========================================================
    TRAMOS Y CÁLCULOS
@@ -499,6 +501,12 @@ async function saveTasacion(inspectorId, id, data) {
   try { await window.storage.set(`tasacion::${inspectorId}::${id}`, JSON.stringify(data), true); return true; }
   catch (e) { return false; }
 }
+async function deleteInspeccion(key) {
+  try { return await window.storage.delete(key, true); } catch (e) { return null; }
+}
+async function deleteTasacion(key) {
+  try { return await window.storage.delete(key, true); } catch (e) { return null; }
+}
 async function loadTasacionesFor(inspectorId) {
   try {
     const listRes = await window.storage.list(`tasacion::${inspectorId}::`, true);
@@ -621,6 +629,7 @@ function emptyInspeccion() {
     cavFileData: "",
     fecha: new Date().toISOString().slice(0, 10),
     inscripcion: "",
+    anio: "",
     marca: "",
     modelo: "",
     nroMotor: "",
@@ -646,6 +655,7 @@ function emptyTasacion() {
     valorComercial: 0,
     estadoGeneral: "",
     observaciones: "",
+    inspeccionId: "",
     checklist: {},
   };
 }
@@ -838,7 +848,8 @@ function PdfDropzone({ fileName, fileData, onFileLoaded, onRemove, readOnly = fa
         onClick={() => inputRef.current && inputRef.current.click()}
         className={`cursor-pointer border-2 border-dashed p-8 text-center transition-colors ${dragOver ? "border-amber-500 bg-amber-50" : "border-stone-300 bg-stone-50 hover:bg-stone-100"}`}
       >
-        <p className="text-sm text-stone-600">Arrastra aquí tu archivo PDF, o haz clic para seleccionarlo</p>
+        <p className="text-sm text-stone-600 md:hidden">Toca para seleccionar el PDF</p>
+        <p className="text-sm text-stone-600 hidden md:block">Arrastra aquí tu archivo PDF, o haz clic para seleccionarlo</p>
         <p className="text-xs text-stone-400 mt-1">Solo formato PDF</p>
         <input ref={inputRef} type="file" accept="application/pdf,.pdf" onChange={handleInputChange} className="hidden" />
       </div>
@@ -854,10 +865,60 @@ function PdfDropzone({ fileName, fileData, onFileLoaded, onRemove, readOnly = fa
   );
 }
 
+/* ---------- Módulos plegables (agrupan cada parte del formulario) ---------- */
+function Module({ id, title, badge, accent = "border-sky-600", open, onToggle, children }) {
+  return (
+    <div className={`bg-white border border-stone-200 border-l-4 ${accent}`}>
+      <button
+        type="button"
+        onClick={() => onToggle(id)}
+        aria-expanded={open}
+        className="w-full flex items-center justify-between gap-3 px-4 py-3 md:px-5 md:py-4 text-left min-h-[52px]"
+      >
+        <h3 className="font-serif text-lg text-stone-900">{title}</h3>
+        <span className="flex items-center gap-3 shrink-0">
+          {badge && (
+            <span className={`text-xs px-2 py-0.5 border ${badge.done ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-stone-50 text-stone-500 border-stone-200"}`}>
+              {badge.text}
+            </span>
+          )}
+          <span aria-hidden="true" className="text-stone-400 text-xs">{open ? "▲" : "▼"}</span>
+        </span>
+      </button>
+      {open && <div className="px-4 md:px-5 pb-5">{children}</div>}
+    </div>
+  );
+}
+const countBadge = (done, total) => ({ text: `${done}/${total}`, done: total > 0 && done >= total });
+
+function useModules(ids, initiallyOpen) {
+  const [open, setOpen] = useState(() => Object.fromEntries(ids.map((id) => [id, initiallyOpen.includes(id)])));
+  return {
+    open,
+    toggle: (id) => setOpen((o) => ({ ...o, [id]: !o[id] })),
+    setAll: (value) => setOpen(Object.fromEntries(ids.map((id) => [id, value]))),
+  };
+}
+
+function ModuleToolbar({ modules }) {
+  return (
+    <div className="flex justify-end gap-4 text-xs">
+      <button type="button" onClick={() => modules.setAll(true)} className="text-stone-500 hover:underline py-1">Expandir todo</button>
+      <button type="button" onClick={() => modules.setAll(false)} className="text-stone-500 hover:underline py-1">Contraer todo</button>
+    </div>
+  );
+}
+
+const hasText = (v) => String(v == null ? "" : v).trim() !== "";
+const INSPECCION_VEHICULO_KEYS = ["inscripcion", "anio", "marca", "modelo", "nroMotor", "nroChasis", "color"];
+
 function InspeccionForm({ record, onFieldChange, onChecklistChange, readOnly = false }) {
   const fechaDisplay = record.fecha
     ? new Date(`${record.fecha}T00:00:00`).toLocaleDateString("es-CL", { day: "2-digit", month: "long", year: "numeric" })
     : "—";
+
+  const moduleIds = ["cav", "vehiculo", "propietario", ...CHECKLIST_SECTIONS.map((s) => s.id)];
+  const modules = useModules(moduleIds, readOnly ? moduleIds : ["cav"]);
 
   const [autoFillMsg, setAutoFillMsg] = useState("");
   const [autoFilling, setAutoFilling] = useState(false);
@@ -877,6 +938,9 @@ function InspeccionForm({ record, onFieldChange, onChecklistChange, readOnly = f
           ? `Se autocompletaron ${filledKeys.length} campo(s) desde el CAV. Verifica los datos antes de guardar.`
           : "No se detectaron datos automáticamente en este PDF (puede ser una imagen escaneada). Completa los campos manualmente."
       );
+      // Abre los módulos que se acaban de llenar para que el inspector los revise.
+      if (filledKeys.some((k) => INSPECCION_VEHICULO_KEYS.includes(k) && !modules.open.vehiculo)) modules.toggle("vehiculo");
+      if (filledKeys.some((k) => k.startsWith("propietario")) && !modules.open.propietario) modules.toggle("propietario");
     } catch (e) {
       console.warn("No se pudo leer el CAV automáticamente:", e);
       setAutoFillMsg("No se pudo leer el contenido del PDF automáticamente. Completa los campos manualmente.");
@@ -885,10 +949,15 @@ function InspeccionForm({ record, onFieldChange, onChecklistChange, readOnly = f
     }
   };
 
+  const vehiculoDone = INSPECCION_VEHICULO_KEYS.filter((k) => hasText(record[k])).length;
+  const propietarioDone = ["propietarioNombre", "propietarioRun"].filter((k) => hasText(record[k])).length;
+
   return (
-    <div className="flex flex-col gap-6">
-      <div className="bg-white border border-stone-200 border-l-4 border-sky-600 p-5">
-        <h3 className="font-serif text-lg text-stone-900 mb-4">CAV</h3>
+    <div className="flex flex-col gap-3">
+      <ModuleToolbar modules={modules} />
+
+      <Module id="cav" title="CAV" open={modules.open.cav} onToggle={modules.toggle}
+        badge={{ text: record.cavFileName ? "Cargado" : "Sin archivo", done: !!record.cavFileName }}>
         <PdfDropzone
           fileName={record.cavFileName}
           fileData={record.cavFileData}
@@ -898,16 +967,17 @@ function InspeccionForm({ record, onFieldChange, onChecklistChange, readOnly = f
         />
         {autoFilling && <p className="text-xs text-stone-500 mt-2">Leyendo el CAV para autocompletar datos…</p>}
         {!autoFilling && autoFillMsg && <p className="text-xs text-stone-500 mt-2">{autoFillMsg}</p>}
-      </div>
+      </Module>
 
-      <div className="bg-white border border-stone-200 border-l-4 border-sky-600 p-5">
-        <h3 className="font-serif text-lg text-stone-900 mb-4">Datos del vehículo</h3>
+      <Module id="vehiculo" title="Datos del vehículo" open={modules.open.vehiculo} onToggle={modules.toggle}
+        badge={countBadge(vehiculoDone, INSPECCION_VEHICULO_KEYS.length)}>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
             <label className="text-xs text-stone-500 block mb-1">Fecha del día</label>
             <div className="w-full px-2 py-1.5 text-sm text-stone-700 bg-stone-50 border border-stone-200">{fechaDisplay}</div>
           </div>
           <TextField label="Inscripción" value={record.inscripcion} onChange={(v) => onFieldChange("inscripcion", v)} readOnly={readOnly} />
+          <TextField label="Año" value={record.anio} onChange={(v) => onFieldChange("anio", v)} readOnly={readOnly} />
           <TextField label="Marca" value={record.marca} onChange={(v) => onFieldChange("marca", v)} readOnly={readOnly} />
           <TextField label="Modelo" value={record.modelo} onChange={(v) => onFieldChange("modelo", v)} readOnly={readOnly} />
           <TextField label="Nro Motor" value={record.nroMotor} onChange={(v) => onFieldChange("nroMotor", v)} readOnly={readOnly} />
@@ -916,70 +986,83 @@ function InspeccionForm({ record, onFieldChange, onChecklistChange, readOnly = f
           <TextField label="Nro Vin" value={record.nroVin} onChange={(v) => onFieldChange("nroVin", v)} readOnly={readOnly} />
           <TextField label="Color" value={record.color} onChange={(v) => onFieldChange("color", v)} readOnly={readOnly} />
         </div>
-      </div>
+      </Module>
 
-      <div className="bg-white border border-stone-200 border-l-4 border-sky-600 p-5">
-        <h3 className="font-serif text-lg text-stone-900 mb-4">Datos del propietario</h3>
+      <Module id="propietario" title="Datos del propietario" open={modules.open.propietario} onToggle={modules.toggle}
+        badge={countBadge(propietarioDone, 2)}>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <TextField label="Nombre" value={record.propietarioNombre} onChange={(v) => onFieldChange("propietarioNombre", v)} readOnly={readOnly} />
           <TextField label="R.U.N." value={record.propietarioRun} onChange={(v) => onFieldChange("propietarioRun", v)} readOnly={readOnly} />
         </div>
-      </div>
+      </Module>
 
-      {CHECKLIST_SECTIONS.map((section) => (
-        <div key={section.id} className="bg-white border border-stone-200 border-l-4 border-sky-600 p-5">
-          <h3 className="font-serif text-lg text-stone-900 mb-4">{section.title}</h3>
-          <div className="flex flex-col gap-4">
-            {section.items.map((item) => {
-              const itemState = record.checklist?.[item.id] || { estado: "", observacion: "" };
-              return (
-                <div key={item.id} className="grid grid-cols-1 md:grid-cols-3 gap-3 border-b border-stone-100 pb-4">
-                  <div className="text-sm text-stone-700 flex items-center">{item.label}</div>
-                  <div>
-                    {readOnly ? (
-                      <div className="text-sm text-stone-700">{itemState.estado || "—"}</div>
-                    ) : (
-                      <select
-                        value={itemState.estado}
-                        onChange={(e) => onChecklistChange(item.id, { estado: e.target.value })}
-                        className="w-full border border-stone-300 bg-white px-2 py-1.5 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
-                      >
-                        <option value="">Seleccionar</option>
-                        {ESTADOS_CHECKLIST.map((op) => <option key={op} value={op}>{op}</option>)}
-                      </select>
-                    )}
+      {CHECKLIST_SECTIONS.map((section) => {
+        const done = section.items.filter((it) => record.checklist?.[it.id]?.estado).length;
+        return (
+          <Module key={section.id} id={section.id} title={section.title} open={modules.open[section.id]} onToggle={modules.toggle}
+            badge={countBadge(done, section.items.length)}>
+            <div className="flex flex-col gap-4">
+              {section.items.map((item) => {
+                const itemState = record.checklist?.[item.id] || { estado: "", observacion: "" };
+                return (
+                  <div key={item.id} className="grid grid-cols-1 md:grid-cols-3 gap-3 border-b border-stone-100 pb-4">
+                    <div className="text-sm font-medium md:font-normal text-stone-700 flex items-center">{item.label}</div>
+                    <div>
+                      {readOnly ? (
+                        <div className="text-sm text-stone-700">{itemState.estado || "—"}</div>
+                      ) : (
+                        <select
+                          value={itemState.estado}
+                          onChange={(e) => onChecklistChange(item.id, { estado: e.target.value })}
+                          className="w-full border border-stone-300 bg-white px-2 py-1.5 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                        >
+                          <option value="">Seleccionar</option>
+                          {ESTADOS_CHECKLIST.map((op) => <option key={op} value={op}>{op}</option>)}
+                        </select>
+                      )}
+                    </div>
+                    <div>
+                      {readOnly ? (
+                        <div className="text-sm text-stone-500">{itemState.observacion || "—"}</div>
+                      ) : (
+                        <input
+                          type="text"
+                          value={itemState.observacion || ""}
+                          placeholder="Observaciones"
+                          onChange={(e) => onChecklistChange(item.id, { observacion: e.target.value })}
+                          className="w-full border border-stone-300 bg-white px-2 py-1.5 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                        />
+                      )}
+                    </div>
                   </div>
-                  <div>
-                    {readOnly ? (
-                      <div className="text-sm text-stone-500">{itemState.observacion || "—"}</div>
-                    ) : (
-                      <input
-                        type="text"
-                        value={itemState.observacion || ""}
-                        placeholder="Observaciones"
-                        onChange={(e) => onChecklistChange(item.id, { observacion: e.target.value })}
-                        className="w-full border border-stone-300 bg-white px-2 py-1.5 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
-                      />
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      ))}
+                );
+              })}
+            </div>
+          </Module>
+        );
+      })}
     </div>
   );
 }
 
-function TasacionForm({ record, onFieldChange, onChecklistChange, readOnly = false }) {
+const TASACION_DATOS_KEYS = ["propietario", "vehiculo", "patente", "anio", "kilometraje", "valorComercial", "estadoGeneral"];
+
+function TasacionForm({ record, onFieldChange, onChecklistChange, readOnly = false, inspeccionLabel = "" }) {
   const fechaDisplay = record.fecha
     ? new Date(`${record.fecha}T00:00:00`).toLocaleDateString("es-CL", { day: "2-digit", month: "long", year: "numeric" })
     : "—";
+
+  const moduleIds = ["datos", ...TASACION_SECTIONS.map((s) => s.id)];
+  const modules = useModules(moduleIds, readOnly ? moduleIds : ["datos"]);
+  const datosDone = TASACION_DATOS_KEYS.filter((k) => (k === "valorComercial" ? toNum(record[k]) > 0 : hasText(record[k]))).length;
+
   return (
-    <div className="flex flex-col gap-6">
-      <div className="bg-white border border-stone-200 border-l-4 border-violet-600 p-5">
-        <h3 className="font-serif text-lg text-stone-900 mb-4">Tasación</h3>
+    <div className="flex flex-col gap-3">
+      <ModuleToolbar modules={modules} />
+
+      <Module id="datos" title="Tasación" accent="border-violet-600" open={modules.open.datos} onToggle={modules.toggle}
+        badge={countBadge(datosDone, TASACION_DATOS_KEYS.length)}>
+        {inspeccionLabel && <p className="text-xs text-violet-700 bg-violet-50 border border-violet-200 px-3 py-2 mb-4">Basada en la {inspeccionLabel}</p>}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <TextField label="Propietario" value={record.propietario} onChange={(v) => onFieldChange("propietario", v)} readOnly={readOnly} />
           <div>
@@ -1009,81 +1092,76 @@ function TasacionForm({ record, onFieldChange, onChecklistChange, readOnly = fal
             )}
           </div>
         </div>
-      </div>
+      </Module>
 
-      <TasacionChecklist checklist={record.checklist || {}} onItemChange={onChecklistChange} readOnly={readOnly} />
+      <TasacionChecklist checklist={record.checklist || {}} onItemChange={onChecklistChange} readOnly={readOnly} modules={modules} />
     </div>
   );
 }
 
-function TasacionChecklist({ checklist, onItemChange, readOnly = false }) {
+function TasacionChecklist({ checklist, onItemChange, readOnly = false, modules }) {
   return (
     <>
       {TASACION_SECTIONS.map((section) => {
         const items = getTasacionSectionItems(section);
+        const done = items.filter((it) => {
+          const st = checklist[it.id];
+          return st && (section.type === "dynamic" ? (st.nombre || st.estado || toNum(st.valor) > 0) : st.estado);
+        }).length;
+        const badge = section.type === "dynamic" ? { text: `${done} fila${done === 1 ? "" : "s"}`, done: done > 0 } : countBadge(done, items.length);
 
         if (section.type === "dynamic") {
           return (
-            <div key={section.id} className="bg-white border border-stone-200 border-l-4 border-violet-600 p-5">
-              <h3 className="font-serif text-lg text-stone-900 mb-4">{section.title}</h3>
-              <div className="overflow-x-auto">
-                <table className="w-full border-collapse text-sm">
-                  <thead>
-                    <tr className="text-left text-xs uppercase tracking-wide text-stone-400 border-b border-stone-200">
-                      <th className="py-2 pr-2">Nombre de pieza</th>
-                      <th className="py-2 pr-2">Estado</th>
-                      <th className="py-2 pr-2">Valorización</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {items.map((item) => {
-                      const state = checklist[item.id] || { nombre: "", estado: "", valor: 0 };
-                      const estadoOptions = section.estadoOptions || ESTADOS_CHECKLIST;
-                      return (
-                        <tr key={item.id} className="border-b border-stone-100">
-                          <td className="py-1.5 pr-2 w-1/3">
-                            {readOnly ? (
-                              <div className="px-2 py-1.5 text-sm text-stone-700">{state.nombre || "—"}</div>
-                            ) : (
-                              <input
-                                type="text"
-                                value={state.nombre || ""}
-                                placeholder="Nombre de la pieza"
-                                onChange={(e) => onItemChange(item.id, { nombre: e.target.value })}
-                                className="w-full border border-stone-300 bg-white px-2 py-1.5 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
-                              />
-                            )}
-                          </td>
-                          <td className="py-1.5 pr-2 w-1/3">
-                            {readOnly ? (
-                              <div className="px-2 py-1.5 text-sm text-stone-700">{state.estado || "—"}</div>
-                            ) : (
-                              <select
-                                value={state.estado}
-                                onChange={(e) => onItemChange(item.id, { estado: e.target.value })}
-                                className="w-full border border-stone-300 bg-white px-2 py-1.5 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
-                              >
-                                <option value="">Seleccionar</option>
-                                {estadoOptions.map((op) => <option key={op} value={op}>{op}</option>)}
-                              </select>
-                            )}
-                          </td>
-                          <td className="py-1.5 pr-2 w-1/3">
-                            <NumberField value={toNum(state.valor)} onChange={(v) => onItemChange(item.id, { valor: v })} readOnly={readOnly} />
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+            <Module key={section.id} id={section.id} title={section.title} accent="border-violet-600" open={modules.open[section.id]} onToggle={modules.toggle} badge={badge}>
+              <div className="flex flex-col">
+                {items.map((item) => {
+                  const state = checklist[item.id] || { nombre: "", estado: "", valor: 0 };
+                  const estadoOptions = section.estadoOptions || ESTADOS_CHECKLIST;
+                  return (
+                    <div key={item.id} className="grid grid-cols-1 md:grid-cols-3 gap-2 md:gap-3 border-b border-stone-100 py-3">
+                      <div>
+                        <label className="text-xs text-stone-400 block mb-1 md:hidden">Nombre de pieza</label>
+                        {readOnly ? (
+                          <div className="px-2 py-1.5 text-sm text-stone-700">{state.nombre || "—"}</div>
+                        ) : (
+                          <input
+                            type="text"
+                            value={state.nombre || ""}
+                            placeholder="Nombre de la pieza"
+                            onChange={(e) => onItemChange(item.id, { nombre: e.target.value })}
+                            className="w-full border border-stone-300 bg-white px-2 py-1.5 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                          />
+                        )}
+                      </div>
+                      <div>
+                        <label className="text-xs text-stone-400 block mb-1 md:hidden">Estado</label>
+                        {readOnly ? (
+                          <div className="px-2 py-1.5 text-sm text-stone-700">{state.estado || "—"}</div>
+                        ) : (
+                          <select
+                            value={state.estado}
+                            onChange={(e) => onItemChange(item.id, { estado: e.target.value })}
+                            className="w-full border border-stone-300 bg-white px-2 py-1.5 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                          >
+                            <option value="">Seleccionar</option>
+                            {estadoOptions.map((op) => <option key={op} value={op}>{op}</option>)}
+                          </select>
+                        )}
+                      </div>
+                      <div>
+                        <label className="text-xs text-stone-400 block mb-1 md:hidden">Valorización</label>
+                        <NumberField value={toNum(state.valor)} onChange={(v) => onItemChange(item.id, { valor: v })} readOnly={readOnly} />
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            </div>
+            </Module>
           );
         }
 
         return (
-          <div key={section.id} className="bg-white border border-stone-200 border-l-4 border-violet-600 p-5">
-            <h3 className="font-serif text-lg text-stone-900 mb-4">{section.title}</h3>
+          <Module key={section.id} id={section.id} title={section.title} accent="border-violet-600" open={modules.open[section.id]} onToggle={modules.toggle} badge={badge}>
             <div className="flex flex-col gap-4">
               {items.map((item) => {
                 const state = checklist[item.id] || { nombre: "", estado: "", valor: 0 };
@@ -1091,7 +1169,7 @@ function TasacionChecklist({ checklist, onItemChange, readOnly = false }) {
                 return (
                   <div key={item.id} className="flex flex-col gap-3 border-b border-stone-100 pb-4">
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                      <div className="text-sm text-stone-700 flex items-center">{item.label}</div>
+                      <div className="text-sm font-medium md:font-normal text-stone-700 flex items-center">{item.label}</div>
                       <div>
                         {readOnly ? (
                           <div className="text-sm text-stone-700">{state.estado || "—"}</div>
@@ -1133,7 +1211,7 @@ function TasacionChecklist({ checklist, onItemChange, readOnly = false }) {
                 );
               })}
             </div>
-          </div>
+          </Module>
         );
       })}
     </>
@@ -1941,16 +2019,68 @@ function AnnualView({ vendor, year, onYearChange, afpList = [], ufValor = DEFAUL
 /* =========================================================
    PANEL INSPECTOR
 ========================================================= */
+function downloadPdfBytes(bytes, filename) {
+  const blob = new Blob([bytes], { type: "application/pdf" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+const recordIdFromKey = (key) => String(key).split("::").pop();
+const horaCorta = () => new Date().toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" });
+const fechaHoraCorta = (iso) =>
+  iso ? new Date(iso).toLocaleString("es-CL", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
+
+function RecordActions({ children }) {
+  return <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2">{children}</div>;
+}
+function ActionLink({ onClick, danger = false, children }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`text-sm py-1.5 hover:underline ${danger ? "text-rose-600" : "text-amber-700"}`}
+    >
+      {children}
+    </button>
+  );
+}
+
 function InspectorDashboard({ inspector, onExit }) {
   const [tab, setTab] = useState("inspeccion");
 
-  const [record, setRecord] = useState(emptyInspeccion());
+  // Borradores: se restauran una sola vez, antes del primer render, para que
+  // el autoguardado no pise el borrador con un formulario vacío.
+  const initRef = useRef(null);
+  if (!initRef.current) {
+    const restore = (kind, empty) => {
+      const d = loadDraft(inspector.id, kind);
+      if (!d || !isMeaningful(d.data, empty)) return { record: empty, editingId: null, savedAt: null };
+      const { __editingId, ...rec } = d.data;
+      return { record: { ...empty, ...rec }, editingId: __editingId || null, savedAt: d.savedAt };
+    };
+    initRef.current = { ins: restore("inspeccion", emptyInspeccion()), tas: restore("tasacion", emptyTasacion()) };
+  }
+  // Punto de comparación para decidir si hay "trabajo sin guardar" (vacío, o el registro que se está editando).
+  const baselineRef = useRef({ ins: emptyInspeccion(), tas: emptyTasacion() });
+
+  const [record, setRecord] = useState(initRef.current.ins.record);
+  const [editingId, setEditingId] = useState(initRef.current.ins.editingId);
+  const [restoredAt, setRestoredAt] = useState(initRef.current.ins.savedAt);
+  const [draftNote, setDraftNote] = useState("");
   const [historial, setHistorial] = useState([]);
   const [loadingHist, setLoadingHist] = useState(true);
   const [saveMsg, setSaveMsg] = useState("");
-  const [viewing, setViewing] = useState(null);
+  const [viewing, setViewing] = useState(null); // { key, data }
 
-  const [tasacion, setTasacion] = useState(emptyTasacion());
+  const [tasacion, setTasacion] = useState(initRef.current.tas.record);
+  const [editingTasId, setEditingTasId] = useState(initRef.current.tas.editingId);
+  const [restoredTasAt, setRestoredTasAt] = useState(initRef.current.tas.savedAt);
+  const [draftNoteTas, setDraftNoteTas] = useState("");
   const [historialTasaciones, setHistorialTasaciones] = useState([]);
   const [loadingHistTasaciones, setLoadingHistTasaciones] = useState(true);
   const [saveMsgTasacion, setSaveMsgTasacion] = useState("");
@@ -1958,17 +2088,35 @@ function InspectorDashboard({ inspector, onExit }) {
 
   const refreshHistorial = async () => {
     setLoadingHist(true);
-    const list = await loadInspeccionesFor(inspector.id);
-    setHistorial(list);
+    setHistorial(await loadInspeccionesFor(inspector.id));
     setLoadingHist(false);
   };
   const refreshHistorialTasaciones = async () => {
     setLoadingHistTasaciones(true);
-    const list = await loadTasacionesFor(inspector.id);
-    setHistorialTasaciones(list);
+    setHistorialTasaciones(await loadTasacionesFor(inspector.id));
     setLoadingHistTasaciones(false);
   };
   useEffect(() => { refreshHistorial(); refreshHistorialTasaciones(); }, [inspector.id]);
+
+  // Autoguardado del borrador (con una pequeña espera para no escribir en cada tecla).
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (isMeaningful(record, baselineRef.current.ins)) {
+        const r = saveDraft(inspector.id, "inspeccion", { ...record, __editingId: editingId });
+        setDraftNote(!r.ok ? "No se pudo guardar el borrador en este dispositivo." : `Borrador guardado en este dispositivo · ${horaCorta()}${r.sinArchivo ? " (sin el PDF del CAV: pesa demasiado)" : ""}`);
+      } else { clearDraft(inspector.id, "inspeccion"); setDraftNote(""); }
+    }, 700);
+    return () => clearTimeout(t);
+  }, [record, editingId]);
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (isMeaningful(tasacion, baselineRef.current.tas)) {
+        const r = saveDraft(inspector.id, "tasacion", { ...tasacion, __editingId: editingTasId });
+        setDraftNoteTas(!r.ok ? "No se pudo guardar el borrador en este dispositivo." : `Borrador guardado en este dispositivo · ${horaCorta()}`);
+      } else { clearDraft(inspector.id, "tasacion"); setDraftNoteTas(""); }
+    }, 700);
+    return () => clearTimeout(t);
+  }, [tasacion, editingTasId]);
 
   const updateField = (field, value) => setRecord((prev) => ({ ...prev, [field]: value }));
   const updateChecklist = (itemId, patch) => {
@@ -1985,28 +2133,141 @@ function InspectorDashboard({ inspector, onExit }) {
     }));
   };
 
+  const resetInspeccion = () => {
+    baselineRef.current.ins = emptyInspeccion();
+    setRecord(emptyInspeccion()); setEditingId(null); setRestoredAt(null); setDraftNote("");
+    clearDraft(inspector.id, "inspeccion");
+  };
+  const resetTasacion = () => {
+    baselineRef.current.tas = emptyTasacion();
+    setTasacion(emptyTasacion()); setEditingTasId(null); setRestoredTasAt(null); setDraftNoteTas("");
+    clearDraft(inspector.id, "tasacion");
+  };
+  // ¿Hay algo sin guardar que se perdería al cargar otro registro en el formulario?
+  const hayInspeccionSinGuardar = () => isMeaningful(record, baselineRef.current.ins);
+  const hayTasacionSinGuardar = () => isMeaningful(tasacion, baselineRef.current.tas);
+
+  const flash = (setter, msg, ms = 4000) => { setter(msg); setTimeout(() => setter(""), ms); };
+
+  /* ---------- Inspección: guardar / editar / eliminar / PDF ---------- */
   const handleSave = async () => {
-    const id = `${Date.now()}`;
-    const toSave = { ...record, inspectorId: inspector.id, inspectorNombre: inspector.nombre, guardadoEl: new Date().toISOString() };
+    const id = editingId || `${Date.now()}`;
+    const now = new Date().toISOString();
+    const toSave = { ...record, inspectorId: inspector.id, inspectorNombre: inspector.nombre, guardadoEl: editingId ? (record.guardadoEl || now) : now };
+    if (editingId) toSave.editadoEl = now;
     const ok = await saveInspeccion(inspector.id, id, toSave);
-    setSaveMsg(ok ? "Inspección guardada ✓" : "No se pudo guardar, intenta de nuevo.");
-    if (ok) { setRecord(emptyInspeccion()); refreshHistorial(); }
-    setTimeout(() => setSaveMsg(""), 2500);
+    if (ok) {
+      flash(setSaveMsg, editingId ? "Cambios guardados ✓" : "Inspección guardada ✓", 2500);
+      resetInspeccion();
+      refreshHistorial();
+    } else {
+      flash(setSaveMsg, "No se pudo guardar. Tus datos siguen en el borrador de este dispositivo; intenta de nuevo.");
+    }
+  };
+  const startEditInspeccion = (h) => {
+    if (hayInspeccionSinGuardar() && !window.confirm("Tienes una inspección sin guardar. ¿Reemplazarla por la que vas a editar?")) return;
+    const rec = { ...emptyInspeccion(), ...h.data };
+    baselineRef.current.ins = rec;
+    setRecord(rec); setEditingId(recordIdFromKey(h.id)); setRestoredAt(null); setViewing(null);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+  const handleDeleteInspeccion = async (h) => {
+    if (!window.confirm("¿Eliminar esta inspección? No se puede deshacer.")) return;
+    const res = await deleteInspeccion(h.id);
+    if (!res) { flash(setSaveMsg, "No se pudo eliminar. Intenta de nuevo."); return; }
+    if (editingId && editingId === recordIdFromKey(h.id)) resetInspeccion();
+    setViewing(null);
+    flash(setSaveMsg, "Inspección eliminada ✓", 2500);
+    refreshHistorial();
+  };
+  const handlePdfInspeccion = (data) => {
+    try {
+      const bytes = buildInspeccionPdf(data, { sections: CHECKLIST_SECTIONS, inspectorNombre: data.inspectorNombre || inspector.nombre });
+      downloadPdfBytes(bytes, pdfFileName("Inspeccion", data));
+    } catch (e) {
+      console.error("No se pudo generar el PDF:", e);
+      flash(setSaveMsg, "No se pudo generar el PDF.");
+    }
   };
 
+  /* ---------- Tasación: guardar / editar / eliminar / PDF ---------- */
   const handleSaveTasacion = async () => {
-    const id = `${Date.now()}`;
-    const toSave = { ...tasacion, inspectorId: inspector.id, inspectorNombre: inspector.nombre, guardadoEl: new Date().toISOString() };
+    const id = editingTasId || `${Date.now()}`;
+    const now = new Date().toISOString();
+    const toSave = { ...tasacion, inspectorId: inspector.id, inspectorNombre: inspector.nombre, guardadoEl: editingTasId ? (tasacion.guardadoEl || now) : now };
+    if (editingTasId) toSave.editadoEl = now;
     const ok = await saveTasacion(inspector.id, id, toSave);
-    setSaveMsgTasacion(ok ? "Tasación guardada ✓" : "No se pudo guardar, intenta de nuevo.");
-    if (ok) { setTasacion(emptyTasacion()); refreshHistorialTasaciones(); }
-    setTimeout(() => setSaveMsgTasacion(""), 2500);
+    if (ok) {
+      flash(setSaveMsgTasacion, editingTasId ? "Cambios guardados ✓" : "Tasación guardada ✓", 2500);
+      resetTasacion();
+      refreshHistorialTasaciones();
+    } else {
+      flash(setSaveMsgTasacion, "No se pudo guardar. Tus datos siguen en el borrador de este dispositivo; intenta de nuevo.");
+    }
   };
+  const startEditTasacion = (h) => {
+    if (hayTasacionSinGuardar() && !window.confirm("Tienes una tasación sin guardar. ¿Reemplazarla por la que vas a editar?")) return;
+    const rec = { ...emptyTasacion(), ...h.data };
+    baselineRef.current.tas = rec;
+    setTasacion(rec); setEditingTasId(recordIdFromKey(h.id)); setRestoredTasAt(null); setViewingTasacion(null);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+  const handleDeleteTasacion = async (h) => {
+    if (!window.confirm("¿Eliminar esta tasación? No se puede deshacer.")) return;
+    const res = await deleteTasacion(h.id);
+    if (!res) { flash(setSaveMsgTasacion, "No se pudo eliminar. Intenta de nuevo."); return; }
+    if (editingTasId && editingTasId === recordIdFromKey(h.id)) resetTasacion();
+    setViewingTasacion(null);
+    flash(setSaveMsgTasacion, "Tasación eliminada ✓", 2500);
+    refreshHistorialTasaciones();
+  };
+  const handlePdfTasacion = (data) => {
+    try {
+      const bytes = buildTasacionPdf(data, { sections: TASACION_SECTIONS, getItems: getTasacionSectionItems, fmt: clp, inspectorNombre: data.inspectorNombre || inspector.nombre });
+      downloadPdfBytes(bytes, pdfFileName("Tasacion", { ...data, inscripcion: data.patente }));
+    } catch (e) {
+      console.error("No se pudo generar el PDF:", e);
+      flash(setSaveMsgTasacion, "No se pudo generar el PDF.");
+    }
+  };
+
+  /* ---------- Conexión inspección → tasación ---------- */
+  const tasacionDesdeInspeccion = (h) => ({
+    propietario: h.data.propietarioNombre || "",
+    vehiculo: [h.data.marca, h.data.modelo].filter(Boolean).join(" "),
+    patente: h.data.inscripcion || "",
+    anio: h.data.anio || "",
+    inspeccionId: h.id,
+  });
+  const precargarTasacion = (h, { cambiarTab = true } = {}) => {
+    if (hayTasacionSinGuardar() && !window.confirm("Tienes una tasación sin guardar. ¿Reemplazarla por una nueva basada en esta inspección?")) return;
+    baselineRef.current.tas = emptyTasacion();
+    setTasacion({ ...emptyTasacion(), ...tasacionDesdeInspeccion(h) });
+    setEditingTasId(null); setRestoredTasAt(null); setViewingTasacion(null);
+    if (cambiarTab) { setTab("tasaciones"); window.scrollTo({ top: 0, behavior: "smooth" }); }
+  };
+  const inspeccionPorKey = (key) => historial.find((h) => h.id === key);
+  const etiquetaInspeccion = (key) => {
+    const h = key && inspeccionPorKey(key);
+    return h ? `inspección del ${h.data.fecha} (${[h.data.marca, h.data.modelo].filter(Boolean).join(" ") || "sin marca"} · ${h.data.inscripcion || "sin patente"})` : "";
+  };
+  const tasadas = new Set(historialTasaciones.map((t) => t.data.inspeccionId).filter(Boolean));
+
+  const tabBtn = (id, label) => (
+    <button
+      onClick={() => setTab(id)}
+      className={`px-4 py-3 text-sm whitespace-nowrap ${tab === id ? "text-amber-400 border-b-2 border-amber-400" : "text-stone-400"}`}
+    >
+      {label}
+    </button>
+  );
+
+  const barClass = "fixed bottom-0 inset-x-0 z-20 bg-white border-t border-stone-200 px-4 py-3 md:static md:z-auto md:bg-transparent md:border-0 md:p-0";
 
   return (
-    <div className="min-h-screen bg-stone-100 pb-16">
+    <div className="min-h-screen bg-stone-100 pb-32 md:pb-16">
       <div className="bg-stone-900 text-stone-100">
-        <div className="max-w-5xl mx-auto px-6 py-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div className="max-w-5xl mx-auto px-4 md:px-6 py-5 md:py-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
             <p className="text-xs uppercase tracking-widest text-stone-400 mb-1">Panel del inspector</p>
             <h1 className="font-serif text-2xl md:text-3xl">{inspector.nombre}</h1>
@@ -2014,57 +2275,86 @@ function InspectorDashboard({ inspector, onExit }) {
               {new Date().toLocaleDateString("es-CL", { weekday: "long", day: "2-digit", month: "long", year: "numeric" })}
             </p>
           </div>
-          <button onClick={onExit} className="self-start md:self-auto border border-stone-700 px-3 py-1.5 text-sm text-stone-300 hover:bg-stone-800">Salir</button>
+          <button onClick={onExit} className="self-start md:self-auto border border-stone-700 px-3 py-2 text-sm text-stone-300 hover:bg-stone-800">Salir</button>
         </div>
-        <div className="max-w-5xl mx-auto px-6 flex gap-2 border-t border-stone-800">
-          <button onClick={() => setTab("inspeccion")} className={`px-4 py-3 text-sm ${tab === "inspeccion" ? "text-amber-400 border-b-2 border-amber-400" : "text-stone-400"}`}>Inspección</button>
-          <button onClick={() => setTab("tasaciones")} className={`px-4 py-3 text-sm ${tab === "tasaciones" ? "text-amber-400 border-b-2 border-amber-400" : "text-stone-400"}`}>Tasaciones</button>
+        <div className="max-w-5xl mx-auto px-4 md:px-6 flex gap-2 border-t border-stone-800 overflow-x-auto">
+          {tabBtn("inspeccion", "Inspección")}
+          {tabBtn("tasaciones", "Tasaciones")}
         </div>
       </div>
 
-      <div className="max-w-5xl mx-auto px-6 mt-8 flex flex-col gap-6">
+      <div className="max-w-5xl mx-auto px-4 md:px-6 mt-6 md:mt-8 flex flex-col gap-6">
         {tab === "inspeccion" && (
           viewing ? (
             <>
-              <button onClick={() => setViewing(null)} className="self-start text-sm text-stone-500 hover:underline">← Volver al checklist</button>
-              <InspeccionForm record={viewing} onFieldChange={() => {}} onChecklistChange={() => {}} readOnly />
+              <div className="flex flex-wrap items-center gap-x-5 gap-y-1">
+                <button onClick={() => setViewing(null)} className="text-sm text-stone-500 hover:underline py-1.5">← Volver al checklist</button>
+                <ActionLink onClick={() => handlePdfInspeccion(viewing.data)}>Descargar PDF</ActionLink>
+                <ActionLink onClick={() => startEditInspeccion(viewing)}>Editar</ActionLink>
+                <ActionLink onClick={() => precargarTasacion(viewing)}>Crear tasación</ActionLink>
+                <ActionLink danger onClick={() => handleDeleteInspeccion(viewing)}>Eliminar</ActionLink>
+              </div>
+              {saveMsg && <p className="text-xs text-stone-500">{saveMsg}</p>}
+              <InspeccionForm key={"ver-" + viewing.id} record={viewing.data} onFieldChange={() => {}} onChecklistChange={() => {}} readOnly />
             </>
           ) : (
             <>
-              <InspeccionForm record={record} onFieldChange={updateField} onChecklistChange={updateChecklist} />
+              {editingId && (
+                <div className="bg-amber-50 border border-amber-300 px-4 py-3 text-sm text-stone-700 flex flex-wrap items-center justify-between gap-2">
+                  <span>Editando una inspección ya guardada{record.fecha ? ` (${record.fecha})` : ""}.</span>
+                  <button onClick={() => { if (!hayInspeccionSinGuardar() || window.confirm("¿Cancelar la edición y descartar los cambios?")) resetInspeccion(); }} className="text-amber-800 hover:underline py-1">Cancelar edición</button>
+                </div>
+              )}
+              {restoredAt && !editingId && (
+                <div className="bg-sky-50 border border-sky-200 px-4 py-3 text-sm text-stone-700 flex flex-wrap items-center justify-between gap-2">
+                  <span>Se recuperó el borrador guardado el {fechaHoraCorta(restoredAt)}</span>
+                  <button onClick={() => { if (window.confirm("¿Descartar el borrador y empezar de cero?")) resetInspeccion(); }} className="text-sky-800 hover:underline py-1">Descartar borrador</button>
+                </div>
+              )}
 
-              <div className="flex items-center justify-end gap-3">
-                {saveMsg && <span className="text-xs text-stone-500">{saveMsg}</span>}
-                <button onClick={handleSave} className="bg-stone-900 text-white px-4 py-2 text-sm font-medium hover:bg-stone-800">Guardar inspección</button>
+              <InspeccionForm key={editingId || "nuevo"} record={record} onFieldChange={updateField} onChecklistChange={updateChecklist} />
+
+              <div className={barClass}>
+                <div className="flex flex-col md:flex-row md:items-center md:justify-end gap-2 md:gap-3">
+                  <span className="text-xs text-stone-500 md:mr-auto">{saveMsg || draftNote}</span>
+                  <div className="flex gap-2">
+                    <button onClick={() => handlePdfInspeccion({ ...record, inspectorNombre: inspector.nombre })} className="flex-1 md:flex-none border border-stone-300 bg-white text-stone-700 px-4 py-3 md:py-2 text-sm hover:bg-stone-50">PDF</button>
+                    <button onClick={handleSave} className="flex-[2] md:flex-none bg-stone-900 text-white px-4 py-3 md:py-2 text-sm font-medium hover:bg-stone-800">
+                      {editingId ? "Guardar cambios" : "Guardar inspección"}
+                    </button>
+                  </div>
+                </div>
               </div>
 
-              <div className="bg-white border border-stone-200 p-5">
+              <div className="bg-white border border-stone-200 p-4 md:p-5">
                 <h3 className="font-serif text-lg text-stone-900 mb-4">Historial de inspecciones</h3>
                 {loadingHist ? (
                   <p className="text-sm text-stone-500">Cargando…</p>
                 ) : historial.length === 0 ? (
                   <p className="text-sm text-stone-500">Aún no hay inspecciones guardadas.</p>
                 ) : (
-                  <table className="w-full border-collapse text-sm">
-                    <thead>
-                      <tr className="text-left text-xs uppercase tracking-wide text-stone-400 border-b border-stone-200">
-                        <th className="py-2 pr-2">Fecha</th>
-                        <th className="py-2 pr-2">Marca / Modelo</th>
-                        <th className="py-2 pr-2">Inscripción</th>
-                        <th className="py-2 pr-2 w-10"></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {historial.map((h) => (
-                        <tr key={h.id} className="border-b border-stone-100">
-                          <td className="py-2 pr-2 text-stone-600">{h.data.fecha}</td>
-                          <td className="py-2 pr-2 text-stone-900">{[h.data.marca, h.data.modelo].filter(Boolean).join(" ") || "—"}</td>
-                          <td className="py-2 pr-2 text-stone-600 font-mono">{h.data.inscripcion || "—"}</td>
-                          <td className="py-2 pr-2 text-right"><button onClick={() => setViewing(h.data)} className="text-xs text-amber-700 hover:underline">Ver</button></td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  <ul className="flex flex-col">
+                    {historial.map((h) => (
+                      <li key={h.id} className="border-b border-stone-100 py-3">
+                        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5">
+                          <span className="text-stone-900">{[h.data.marca, h.data.modelo].filter(Boolean).join(" ") || "—"}</span>
+                          <span className="font-mono text-sm text-stone-600">{h.data.inscripcion || "—"}</span>
+                        </div>
+                        <div className="text-xs text-stone-500">
+                          {h.data.fecha}
+                          {h.data.editadoEl ? " · editada" : ""}
+                          {tasadas.has(h.id) ? " · con tasación" : ""}
+                        </div>
+                        <RecordActions>
+                          <ActionLink onClick={() => setViewing(h)}>Ver</ActionLink>
+                          <ActionLink onClick={() => startEditInspeccion(h)}>Editar</ActionLink>
+                          <ActionLink onClick={() => handlePdfInspeccion(h.data)}>PDF</ActionLink>
+                          <ActionLink onClick={() => precargarTasacion(h)}>Crear tasación</ActionLink>
+                          <ActionLink danger onClick={() => handleDeleteInspeccion(h)}>Eliminar</ActionLink>
+                        </RecordActions>
+                      </li>
+                    ))}
+                  </ul>
                 )}
               </div>
             </>
@@ -2074,47 +2364,90 @@ function InspectorDashboard({ inspector, onExit }) {
         {tab === "tasaciones" && (
           viewingTasacion ? (
             <>
-              <button onClick={() => setViewingTasacion(null)} className="self-start text-sm text-stone-500 hover:underline">← Volver a Tasaciones</button>
-              <TasacionForm record={viewingTasacion} onFieldChange={() => {}} onChecklistChange={() => {}} readOnly />
+              <div className="flex flex-wrap items-center gap-x-5 gap-y-1">
+                <button onClick={() => setViewingTasacion(null)} className="text-sm text-stone-500 hover:underline py-1.5">← Volver a Tasaciones</button>
+                <ActionLink onClick={() => handlePdfTasacion(viewingTasacion.data)}>Descargar PDF</ActionLink>
+                <ActionLink onClick={() => startEditTasacion(viewingTasacion)}>Editar</ActionLink>
+                <ActionLink danger onClick={() => handleDeleteTasacion(viewingTasacion)}>Eliminar</ActionLink>
+              </div>
+              {saveMsgTasacion && <p className="text-xs text-stone-500">{saveMsgTasacion}</p>}
+              <TasacionForm key={"ver-" + viewingTasacion.id} record={viewingTasacion.data} onFieldChange={() => {}} onChecklistChange={() => {}} readOnly inspeccionLabel={etiquetaInspeccion(viewingTasacion.data.inspeccionId)} />
             </>
           ) : (
             <>
-              <TasacionForm record={tasacion} onFieldChange={updateTasacionField} onChecklistChange={updateTasacionChecklist} />
+              {editingTasId && (
+                <div className="bg-amber-50 border border-amber-300 px-4 py-3 text-sm text-stone-700 flex flex-wrap items-center justify-between gap-2">
+                  <span>Editando una tasación ya guardada{tasacion.fecha ? ` (${tasacion.fecha})` : ""}.</span>
+                  <button onClick={() => { if (!hayTasacionSinGuardar() || window.confirm("¿Cancelar la edición y descartar los cambios?")) resetTasacion(); }} className="text-amber-800 hover:underline py-1">Cancelar edición</button>
+                </div>
+              )}
+              {restoredTasAt && !editingTasId && (
+                <div className="bg-sky-50 border border-sky-200 px-4 py-3 text-sm text-stone-700 flex flex-wrap items-center justify-between gap-2">
+                  <span>Se recuperó el borrador guardado el {fechaHoraCorta(restoredTasAt)}</span>
+                  <button onClick={() => { if (window.confirm("¿Descartar el borrador y empezar de cero?")) resetTasacion(); }} className="text-sky-800 hover:underline py-1">Descartar borrador</button>
+                </div>
+              )}
 
-              <div className="flex items-center justify-end gap-3">
-                {saveMsgTasacion && <span className="text-xs text-stone-500">{saveMsgTasacion}</span>}
-                <button onClick={handleSaveTasacion} className="bg-stone-900 text-white px-4 py-2 text-sm font-medium hover:bg-stone-800">Guardar tasación</button>
+              {!editingTasId && historial.length > 0 && (
+                <div className="bg-white border border-stone-200 p-4">
+                  <label className="text-xs text-stone-500 block mb-1">Precargar desde una inspección</label>
+                  <select
+                    value=""
+                    onChange={(e) => { const h = inspeccionPorKey(e.target.value); if (h) precargarTasacion(h, { cambiarTab: false }); }}
+                    className="w-full border border-stone-300 bg-white px-2 py-1.5 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  >
+                    <option value="">Seleccionar inspección…</option>
+                    {historial.map((h) => (
+                      <option key={h.id} value={h.id}>
+                        {h.data.fecha} · {[h.data.marca, h.data.modelo].filter(Boolean).join(" ") || "sin marca"} · {h.data.inscripcion || "sin patente"}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <TasacionForm key={editingTasId || "nueva"} record={tasacion} onFieldChange={updateTasacionField} onChecklistChange={updateTasacionChecklist} inspeccionLabel={etiquetaInspeccion(tasacion.inspeccionId)} />
+
+              <div className={barClass}>
+                <div className="flex flex-col md:flex-row md:items-center md:justify-end gap-2 md:gap-3">
+                  <span className="text-xs text-stone-500 md:mr-auto">{saveMsgTasacion || draftNoteTas}</span>
+                  <div className="flex gap-2">
+                    <button onClick={() => handlePdfTasacion({ ...tasacion, inspectorNombre: inspector.nombre })} className="flex-1 md:flex-none border border-stone-300 bg-white text-stone-700 px-4 py-3 md:py-2 text-sm hover:bg-stone-50">PDF</button>
+                    <button onClick={handleSaveTasacion} className="flex-[2] md:flex-none bg-stone-900 text-white px-4 py-3 md:py-2 text-sm font-medium hover:bg-stone-800">
+                      {editingTasId ? "Guardar cambios" : "Guardar tasación"}
+                    </button>
+                  </div>
+                </div>
               </div>
 
-              <div className="bg-white border border-stone-200 p-5">
+              <div className="bg-white border border-stone-200 p-4 md:p-5">
                 <h3 className="font-serif text-lg text-stone-900 mb-4">Historial de tasaciones</h3>
                 {loadingHistTasaciones ? (
                   <p className="text-sm text-stone-500">Cargando…</p>
                 ) : historialTasaciones.length === 0 ? (
                   <p className="text-sm text-stone-500">Aún no hay tasaciones guardadas.</p>
                 ) : (
-                  <table className="w-full border-collapse text-sm">
-                    <thead>
-                      <tr className="text-left text-xs uppercase tracking-wide text-stone-400 border-b border-stone-200">
-                        <th className="py-2 pr-2">Fecha</th>
-                        <th className="py-2 pr-2">Vehículo</th>
-                        <th className="py-2 pr-2">Patente</th>
-                        <th className="py-2 pr-2 text-right">Valor comercial</th>
-                        <th className="py-2 pr-2 w-10"></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {historialTasaciones.map((h) => (
-                        <tr key={h.id} className="border-b border-stone-100">
-                          <td className="py-2 pr-2 text-stone-600">{h.data.fecha}</td>
-                          <td className="py-2 pr-2 text-stone-900">{h.data.vehiculo || "—"}</td>
-                          <td className="py-2 pr-2 text-stone-600 font-mono">{h.data.patente || "—"}</td>
-                          <td className="py-2 pr-2 text-right font-mono text-stone-900">{clp(h.data.valorComercial)}</td>
-                          <td className="py-2 pr-2 text-right"><button onClick={() => setViewingTasacion(h.data)} className="text-xs text-amber-700 hover:underline">Ver</button></td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  <ul className="flex flex-col">
+                    {historialTasaciones.map((h) => (
+                      <li key={h.id} className="border-b border-stone-100 py-3">
+                        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5">
+                          <span className="text-stone-900">{h.data.vehiculo || "—"}</span>
+                          <span className="font-mono text-sm text-stone-900">{clp(h.data.valorComercial)}</span>
+                        </div>
+                        <div className="text-xs text-stone-500">
+                          {h.data.fecha} · <span className="font-mono">{h.data.patente || "—"}</span>
+                          {h.data.editadoEl ? " · editada" : ""}
+                          {h.data.inspeccionId ? " · desde inspección" : ""}
+                        </div>
+                        <RecordActions>
+                          <ActionLink onClick={() => setViewingTasacion(h)}>Ver</ActionLink>
+                          <ActionLink onClick={() => startEditTasacion(h)}>Editar</ActionLink>
+                          <ActionLink onClick={() => handlePdfTasacion(h.data)}>PDF</ActionLink>
+                          <ActionLink danger onClick={() => handleDeleteTasacion(h)}>Eliminar</ActionLink>
+                        </RecordActions>
+                      </li>
+                    ))}
+                  </ul>
                 )}
               </div>
             </>
@@ -3299,6 +3632,26 @@ function Landing({ onEnterAdmin, onEnterVendor, onEnterInspector }) {
 }
 
 export default function App() {
+  const [sessionExpired, setSessionExpired] = useState(false);
+  useEffect(() => {
+    const onExpired = () => setSessionExpired(true);
+    window.addEventListener("df-session-expired", onExpired);
+    return () => window.removeEventListener("df-session-expired", onExpired);
+  }, []);
+  return (
+    <>
+      {sessionExpired && (
+        <div className="fixed top-0 inset-x-0 z-50 bg-amber-100 border-b border-amber-300 px-4 py-3 text-sm text-stone-800 flex flex-wrap items-center justify-between gap-2">
+          <span>Tu sesión venció. Recarga la página para volver a ingresar (los borradores del inspector quedan guardados en este dispositivo).</span>
+          <button onClick={() => window.location.reload()} className="bg-stone-900 text-white px-3 py-1.5">Recargar</button>
+        </div>
+      )}
+      <AppRoutes />
+    </>
+  );
+}
+
+function AppRoutes() {
   const [vendors, setVendors] = useState([]);
   const [inspectors, setInspectors] = useState([]);
   const [ready, setReady] = useState(false);

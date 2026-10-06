@@ -5,7 +5,7 @@
 // puede leer o escribir cada sesión:
 //   admin      -> todo, salvo la clave interna "admin_auth"
 //   vendor     -> record::<id>::*  (lectura/escritura), afp_config y uf_valor (solo lectura)
-//   inspector  -> inspeccion::<id>::* y tasacion::<id>::* (lectura/escritura),
+//   inspector  -> inspeccion::<id>::* y tasacion::<id>::* (lectura/escritura/eliminación),
 //                 afp_config y uf_valor (solo lectura)
 //
 // Secretos requeridos (supabase secrets set ...):
@@ -148,6 +148,8 @@ function canKv(s: Session, op: string, key: string): boolean {
   if (s.role === "admin") return true;
   if ((op === "get") && READ_ONLY_SHARED.has(key)) return true;
   if (op === "get" || op === "set") return ownPrefixes(s).some((p) => key.startsWith(p));
+  // El inspector puede eliminar SUS PROPIAS inspecciones y tasaciones (no las de otros, ni los ejecutivos nada).
+  if (op === "delete" && s.role === "inspector") return ownPrefixes(s).some((p) => key.startsWith(p));
   return false;
 }
 

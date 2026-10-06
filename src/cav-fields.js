@@ -22,6 +22,7 @@ export const CAV_FIELD_DEFS = [
   { key: "nroChasis", labels: ["NRO. CHASIS", "NRO CHASIS", "N DE CHASIS", "NUMERO DE CHASIS", "N CHASIS", "CHASIS N", "CHASIS"], compact: true },
   { key: "nroSerie", labels: ["NRO. SERIE", "NRO SERIE", "N DE SERIE", "NUMERO DE SERIE", "N SERIE", "SERIE N", "SERIE"], compact: true },
   { key: "nroVin", labels: ["NRO. VIN", "NRO VIN", "N DE VIN", "NUMERO DE VIN", "N VIN", "VIN N", "VIN"], compact: true },
+  { key: "anio", labels: ["ANO", "ANO VEHICULO", "ANO FABRICACION"], compact: true },
   { key: "color", labels: ["COLOR PRINCIPAL", "COLOR DEL VEHICULO", "COLOR"] },
   { key: "propietarioNombre", labels: ["NOMBRE DEL PROPIETARIO", "NOMBRE O RAZON SOCIAL", "NOMBRE COMPLETO", "NOMBRE"] },
   { key: "propietarioRun", labels: ["R.U.N.", "RUN DEL PROPIETARIO", "RUN", "RUT DEL PROPIETARIO", "RUT"], compact: true },
@@ -30,7 +31,7 @@ export const CAV_FIELD_DEFS = [
 // Etiquetas del CAV que NO se capturan, pero sirven para saber dónde termina
 // un valor ("STATION WAGON  Año : 2025") o que una línea es una etiqueta.
 const STOP_LABELS = [
-  "TIPO VEHICULO", "ANO", "COMBUSTIBLE", "PBV", "INSTIT. ASEG.", "NUMERO POLIZA",
+  "TIPO VEHICULO", "COMBUSTIBLE", "PBV", "INSTIT. ASEG.", "NUMERO POLIZA",
   "FEC. VEN. POL.", "FEC. ADQUISICION", "REPERTORIO", "NUMERO", "FOLIO",
   "FECHA EMISION", "CODIGO VERIFICACION", "REGION", "VALOR PAGADO", "IMPRESO EN",
 ];

@@ -178,6 +178,19 @@ existe realmente en `node_modules/pdfjs-dist/build/` después de
 `npm install`, y ajusta esa misma ruta en el import correspondiente
 dentro de `src/cav-parser.js`.
 
+## Perfil de inspector
+
+- **Módulos plegables** con avance ("4/7") en inspección y tasación, y barra de guardado fija en el celular.
+- **Borrador automático**: lo que el inspector escribe se guarda en el propio dispositivo
+  (localStorage, clave `driveFuturo:draft::<id>::<inspeccion|tasacion>`) y se recupera al recargar.
+  Se borra al guardar o descartar. Incluye datos del propietario, por eso vive solo en el
+  navegador del inspector. Si el PDF del CAV no cabe, se guarda el resto sin el archivo.
+- **Editar y eliminar** inspecciones y tasaciones propias (la Edge Function permite al
+  inspector eliminar solo bajo sus prefijos `inspeccion::<id>::` y `tasacion::<id>::`).
+- **Informe PDF** de cada inspección y tasación (`src/pdf-report.js`, sin librerías externas).
+- **Crear tasación desde una inspección**: precarga propietario, vehículo, patente y año.
+- Si la sesión (8 h) vence, el ejecutivo/inspector reingresa en silencio con su mismo código.
+
 ## Desplegar en un hosting público
 
 Las opciones más simples (tienen plan gratuito y se conectan directo a
