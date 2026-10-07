@@ -24,7 +24,7 @@ function normalize(record) {
   const { fecha, checklist, ...rest } = record || {};
   const cl = {};
   for (const [id, st] of Object.entries(checklist || {})) {
-    const filled = Object.values(st || {}).some((v) => v !== "" && v !== 0 && v != null);
+    const filled = Object.values(st || {}).some((v) => (Array.isArray(v) ? v.length > 0 : v !== "" && v !== 0 && v != null));
     if (filled) cl[id] = st;
   }
   return { ...rest, checklist: cl };

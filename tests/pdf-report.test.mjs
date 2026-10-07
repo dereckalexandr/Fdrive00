@@ -154,3 +154,14 @@ test("tasación sin valores: total $0 y el PDF sigue siendo válido", async () =
   assert.ok(all.includes("Total valorizaciones $0"));
   assert.ok(all.includes("Sin piezas con valorización"));
 });
+
+test("tasación: las fotos no entran al PDF (ni imágenes ni peso extra)", async () => {
+  const base = { fecha: "2026-10-07", vehiculo: "KIA RIO", valorComercial: 1000000, checklist: { capot: { estado: "Bueno", valor: 1000 } } };
+  const conFotos = { ...base, checklist: { capot: { ...base.checklist.capot, fotos: ["f1", "f2", "f3"] }, puerta: { fotos: ["f4"] } } };
+  const a = buildTasacionPdf(base, { sections: T_SECTIONS, getItems, fmt });
+  const b = buildTasacionPdf(conFotos, { sections: T_SECTIONS, getItems, fmt });
+  assert.equal(b.length, a.length, "el PDF con fotos pesa lo mismo que sin fotos");
+  assert.ok(!Buffer.from(b).toString("latin1").includes("/Image"), "no debe haber objetos de imagen");
+  const all = (await readPdf(b)).join(" ");
+  assert.ok(!all.includes("f1") && !all.includes("foto"), "los ids de foto no aparecen en el texto");
+});

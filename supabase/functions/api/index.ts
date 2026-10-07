@@ -5,7 +5,7 @@
 // puede leer o escribir cada sesión:
 //   admin      -> todo, salvo la clave interna "admin_auth"
 //   vendor     -> record::<id>::*  (lectura/escritura), afp_config y uf_valor (solo lectura)
-//   inspector  -> inspeccion::<id>::* y tasacion::<id>::* (lectura/escritura/eliminación),
+//   inspector  -> inspeccion::<id>::*, tasacion::<id>::* y foto::<id>::* (lectura/escritura/eliminación),
 //                 afp_config y uf_valor (solo lectura)
 //
 // Secretos requeridos (supabase secrets set ...):
@@ -139,7 +139,8 @@ async function dbJsonList(key: string): Promise<any[]> {
 
 function ownPrefixes(s: Session): string[] {
   if (s.role === "vendor") return [`record::${s.id}::`];
-  if (s.role === "inspector") return [`inspeccion::${s.id}::`, `tasacion::${s.id}::`];
+  // foto::<id>::* son las fotos de las tasaciones (un registro por foto, ya reducida en el dispositivo).
+  if (s.role === "inspector") return [`inspeccion::${s.id}::`, `tasacion::${s.id}::`, `foto::${s.id}::`];
   return [];
 }
 

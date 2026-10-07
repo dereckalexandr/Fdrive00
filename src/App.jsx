@@ -13,6 +13,7 @@ import { extractPdfText, parseCavFields } from "./cav-parser.js";
 import { buildInspeccionPdf, buildTasacionPdf, pdfFileName } from "./pdf-report.js";
 import { saveDraft, loadDraft, clearDraft, isMeaningful } from "./drafts.js";
 import { computeTasacionTotals, computeValorFinal } from "./tasacion-totals.js";
+import { photoKey, photoPrefix, makePhotoId, compressImage, collectPhotoIds, diffIds, MAX_PHOTOS_PER_ITEM, MAX_PHOTOS_PER_TASACION } from "./photos.js";
 
 /* =========================================================
    TRAMOS Y CÁLCULOS
@@ -545,6 +546,12 @@ async function deleteInspectorEverywhere(inspectorId, inspectors) {
     const listRes2 = await window.storage.list(`tasacion::${inspectorId}::`, true);
     if (listRes2 && listRes2.keys) {
       for (const k of listRes2.keys) { try { await window.storage.delete(k, true); } catch (e) {} }
+    }
+  } catch (e) {}
+  try {
+    const listRes3 = await window.storage.list(photoPrefix(inspectorId), true); // fotos de sus tasaciones
+    if (listRes3 && listRes3.keys) {
+      for (const k of listRes3.keys) { try { await window.storage.delete(k, true); } catch (e) {} }
     }
   } catch (e) {}
   return next;
@@ -1087,9 +1094,87 @@ function InspeccionForm({ record, onFieldChange, onChecklistChange, readOnly = f
   );
 }
 
+/* ---------- Fotos de la tasación: botón (+) por caja, miniaturas y visor ---------- */
+const photoCache = new Map(); // id -> data URL (evita volver a descargar la misma foto)
+
+function PhotoThumb({ inspectorId, photoId, onOpen }) {
+  const [src, setSrc] = useState(photoCache.get(photoId) || null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    if (photoCache.has(photoId)) { setSrc(photoCache.get(photoId)); return undefined; }
+    let alive = true;
+    (async () => {
+      const res = await window.storage.get(photoKey(inspectorId, photoId), true);
+      if (!alive) return;
+      if (res && res.value) { photoCache.set(photoId, res.value); setSrc(res.value); } else setFailed(true);
+    })();
+    return () => { alive = false; };
+  }, [photoId, inspectorId]);
+  return (
+    <button
+      type="button"
+      onClick={() => src && onOpen(photoId)}
+      aria-label="Ver foto"
+      className="w-14 h-14 shrink-0 border border-stone-300 bg-stone-100 overflow-hidden flex items-center justify-center text-xs text-stone-400"
+    >
+      {src ? <img src={src} alt="Foto de la pieza" className="w-full h-full object-cover" /> : failed ? "!" : "…"}
+    </button>
+  );
+}
+
+function PhotoLightbox({ photoId, onClose, onRemove }) {
+  const src = photoCache.get(photoId);
+  return (
+    <div className="fixed inset-0 z-50 bg-black/90 flex flex-col" role="dialog" aria-label="Foto" onClick={onClose}>
+      <div className="flex items-center justify-between p-3" onClick={(e) => e.stopPropagation()}>
+        <button type="button" onClick={() => { if (window.confirm("¿Quitar esta foto?")) onRemove(photoId); }} className="text-rose-300 text-sm px-3 py-2 border border-rose-300/50">Quitar foto</button>
+        <button type="button" onClick={onClose} className="text-white text-sm px-3 py-2 border border-white/40">Cerrar</button>
+      </div>
+      <div className="flex-1 min-h-0 flex items-center justify-center p-2">
+        {src && <img src={src} alt="Foto de la pieza" className="max-w-full max-h-full object-contain" onClick={(e) => e.stopPropagation()} />}
+      </div>
+    </div>
+  );
+}
+
+// `photos` = { inspectorId, busy, errors, add(itemId, file), remove(itemId, photoId) }
+function PhotoStrip({ itemId, label, fotos, photos }) {
+  const list = fotos || [];
+  const inputRef = useRef(null);
+  const [openId, setOpenId] = useState(null);
+  const busy = !!photos.busy[itemId];
+  const full = list.length >= MAX_PHOTOS_PER_ITEM;
+  return (
+    <div className="flex flex-wrap items-center gap-2 mt-3">
+      <button
+        type="button"
+        disabled={busy || full}
+        onClick={() => inputRef.current && inputRef.current.click()}
+        aria-label={`Agregar foto: ${label}`}
+        title={full ? `Máximo ${MAX_PHOTOS_PER_ITEM} fotos` : "Agregar foto"}
+        className="w-14 h-14 shrink-0 border-2 border-dashed border-stone-300 text-stone-500 text-2xl leading-none hover:bg-stone-50 disabled:opacity-40"
+      >
+        {busy ? "…" : "+"}
+      </button>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ""; if (f) photos.add(itemId, f); }}
+      />
+      {list.map((id) => <PhotoThumb key={id} inspectorId={photos.inspectorId} photoId={id} onOpen={setOpenId} />)}
+      {list.length > 0 && <span className="text-xs text-stone-400">{list.length}/{MAX_PHOTOS_PER_ITEM}</span>}
+      {photos.errors[itemId] && <p className="w-full text-xs text-rose-600">{photos.errors[itemId]}</p>}
+      {openId && <PhotoLightbox photoId={openId} onClose={() => setOpenId(null)} onRemove={(id) => { setOpenId(null); photos.remove(itemId, id); }} />}
+    </div>
+  );
+}
+
 const TASACION_DATOS_KEYS = ["propietario", "vehiculo", "patente", "anio", "kilometraje", "valorComercial", "estadoGeneral"];
 
-function TasacionForm({ record, onFieldChange, onChecklistChange, readOnly = false, inspeccionLabel = "" }) {
+function TasacionForm({ record, onFieldChange, onChecklistChange, readOnly = false, inspeccionLabel = "", photos = null }) {
   const fechaDisplay = record.fecha
     ? new Date(`${record.fecha}T00:00:00`).toLocaleDateString("es-CL", { day: "2-digit", month: "long", year: "numeric" })
     : "—";
@@ -1137,14 +1222,14 @@ function TasacionForm({ record, onFieldChange, onChecklistChange, readOnly = fal
         </div>
       </Module>
 
-      <TasacionChecklist checklist={record.checklist || {}} onItemChange={onChecklistChange} readOnly={readOnly} modules={modules} totals={totals} />
+      <TasacionChecklist checklist={record.checklist || {}} onItemChange={onChecklistChange} readOnly={readOnly} modules={modules} totals={totals} photos={readOnly ? null : photos} />
 
       <TotalCard value={totals.total} />
     </div>
   );
 }
 
-function TasacionChecklist({ checklist, onItemChange, readOnly = false, modules, totals }) {
+function TasacionChecklist({ checklist, onItemChange, readOnly = false, modules, totals, photos = null }) {
   return (
     <>
       {TASACION_SECTIONS.map((section) => {
@@ -1165,7 +1250,8 @@ function TasacionChecklist({ checklist, onItemChange, readOnly = false, modules,
                   const state = checklist[item.id] || { nombre: "", estado: "", valor: 0 };
                   const estadoOptions = section.estadoOptions || ESTADOS_CHECKLIST;
                   return (
-                    <div key={item.id} className="grid grid-cols-1 md:grid-cols-3 gap-2 md:gap-3 border-b border-stone-100 py-3">
+                    <div key={item.id} className="border-b border-stone-100 py-3">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2 md:gap-3">
                       <div>
                         <label className="text-xs text-stone-400 block mb-1 md:hidden">Nombre de pieza</label>
                         {readOnly ? (
@@ -1199,6 +1285,8 @@ function TasacionChecklist({ checklist, onItemChange, readOnly = false, modules,
                         <label className="text-xs text-stone-400 block mb-1 md:hidden">Valorización</label>
                         <NumberField value={toNum(state.valor)} onChange={(v) => onItemChange(item.id, { valor: v })} readOnly={readOnly} />
                       </div>
+                    </div>
+                    {photos && <PhotoStrip itemId={item.id} label={state.nombre || section.title} fotos={state.fotos} photos={photos} />}
                     </div>
                   );
                 })}
@@ -1255,6 +1343,7 @@ function TasacionChecklist({ checklist, onItemChange, readOnly = false, modules,
                         </div>
                       </div>
                     )}
+                    {photos && <PhotoStrip itemId={item.id} label={item.label} fotos={state.fotos} photos={photos} />}
                   </div>
                 );
               })}
@@ -2187,7 +2276,25 @@ function InspectorDashboard({ inspector, onExit }) {
     setRecord(emptyInspeccion()); setEditingId(null); setRestoredAt(null); setDraftNote("");
     clearDraft(inspector.id, "inspeccion");
   };
-  const resetTasacion = () => {
+  /* ---------- Fotos de la tasación ---------- */
+  // Cada foto es un registro aparte (foto::<inspector>::<id>); la tasación solo guarda sus ids.
+  const [photoBusy, setPhotoBusy] = useState({});
+  const [photoErrors, setPhotoErrors] = useState({});
+  // Ids de foto ya guardados con la tasación indicada. null = todavía no se sabe (el historial no ha cargado).
+  const savedPhotoIds = (recordId) => {
+    if (!recordId) return [];
+    const h = historialTasaciones.find((x) => recordIdFromKey(x.id) === recordId);
+    return h ? collectPhotoIds(h.data.checklist) : null;
+  };
+  // Fotos subidas en este formulario que aún no pertenecen a una tasación guardada.
+  const unsavedPhotoIds = () => {
+    const saved = savedPhotoIds(editingTasId);
+    return saved === null ? [] : diffIds(collectPhotoIds(tasacion.checklist), saved);
+  };
+  const deletePhotos = (ids) => ids.forEach((id) => { photoCache.delete(id); window.storage.delete(photoKey(inspector.id, id), true); });
+
+  const resetTasacion = ({ borrarFotos = true } = {}) => {
+    if (borrarFotos) deletePhotos(unsavedPhotoIds());
     baselineRef.current.tas = emptyTasacion();
     setTasacion(emptyTasacion()); setEditingTasId(null); setRestoredTasAt(null); setDraftNoteTas("");
     clearDraft(inspector.id, "tasacion");
@@ -2245,10 +2352,13 @@ function InspectorDashboard({ inspector, onExit }) {
     const now = new Date().toISOString();
     const toSave = { ...tasacion, inspectorId: inspector.id, inspectorNombre: inspector.nombre, guardadoEl: editingTasId ? (tasacion.guardadoEl || now) : now };
     if (editingTasId) toSave.editadoEl = now;
+    const savedIds = savedPhotoIds(editingTasId);
     const ok = await saveTasacion(inspector.id, id, toSave);
     if (ok) {
       flash(setSaveMsgTasacion, editingTasId ? "Cambios guardados ✓" : "Tasación guardada ✓", 2500);
-      resetTasacion();
+      // Fotos que tenía la tasación y ya no están: recién ahora se borran de la base.
+      if (savedIds) deletePhotos(diffIds(savedIds, collectPhotoIds(tasacion.checklist)));
+      resetTasacion({ borrarFotos: false });
       refreshHistorialTasaciones();
     } else {
       flash(setSaveMsgTasacion, "No se pudo guardar. Tus datos siguen en el borrador de este dispositivo; intenta de nuevo.");
@@ -2256,6 +2366,7 @@ function InspectorDashboard({ inspector, onExit }) {
   };
   const startEditTasacion = (h) => {
     if (hayTasacionSinGuardar() && !window.confirm("Tienes una tasación sin guardar. ¿Reemplazarla por la que vas a editar?")) return;
+    deletePhotos(unsavedPhotoIds());
     const rec = { ...emptyTasacion(), ...h.data };
     baselineRef.current.tas = rec;
     setTasacion(rec); setEditingTasId(recordIdFromKey(h.id)); setRestoredTasAt(null); setViewingTasacion(null);
@@ -2265,6 +2376,7 @@ function InspectorDashboard({ inspector, onExit }) {
     if (!window.confirm("¿Eliminar esta tasación? No se puede deshacer.")) return;
     const res = await deleteTasacion(h.id);
     if (!res) { flash(setSaveMsgTasacion, "No se pudo eliminar. Intenta de nuevo."); return; }
+    deletePhotos(collectPhotoIds(h.data.checklist)); // sus fotos se van con ella
     if (editingTasId && editingTasId === recordIdFromKey(h.id)) resetTasacion();
     setViewingTasacion(null);
     flash(setSaveMsgTasacion, "Tasación eliminada ✓", 2500);
@@ -2290,6 +2402,7 @@ function InspectorDashboard({ inspector, onExit }) {
   });
   const precargarTasacion = (h, { cambiarTab = true } = {}) => {
     if (hayTasacionSinGuardar() && !window.confirm("Tienes una tasación sin guardar. ¿Reemplazarla por una nueva basada en esta inspección?")) return;
+    deletePhotos(unsavedPhotoIds());
     baselineRef.current.tas = emptyTasacion();
     setTasacion({ ...emptyTasacion(), ...tasacionDesdeInspeccion(h) });
     setEditingTasId(null); setRestoredTasAt(null); setViewingTasacion(null);
@@ -2299,6 +2412,50 @@ function InspectorDashboard({ inspector, onExit }) {
   const etiquetaInspeccion = (key) => {
     const h = key && inspeccionPorKey(key);
     return h ? `inspección del ${h.data.fecha} (${[h.data.marca, h.data.modelo].filter(Boolean).join(" ") || "sin marca"} · ${h.data.inscripcion || "sin patente"})` : "";
+  };
+  // Interfaz de fotos para los botones (+) del formulario de tasación.
+  const setPhotoError = (itemId, msg) => setPhotoErrors((e) => ({ ...e, [itemId]: msg }));
+  const photoApi = {
+    inspectorId: inspector.id,
+    busy: photoBusy,
+    errors: photoErrors,
+    add: async (itemId, file) => {
+      setPhotoError(itemId, "");
+      if (collectPhotoIds(tasacion.checklist).length >= MAX_PHOTOS_PER_TASACION) {
+        setPhotoError(itemId, `Máximo ${MAX_PHOTOS_PER_TASACION} fotos por tasación.`);
+        return;
+      }
+      setPhotoBusy((b) => ({ ...b, [itemId]: true }));
+      try {
+        const dataUrl = await compressImage(file);
+        const photoId = makePhotoId();
+        const stored = await window.storage.set(photoKey(inspector.id, photoId), dataUrl, true);
+        if (!stored) throw new Error("subida_fallida");
+        photoCache.set(photoId, dataUrl);
+        setTasacion((prev) => {
+          const cur = prev.checklist[itemId] || { nombre: "", estado: "", valor: 0 };
+          return { ...prev, checklist: { ...prev.checklist, [itemId]: { ...cur, fotos: [...(cur.fotos || []), photoId] } } };
+        });
+      } catch (e) {
+        setPhotoError(
+          itemId,
+          e.message === "no_es_imagen" ? "El archivo no es una imagen."
+            : e.message === "imagen_muy_grande" ? "La foto es demasiado grande."
+            : "No se pudo subir la foto. Revisa tu conexión e inténtalo de nuevo."
+        );
+      } finally {
+        setPhotoBusy((b) => ({ ...b, [itemId]: false }));
+      }
+    },
+    // Quita la foto de la tasación. Si ya estaba guardada, se borra de la base recién al guardar los cambios.
+    remove: (itemId, photoId) => {
+      setTasacion((prev) => {
+        const cur = prev.checklist[itemId] || {};
+        return { ...prev, checklist: { ...prev.checklist, [itemId]: { ...cur, fotos: (cur.fotos || []).filter((f) => f !== photoId) } } };
+      });
+      const saved = savedPhotoIds(editingTasId);
+      if (saved !== null && !saved.includes(photoId)) deletePhotos([photoId]);
+    },
   };
   const totalesTasacion = computeTasacionTotals(tasacion.checklist, TASACION_SECTIONS, getTasacionSectionItems);
   const tasadas = new Set(historialTasaciones.map((t) => t.data.inspeccionId).filter(Boolean));
@@ -2456,7 +2613,7 @@ function InspectorDashboard({ inspector, onExit }) {
                 </div>
               )}
 
-              <TasacionForm key={editingTasId || "nueva"} record={tasacion} onFieldChange={updateTasacionField} onChecklistChange={updateTasacionChecklist} inspeccionLabel={etiquetaInspeccion(tasacion.inspeccionId)} />
+              <TasacionForm key={editingTasId || "nueva"} record={tasacion} onFieldChange={updateTasacionField} onChecklistChange={updateTasacionChecklist} inspeccionLabel={etiquetaInspeccion(tasacion.inspeccionId)} photos={photoApi} />
 
               <div className={barClass}>
                 <div className="flex flex-col md:flex-row md:items-center md:justify-end gap-2 md:gap-3">
