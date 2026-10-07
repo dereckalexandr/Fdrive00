@@ -881,8 +881,18 @@ function PdfDropzone({ fileName, fileData, onFileLoaded, onRemove, readOnly = fa
 
 /* ---------- Módulos plegables (agrupan cada parte del formulario) ---------- */
 function Module({ id, title, badge, meta, accent = "border-sky-600", open, onToggle, children }) {
+  const rootRef = useRef(null);
+  // Segunda flecha, al final del módulo: lo contrae y deja su encabezado a la vista
+  // (si no, en un módulo largo la página quedaría varias pantallas más abajo).
+  const collapseFromBottom = () => {
+    onToggle(id);
+    // Salto directo (no suave): la página se acorta mientras se contrae y un scroll animado se cancelaría a medias.
+    setTimeout(() => {
+      if (rootRef.current) rootRef.current.scrollIntoView({ block: "nearest" });
+    }, 30);
+  };
   return (
-    <div className={`bg-white border border-stone-200 border-l-4 ${accent}`}>
+    <div ref={rootRef} className={`bg-white border border-stone-200 border-l-4 ${accent}`}>
       <button
         type="button"
         onClick={() => onToggle(id)}
@@ -902,7 +912,19 @@ function Module({ id, title, badge, meta, accent = "border-sky-600", open, onTog
           <span aria-hidden="true" className="text-stone-400 text-xs">{open ? "▲" : "▼"}</span>
         </span>
       </button>
-      {open && <div className="px-4 md:px-5 pb-5">{children}</div>}
+      {open && (
+        <div className="px-4 md:px-5 pb-3">
+          {children}
+          <button
+            type="button"
+            onClick={collapseFromBottom}
+            aria-label={`Contraer ${title}`}
+            className="mt-4 w-full flex items-center justify-center gap-2 border-t border-stone-200 pt-3 pb-1 min-h-[44px] text-sm text-stone-500 hover:text-stone-800"
+          >
+            <span aria-hidden="true" className="text-xs">▲</span> Contraer
+          </button>
+        </div>
+      )}
     </div>
   );
 }
