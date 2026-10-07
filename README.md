@@ -192,8 +192,8 @@ dentro de `src/cav-parser.js`.
 - **Fotos en la tasación**: botón (+) en cada caja de los módulos 1 a 11 (en el celular abre la cámara;
   en el computador, el selector de archivos). Cada foto se reduce en el dispositivo (JPEG, máx. 1280 px)
   y se guarda como registro aparte `foto::<inspector>::<id>`; la tasación solo guarda los ids.
-  Máximo 6 por caja y 60 por tasación. Se ven al crear o editar la tasación; **no** van en el PDF ni en
-  la vista "Ver". Al descartar un borrador, reemplazar el formulario o eliminar la tasación, sus fotos se borran.
+  Máximo 6 por caja y 60 por tasación. Se ven al crear o editar la tasación y en el "Ver" del panel del administrador (solo lectura); **no** van
+  en el PDF ni en el "Ver" del propio inspector. Al descartar un borrador, reemplazar el formulario o eliminar la tasación, sus fotos se borran.
 - Si la sesión (8 h) vence, el ejecutivo/inspector reingresa en silencio con su mismo código.
 
 ## Desplegar en un hosting público

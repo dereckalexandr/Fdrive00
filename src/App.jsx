@@ -1127,7 +1127,9 @@ function PhotoLightbox({ photoId, onClose, onRemove }) {
   return (
     <div className="fixed inset-0 z-50 bg-black/90 flex flex-col" role="dialog" aria-label="Foto" onClick={onClose}>
       <div className="flex items-center justify-between p-3" onClick={(e) => e.stopPropagation()}>
-        <button type="button" onClick={() => { if (window.confirm("¿Quitar esta foto?")) onRemove(photoId); }} className="text-rose-300 text-sm px-3 py-2 border border-rose-300/50">Quitar foto</button>
+        {onRemove ? (
+          <button type="button" onClick={() => { if (window.confirm("¿Quitar esta foto?")) onRemove(photoId); }} className="text-rose-300 text-sm px-3 py-2 border border-rose-300/50">Quitar foto</button>
+        ) : <span />}
         <button type="button" onClick={onClose} className="text-white text-sm px-3 py-2 border border-white/40">Cerrar</button>
       </div>
       <div className="flex-1 min-h-0 flex items-center justify-center p-2">
@@ -1137,13 +1139,24 @@ function PhotoLightbox({ photoId, onClose, onRemove }) {
   );
 }
 
-// `photos` = { inspectorId, busy, errors, add(itemId, file), remove(itemId, photoId) }
+// `photos` = { inspectorId, busy, errors, add(itemId, file), remove(itemId, photoId) }.
+// Con `viewOnly` (vista del administrador) solo se muestran las fotos: sin botón (+) ni opción de quitar.
 function PhotoStrip({ itemId, label, fotos, photos }) {
   const list = fotos || [];
   const inputRef = useRef(null);
   const [openId, setOpenId] = useState(null);
-  const busy = !!photos.busy[itemId];
+  const busy = !!(photos.busy && photos.busy[itemId]);
   const full = list.length >= MAX_PHOTOS_PER_ITEM;
+  if (photos.viewOnly) {
+    if (list.length === 0) return null;
+    return (
+      <div className="flex flex-wrap items-center gap-2 mt-3">
+        {list.map((id) => <PhotoThumb key={id} inspectorId={photos.inspectorId} photoId={id} onOpen={setOpenId} />)}
+        <span className="text-xs text-stone-400">{list.length} foto{list.length === 1 ? "" : "s"}</span>
+        {openId && <PhotoLightbox photoId={openId} onClose={() => setOpenId(null)} />}
+      </div>
+    );
+  }
   return (
     <div className="flex flex-wrap items-center gap-2 mt-3">
       <button
@@ -1222,7 +1235,7 @@ function TasacionForm({ record, onFieldChange, onChecklistChange, readOnly = fal
         </div>
       </Module>
 
-      <TasacionChecklist checklist={record.checklist || {}} onItemChange={onChecklistChange} readOnly={readOnly} modules={modules} totals={totals} photos={readOnly ? null : photos} />
+      <TasacionChecklist checklist={record.checklist || {}} onItemChange={onChecklistChange} readOnly={readOnly} modules={modules} totals={totals} photos={readOnly ? (photos && photos.viewOnly ? photos : null) : photos} />
 
       <TotalCard value={totals.total} />
     </div>
@@ -3557,7 +3570,13 @@ function AdminDashboard({ vendors, setVendors, inspectors, setInspectors, onExit
             ) : viewingTasacion ? (
               <>
                 <button onClick={() => setViewingTasacion(null)} className="self-start text-sm text-stone-500 hover:underline">← Volver a Inspectores</button>
-                <TasacionForm record={viewingTasacion} onFieldChange={() => {}} onChecklistChange={() => {}} readOnly />
+                <TasacionForm
+                  record={viewingTasacion}
+                  onFieldChange={() => {}}
+                  onChecklistChange={() => {}}
+                  readOnly
+                  photos={viewingTasacion.inspectorId ? { viewOnly: true, inspectorId: viewingTasacion.inspectorId } : null}
+                />
               </>
             ) : (
               <>
