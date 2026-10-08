@@ -3301,7 +3301,7 @@ function TasacionCompra() {
           {calculo.advertencias.map((w) => <p key={w} className="text-xs text-amber-800">⚠ {w}</p>)}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <Tarjeta titulo="Precio promedio" sub={`Promedio de los ${calculo.primeros.length} avisos más baratos`} valor={calculo.promedioPrimeros} />
-            <Tarjeta titulo="Precio sugerido de publicación" sub={`Promedio de la primera página (${calculo.validos.length} avisos)`} valor={calculo.publicacion} />
+            <Tarjeta titulo="Precio sugerido de publicación" sub={`Precio promedio + ${clp(calculo.incremento)}`} valor={calculo.publicacion} />
             <Tarjeta titulo="Precio sugerido de compra" sub={`Precio promedio − ${clp(calculo.descuento)}`} valor={calculo.compra} destacado />
           </div>
           <p className="text-xs text-stone-500">Estimación referencial a partir de precios de publicación, no de ventas concretadas.</p>
@@ -3322,7 +3322,7 @@ function TasacionCompra() {
                       <td className="py-1.5 pr-2">{v.anio || "—"}</td>
                       <td className="py-1.5 pr-2 text-right font-mono">{v.km ? v.km.toLocaleString("es-CL") : "—"}</td>
                       <td className="py-1.5 pr-2 text-right font-mono">{clp(v.precio)}</td>
-                      <td className="py-1.5 pr-2 text-stone-600">{i < calculo.primeros.length ? "Entre los más baratos" : "Usado en la publicación"}</td>
+                      <td className="py-1.5 pr-2 text-stone-600">{i < calculo.primeros.length ? "Entra al promedio" : "Válido, fuera del promedio"}</td>
                     </tr>
                   ))}
                   {calculo.descartados.map((d, i) => (

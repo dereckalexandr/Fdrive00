@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   normalizePatente, isPatenteValida, splitModeloVersion, calcularFiltros, buildChileautosUrl,
-  parseAvisosPegados, esPrecioSimbolico, estimarCompra, DESCUENTO_COMPRA,
+  parseAvisosPegados, esPrecioSimbolico, estimarCompra, DESCUENTO_COMPRA, INCREMENTO_PUBLICACION, N_PRIMEROS,
 } from "../src/compra-calc.js";
 
 /* ---------- patente y datos del CAV ---------- */
@@ -75,18 +75,32 @@ test("esPrecioSimbolico detecta los precios de relleno vistos en Chileautos", ()
 const av = (id, precio, extra = {}) => ({ id, precio, anio: 2020, km: 60000, destacado: false, ...extra });
 const F = { anioMin: 2019, anioMax: 2021, kmMin: 48000, kmMax: 72000 };
 
-test("estimarCompra: promedio de los 4 primeros, publicación = promedio de todos, compra = promedio4 − 2 millones", () => {
-  const r = estimarCompra([av("a", 8000000), av("b", 9000000), av("c", 10000000), av("d", 11000000), av("e", 12000000), av("f", 13000000)], F);
+test("estimarCompra: promedio de los 5 primeros; publicación = promedio + 500.000; compra = promedio − 2 millones", () => {
+  const r = estimarCompra([av("a", 8000000), av("b", 9000000), av("c", 10000000), av("d", 11000000), av("e", 12000000), av("f", 13000000), av("g", 14000000)], F);
   assert.equal(r.ok, true);
-  assert.equal(r.promedioPrimeros, 9500000);          // (8+9+10+11)/4
-  assert.equal(r.publicacion, 10500000);              // (8+9+10+11+12+13)/6
-  assert.equal(r.compra, 9500000 - DESCUENTO_COMPRA); // 7.500.000
-  assert.equal(r.primeros.length, 4);
+  assert.equal(r.primeros.length, 5);
+  assert.equal(r.promedioPrimeros, 10000000);                       // (8+9+10+11+12)/5; el 6.º y el 7.º no entran
+  assert.equal(r.publicacion, 10000000 + INCREMENTO_PUBLICACION);   // 10.500.000
+  assert.equal(r.publicacion, 10500000);
+  assert.equal(r.compra, 10000000 - DESCUENTO_COMPRA);              // 8.000.000
+});
+
+test("las constantes del módulo: 5 avisos, +$500.000 de publicación, −$2.000.000 de compra", () => {
+  assert.equal(N_PRIMEROS, 5);
+  assert.equal(INCREMENTO_PUBLICACION, 500000);
+  assert.equal(DESCUENTO_COMPRA, 2000000);
+});
+
+test("el precio de publicación ya no depende del resto de la página, solo de los 5 primeros", () => {
+  const baratos = [8000000, 8200000, 8400000, 8600000, 8800000];
+  const a = estimarCompra([...baratos, 9000000, 9500000].map((p, i) => av("a" + i, p)), F);
+  const b = estimarCompra([...baratos, 30000000, 40000000].map((p, i) => av("b" + i, p)), F);
+  assert.equal(a.publicacion, b.publicacion);
 });
 
 test("estimarCompra ordena de menor a mayor aunque lleguen desordenados", () => {
-  const r = estimarCompra([av("a", 12000000), av("b", 8000000), av("c", 11000000), av("d", 9000000), av("e", 10000000)], F);
-  assert.deepEqual(r.primeros.map((p) => p.precio), [8000000, 9000000, 10000000, 11000000]);
+  const r = estimarCompra([av("a", 12000000), av("b", 8000000), av("c", 11000000), av("d", 9000000), av("e", 10000000), av("f", 13000000)], F);
+  assert.deepEqual(r.primeros.map((p) => p.precio), [8000000, 9000000, 10000000, 11000000, 12000000]);
 });
 
 test("estimarCompra descarta destacados, sin precio, repetidos y fuera de filtro", () => {
@@ -116,8 +130,9 @@ test("estimarCompra descarta precios simbólicos y muy bajos, como en la lista r
   assert.equal(r.ok, true);
   const bajos = r.descartados.filter((d) => /simbólico|muy bajo/i.test(d.motivo)).map((d) => d.id).sort();
   assert.deepEqual(bajos, ["m", "x1", "x2", "x3", "x4"]);
-  assert.equal(r.promedioPrimeros, Math.round((8200000 + 8500000 + 8800000 + 8850000) / 4));
+  assert.equal(r.promedioPrimeros, Math.round((8200000 + 8500000 + 8800000 + 8850000 + 9200000) / 5));
   assert.equal(r.compra, r.promedioPrimeros - DESCUENTO_COMPRA);
+  assert.equal(r.publicacion, r.promedioPrimeros + INCREMENTO_PUBLICACION);
 });
 
 test("estimarCompra con menos de 4 avisos válidos avisa y usa los que hay", () => {

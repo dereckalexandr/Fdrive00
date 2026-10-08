@@ -4,14 +4,15 @@
  * - Arma la dirección de búsqueda de Chileautos con los filtros del vehículo.
  * - Interpreta los avisos que copia el marcador del navegador.
  * - Estima los precios:
- *     promedio de los 4 primeros avisos (los más baratos, tras la limpieza)
- *     precio sugerido de publicación = promedio de TODOS los avisos válidos de la primera página
- *     precio sugerido de compra     = promedio de los 4 primeros − DESCUENTO_COMPRA
+ *     precio promedio                = promedio de los 5 primeros avisos (los más baratos, tras la limpieza)
+ *     precio sugerido de publicación = precio promedio + INCREMENTO_PUBLICACION
+ *     precio sugerido de compra      = precio promedio − DESCUENTO_COMPRA
  * ----------------------------------------------------------------
  */
 export const DESCUENTO_COMPRA = 2_000_000;
 export const MARGEN_KM = 0.2; // ±20 %
-export const N_PRIMEROS = 4;
+export const INCREMENTO_PUBLICACION = 500_000;
+export const N_PRIMEROS = 5;
 
 /* ---------- transmisión y combustible ---------- */
 // `variantes`: nombres con que Chileautos guarda el valor. "Mecánica" (como la llama el módulo) es "Manual" en Chileautos.
@@ -167,7 +168,7 @@ export function estimarCompra(listings, filtros = {}, { descuento = DESCUENTO_CO
     advertencias.push(`Solo hay ${primeros.length} aviso${primeros.length === 1 ? "" : "s"} válido${primeros.length === 1 ? "" : "s"}: el promedio de los ${N_PRIMEROS} primeros usa solo esos.`);
   }
   const promedioPrimeros = Math.round(promedio(primeros.map((p) => p.precio)));
-  const publicacion = Math.round(promedio(validos.map((v) => v.precio)));
+  const publicacion = promedioPrimeros + INCREMENTO_PUBLICACION;
   const compraBruta = promedioPrimeros - descuento;
   if (compraBruta < 0) advertencias.push("El promedio de los primeros avisos es menor que el descuento: el precio de compra queda en $0.");
   return {
@@ -178,6 +179,7 @@ export function estimarCompra(listings, filtros = {}, { descuento = DESCUENTO_CO
     advertencias,
     promedioPrimeros,
     publicacion,
+    incremento: INCREMENTO_PUBLICACION,
     compra: Math.max(0, compraBruta),
     descuento,
   };
