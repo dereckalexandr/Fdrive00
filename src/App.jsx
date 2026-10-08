@@ -13,7 +13,7 @@ import { extractPdfText, parseCavFields } from "./cav-parser.js";
 import { buildInspeccionPdf, buildTasacionPdf, pdfFileName } from "./pdf-report.js";
 import { saveDraft, loadDraft, clearDraft, isMeaningful } from "./drafts.js";
 import { computeTasacionTotals, computeValorFinal } from "./tasacion-totals.js";
-import { normalizePatente, isPatenteValida, splitModeloVersion, parseKm, calcularFiltros, buildChileautosUrl, parseAvisosPegados, estimarCompra, TRANSMISIONES, COMBUSTIBLES } from "./compra-calc.js";
+import { normalizePatente, isPatenteValida, splitModeloVersion, parseKm, calcularFiltros, buildChileautosUrl, parseAvisosPegados, estimarCompra, TRANSMISIONES, COMBUSTIBLES, MARGENES_BRUTOS, MARGEN_BRUTO_DEFECTO } from "./compra-calc.js";
 import { buildBookmarkletHref } from "./chileautos-bookmarklet.js";
 import { photoKey, photoPrefix, makePhotoId, compressImage, collectPhotoIds, diffIds, MAX_PHOTOS_PER_ITEM, MAX_PHOTOS_PER_TASACION } from "./photos.js";
 
@@ -3097,6 +3097,7 @@ function TasacionCompra() {
   const [margenAnio, setMargenAnio] = useState(1);
   const [transmision, setTransmision] = useState("");
   const [combustible, setCombustible] = useState("");
+  const [margenBruto, setMargenBruto] = useState(MARGEN_BRUTO_DEFECTO);
   const [cav, setCav] = useState({ name: "", data: "" });
   const [cavMsg, setCavMsg] = useState("");
   const [leyendo, setLeyendo] = useState(false);
@@ -3151,7 +3152,7 @@ function TasacionCompra() {
     if (!p.ok) return { error: p.error };
     if (p.data.sinResultados) return { sinResultados: true };
     if (!p.data.listings.length) return { error: "La página de Chileautos no tenía avisos. Revisa que el marcador se usó en la lista de resultados." };
-    const r = estimarCompra(p.data.listings, { ...filtros, transmision, combustible });
+    const r = estimarCompra(p.data.listings, { ...filtros, transmision, combustible }, { margenBruto });
     let otraBusqueda = false;
     try {
       const u = decodeURIComponent(p.data.url || "").toLowerCase();
@@ -3163,12 +3164,12 @@ function TasacionCompra() {
         && (!comb || u.includes(`combustible.${comb.chileautos.toLowerCase()}`)));
     } catch (e) { otraBusqueda = false; }
     return { ...r, otraBusqueda };
-  }, [pegado, marca, modelo, anio, km, margenAnio, transmision, combustible]);
+  }, [pegado, marca, modelo, anio, km, margenAnio, transmision, combustible, margenBruto]);
 
   const copiarMarcador = async () => {
     try { await navigator.clipboard.writeText(buildBookmarkletHref()); setCopiado(true); setTimeout(() => setCopiado(false), 2500); } catch (e) { /* sin permiso: queda el botón arrastrable */ }
   };
-  const limpiar = () => { setPatente(""); setKm(""); setMarca(""); setModelo(""); setAnio(""); setVersion(""); setTransmision(""); setCombustible(""); setCav({ name: "", data: "" }); setCavMsg(""); setPegado(""); };
+  const limpiar = () => { setPatente(""); setKm(""); setMarca(""); setModelo(""); setAnio(""); setVersion(""); setTransmision(""); setCombustible(""); setMargenBruto(MARGEN_BRUTO_DEFECTO); setCav({ name: "", data: "" }); setCavMsg(""); setPegado(""); };
 
   const Tarjeta = ({ titulo, sub, valor, destacado = false }) => (
     <div className={`p-4 border ${destacado ? "bg-stone-900 text-stone-100 border-stone-900" : "bg-white border-stone-200"}`}>
@@ -3279,7 +3280,15 @@ function TasacionCompra() {
       </div>
 
       <div className="bg-white border border-stone-200 p-4 md:p-5">
-        <p className="text-xs uppercase tracking-widest text-stone-400 mb-2">3 · Avisos copiados</p>
+        <p className="text-xs uppercase tracking-widest text-stone-400 mb-2">3 · Margen bruto y avisos copiados</p>
+        <div className="max-w-xs mb-4">
+          <label className="text-xs text-stone-500 block mb-1">Margen bruto (se descuenta del precio promedio para el precio de compra)</label>
+          <select value={margenBruto} onChange={(e) => setMargenBruto(Number(e.target.value))}
+            className="w-full border border-stone-300 bg-white px-2 py-1.5 text-sm font-mono text-stone-900 focus:outline-none focus:ring-2 focus:ring-amber-500">
+            {MARGENES_BRUTOS.map((m) => <option key={m} value={m}>{clp(m)}</option>)}
+          </select>
+        </div>
+        <label className="text-xs text-stone-500 block mb-1">Avisos copiados con el marcador</label>
         <textarea value={pegado} onChange={(e) => setPegado(e.target.value)} rows={3} placeholder="Pega aquí lo que copió el marcador (Ctrl+V)"
           className="w-full border border-stone-300 bg-white px-2 py-1.5 text-xs font-mono text-stone-900 focus:outline-none focus:ring-2 focus:ring-amber-500" />
         {calculo && calculo.error && <p className="text-xs text-rose-600 mt-2">{calculo.error}</p>}
@@ -3302,7 +3311,7 @@ function TasacionCompra() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <Tarjeta titulo="Precio promedio" sub={`Promedio de los ${calculo.primeros.length} avisos más baratos`} valor={calculo.promedioPrimeros} />
             <Tarjeta titulo="Precio sugerido de publicación" sub={`Precio promedio + ${clp(calculo.incremento)}`} valor={calculo.publicacion} />
-            <Tarjeta titulo="Precio sugerido de compra" sub={`Precio promedio − ${clp(calculo.descuento)}`} valor={calculo.compra} destacado />
+            <Tarjeta titulo="Precio sugerido de compra" sub={`Precio promedio − margen bruto ${clp(calculo.margenBruto)}`} valor={calculo.compra} destacado />
           </div>
           <p className="text-xs text-stone-500">Estimación referencial a partir de precios de publicación, no de ventas concretadas.</p>
 

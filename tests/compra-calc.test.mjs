@@ -228,3 +228,45 @@ test("estimarCompra: 'Automático' y 'Automática' cuentan como automática; las
   ], F2);
   assert.deepEqual(r.validos.map((v) => v.id), ["a", "b"]);
 });
+
+/* ---------- margen bruto ---------- */
+import { MARGENES_BRUTOS, MARGEN_BRUTO_DEFECTO } from "../src/compra-calc.js";
+
+test("la lista de margen bruto tiene exactamente las 12 opciones pedidas", () => {
+  assert.deepEqual(MARGENES_BRUTOS, [1500000, 2000000, 2500000, 3000000, 3500000, 4000000, 5000000, 6000000, 7000000, 8000000, 9000000, 10000000]);
+});
+
+test("el margen bruto por defecto es $2.000.000 y está en la lista", () => {
+  assert.equal(MARGEN_BRUTO_DEFECTO, 2000000);
+  assert.ok(MARGENES_BRUTOS.includes(MARGEN_BRUTO_DEFECTO));
+});
+
+const CINCO = [av("a", 8000000), av("b", 9000000), av("c", 10000000), av("d", 11000000), av("e", 12000000)];
+
+test("el precio de compra es el precio promedio menos el margen bruto elegido", () => {
+  for (const m of MARGENES_BRUTOS) {
+    const r = estimarCompra(CINCO, F, { margenBruto: m });
+    assert.equal(r.promedioPrimeros, 10000000);
+    assert.equal(r.compra, 10000000 - m, `margen ${m}`);
+    assert.equal(r.margenBruto, m);
+  }
+});
+
+test("el margen bruto no cambia el precio promedio ni el de publicación", () => {
+  const a = estimarCompra(CINCO, F, { margenBruto: 1500000 });
+  const b = estimarCompra(CINCO, F, { margenBruto: 10000000 });
+  assert.equal(a.promedioPrimeros, b.promedioPrimeros);
+  assert.equal(a.publicacion, b.publicacion);
+});
+
+test("sin elegir margen se usa el valor por defecto", () => {
+  assert.equal(estimarCompra(CINCO, F).compra, 10000000 - MARGEN_BRUTO_DEFECTO);
+  assert.equal(estimarCompra(CINCO, F, { margenBruto: "" }).compra, 10000000 - MARGEN_BRUTO_DEFECTO);
+});
+
+test("si el margen supera al precio promedio, la compra queda en $0 y se avisa", () => {
+  const baratos = [av("a", 3000000), av("b", 3100000), av("c", 3200000), av("d", 3300000), av("e", 3400000)];
+  const r = estimarCompra(baratos, F, { margenBruto: 10000000 });
+  assert.equal(r.compra, 0);
+  assert.ok(r.advertencias.some((w) => /margen bruto/.test(w)));
+});

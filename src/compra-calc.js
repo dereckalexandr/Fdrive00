@@ -6,10 +6,13 @@
  * - Estima los precios:
  *     precio promedio                = promedio de los 5 primeros avisos (los más baratos, tras la limpieza)
  *     precio sugerido de publicación = precio promedio + INCREMENTO_PUBLICACION
- *     precio sugerido de compra      = precio promedio − DESCUENTO_COMPRA
+ *     precio sugerido de compra      = precio promedio − margen bruto (lo elige el administrador de MARGENES_BRUTOS)
  * ----------------------------------------------------------------
  */
-export const DESCUENTO_COMPRA = 2_000_000;
+export const DESCUENTO_COMPRA = 2_000_000; // margen bruto por defecto
+export const MARGEN_BRUTO_DEFECTO = DESCUENTO_COMPRA;
+// Opciones de la lista "Margen bruto" del módulo.
+export const MARGENES_BRUTOS = [1_500_000, 2_000_000, 2_500_000, 3_000_000, 3_500_000, 4_000_000, 5_000_000, 6_000_000, 7_000_000, 8_000_000, 9_000_000, 10_000_000];
 export const MARGEN_KM = 0.2; // ±20 %
 export const INCREMENTO_PUBLICACION = 500_000;
 export const N_PRIMEROS = 5;
@@ -123,7 +126,8 @@ const promedio = (nums) => nums.reduce((s, n) => s + n, 0) / nums.length;
  * @param listings  avisos del marcador: { id, titulo, anio, km, precio, destacado, href }
  * @param filtros   { anioMin, anioMax, kmMin, kmMax, transmision?, combustible? } (los mismos que se pidieron a Chileautos)
  */
-export function estimarCompra(listings, filtros = {}, { descuento = DESCUENTO_COMPRA } = {}) {
+export function estimarCompra(listings, filtros = {}, { margenBruto, descuento = DESCUENTO_COMPRA } = {}) {
+  const margen = Number.isFinite(Number(margenBruto)) && margenBruto !== undefined && margenBruto !== "" ? Number(margenBruto) : descuento;
   const descartados = [];
   const candidatos = [];
   const ids = new Set();
@@ -169,8 +173,8 @@ export function estimarCompra(listings, filtros = {}, { descuento = DESCUENTO_CO
   }
   const promedioPrimeros = Math.round(promedio(primeros.map((p) => p.precio)));
   const publicacion = promedioPrimeros + INCREMENTO_PUBLICACION;
-  const compraBruta = promedioPrimeros - descuento;
-  if (compraBruta < 0) advertencias.push("El promedio de los primeros avisos es menor que el descuento: el precio de compra queda en $0.");
+  const compraBruta = promedioPrimeros - margen;
+  if (compraBruta < 0) advertencias.push("El precio promedio es menor que el margen bruto elegido: el precio de compra queda en $0.");
   return {
     ok: true,
     validos,
@@ -181,6 +185,7 @@ export function estimarCompra(listings, filtros = {}, { descuento = DESCUENTO_CO
     publicacion,
     incremento: INCREMENTO_PUBLICACION,
     compra: Math.max(0, compraBruta),
-    descuento,
+    margenBruto: margen,
+    descuento: margen,
   };
 }

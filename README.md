@@ -203,7 +203,7 @@ Pestaña **Tasación de compra**: estima cuánto pagar por un vehículo con los 
 1. Se ingresan a mano la **patente** y el **kilometraje** (obligatorios). Marca, modelo, año y versión se escriben o se completan subiendo el CAV.
 2. El botón "Abrir la búsqueda en Chileautos" abre la lista ya filtrada (marca, modelo, año ±1, kilometraje ±20 %, orden por precio más bajo y, si se eligen, **transmisión** Mecánica/Automática y **combustible** Bencina/Diesel/Híbrido/Eléctrico).
 3. Un **marcador** del navegador (se arrastra una vez a la barra de favoritos) lee la página de Chileautos que el usuario tiene abierta y copia los avisos; se pegan en la app.
-4. Resultado: **precio promedio** (los 5 avisos más baratos), **precio sugerido de publicación** (precio promedio + $500.000) y **precio sugerido de compra** (precio promedio − $2.000.000). Las constantes están en `src/compra-calc.js` (`N_PRIMEROS`, `INCREMENTO_PUBLICACION`, `DESCUENTO_COMPRA`).
+4. Resultado: **precio promedio** (los 5 avisos más baratos), **precio sugerido de publicación** (precio promedio + $500.000) y **precio sugerido de compra** (precio promedio − **margen bruto**). El margen bruto se elige antes de calcular en una lista ($1.500.000 a $10.000.000; parte en $2.000.000) y solo mueve el precio de compra. Las constantes están en `src/compra-calc.js` (`N_PRIMEROS`, `INCREMENTO_PUBLICACION`, `MARGENES_BRUTOS`).
 
 Decisiones y límites (verificados en chileautos.cl):
 - Chileautos y los sitios de consulta de patentes bloquean las consultas automáticas desde servidores (403 / protección anti-bots), por eso la lectura la hace el navegador del usuario y no un bot. **No se consulta patentechile.com**: es un buscador de datos de dueños y también está protegido.
