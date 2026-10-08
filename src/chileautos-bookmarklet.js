@@ -48,12 +48,21 @@ export function extractChileautosListings(doc, loc) {
     }
     const titulo = ti >= 0 ? partes[ti] : slug;
     const version = ti >= 0 && partes[ti + 1] && !/^\$/.test(partes[ti + 1]) ? partes[ti + 1] : "";
+    let transmision = "";
+    let combustible = "";
+    for (let k = 0; k < partes.length; k++) {
+      const p = partes[k].trim();
+      if (!transmision && /^(?:Manual|Autom[aá]tic[ao]|Secuencial|CVT)$/i.test(p)) transmision = p;
+      if (!combustible && /^(?:Bencina|Di[eé]sel|H[ií]brido[A-Za-zÁ-ú ]*|El[eé]ctrico|Gas|GLP|GNC)$/i.test(p)) combustible = p;
+    }
     const anioTxt = (ti >= 0 && titulo.match(/^((?:19|20)\d{2})/)) || slug.match(/(?:^|-)((?:19|20)\d{2})(?:-|$)/);
     const ranking = href.match(/rankingType=([A-Za-z]+)/);
     listings.push({
       id: id,
       titulo: titulo.slice(0, 90),
       version: version.slice(0, 90),
+      transmision: transmision,
+      combustible: combustible,
       anio: anioTxt ? parseInt(anioTxt[1], 10) : 0,
       km: km ? toInt(km[1]) : 0,
       precio: precio ? toInt(precio[1]) : 0,

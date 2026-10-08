@@ -139,3 +139,77 @@ test("estimarCompra: el precio de compra nunca es negativo", () => {
   assert.equal(r.compra, 0);
   assert.ok(r.advertencias.some((w) => /\$0/.test(w)));
 });
+
+/* ---------- transmisión y combustible ---------- */
+import { TRANSMISIONES, COMBUSTIBLES } from "../src/compra-calc.js";
+
+const BASE = { marca: "Toyota", modelo: "Yaris", anio: 2020, km: 60000 };
+const G = "(C.Marca.Toyota._.Modelo.Yaris.)";
+const R = "Ano.range(2019..2021)._.Kilometraje.range(48000..72000)";
+const url = (extra) => buildChileautosUrl({ ...BASE, ...extra });
+const q = (cuerpo) => `https://www.chileautos.cl/vehiculos/?q=${cuerpo}&sort=~Price`;
+
+test("las listas del módulo: Mecánica/Automática y Bencina/Diesel/Híbrido/Eléctrico", () => {
+  assert.deepEqual(TRANSMISIONES.map((t) => t.label), ["Mecánica", "Automática"]);
+  assert.deepEqual(COMBUSTIBLES.map((c) => c.label), ["Bencina", "Diesel", "Híbrido", "Eléctrico"]);
+});
+
+test("sin transmisión ni combustible la dirección no cambia", () => {
+  assert.equal(url({}), q(`(And.${G}_.${R}.)`));
+  assert.equal(url({ transmision: "", combustible: "" }), q(`(And.${G}_.${R}.)`));
+});
+
+test("Mecánica se pide a Chileautos como 'Manual' (con tilde en el nombre del filtro)", () => {
+  assert.equal(url({ transmision: "manual" }), q(`(And.${G}_.${R}._.Transmisi%C3%B3n.Manual.)`));
+});
+
+test("Automática pide 'Automática' y también 'Automático'", () => {
+  assert.equal(
+    url({ transmision: "automatica" }),
+    q(`(And.${G}_.(Or.Transmisi%C3%B3n.Autom%C3%A1tica._.Transmisi%C3%B3n.Autom%C3%A1tico.)_.${R}.)`)
+  );
+});
+
+test("combustible: los acentos de Híbrido y Eléctrico se conservan (sin tilde Chileautos devuelve 0)", () => {
+  assert.ok(url({ combustible: "bencina" }).includes("._.Combustible.Bencina.)"));
+  assert.ok(url({ combustible: "diesel" }).includes("._.Combustible.Diesel.)"));
+  assert.ok(url({ combustible: "hibrido" }).includes("Combustible.H%C3%ADbrido.)"));
+  assert.ok(url({ combustible: "electrico" }).includes("Combustible.El%C3%A9ctrico.)"));
+});
+
+test("transmisión y combustible juntos", () => {
+  assert.equal(url({ transmision: "manual", combustible: "bencina" }), q(`(And.${G}_.${R}._.Transmisi%C3%B3n.Manual._.Combustible.Bencina.)`));
+  assert.equal(
+    url({ transmision: "automatica", combustible: "hibrido" }),
+    q(`(And.${G}_.(Or.Transmisi%C3%B3n.Autom%C3%A1tica._.Transmisi%C3%B3n.Autom%C3%A1tico.)_.${R}._.Combustible.H%C3%ADbrido.)`)
+  );
+});
+
+test("un valor desconocido de transmisión o combustible se ignora (no rompe la dirección)", () => {
+  assert.equal(url({ transmision: "cvt", combustible: "gas" }), q(`(And.${G}_.${R}.)`));
+});
+
+test("estimarCompra descarta avisos de otra transmisión o combustible (red de seguridad)", () => {
+  const F2 = { ...F, transmision: "manual", combustible: "bencina" };
+  const r = estimarCompra([
+    av("a", 8000000, { transmision: "Manual", combustible: "Bencina" }),
+    av("b", 8200000, { transmision: "Automática", combustible: "Bencina" }),
+    av("c", 8400000, { transmision: "Manual", combustible: "Diesel" }),
+    av("d", 8600000, { transmision: "Manual", combustible: "Bencina" }),
+    av("e", 8800000),                                              // sin datos: no se descarta
+  ], F2);
+  const m = Object.fromEntries(r.descartados.map((d) => [d.id, d.motivo]));
+  assert.equal(m.b, "Transmisión fuera del filtro");
+  assert.equal(m.c, "Combustible fuera del filtro");
+  assert.deepEqual(r.validos.map((v) => v.id), ["a", "d", "e"]);
+});
+
+test("estimarCompra: 'Automático' y 'Automática' cuentan como automática; las tildes no importan", () => {
+  const F2 = { ...F, transmision: "automatica", combustible: "hibrido" };
+  const r = estimarCompra([
+    av("a", 9000000, { transmision: "Automático", combustible: "Híbrido" }),
+    av("b", 9100000, { transmision: "Automática", combustible: "Hibrido enchufable" }),
+    av("c", 9200000, { transmision: "Manual", combustible: "Híbrido" }),
+  ], F2);
+  assert.deepEqual(r.validos.map((v) => v.id), ["a", "b"]);
+});

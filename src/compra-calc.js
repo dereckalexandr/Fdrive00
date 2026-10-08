@@ -13,6 +13,23 @@ export const DESCUENTO_COMPRA = 2_000_000;
 export const MARGEN_KM = 0.2; // ±20 %
 export const N_PRIMEROS = 4;
 
+/* ---------- transmisión y combustible ---------- */
+// `variantes`: nombres con que Chileautos guarda el valor. "Mecánica" (como la llama el módulo) es "Manual" en Chileautos.
+export const TRANSMISIONES = [
+  { value: "manual", label: "Mecánica", variantes: ["Manual"], prefijo: "manual" },
+  { value: "automatica", label: "Automática", variantes: ["Automática", "Automático"], prefijo: "automatic" },
+];
+// Los acentos importan: Chileautos devuelve 0 avisos con "Hibrido" o "Electrico" sin tilde.
+export const COMBUSTIBLES = [
+  { value: "bencina", label: "Bencina", chileautos: "Bencina", prefijo: "bencina" },
+  { value: "diesel", label: "Diesel", chileautos: "Diesel", prefijo: "diesel" },
+  { value: "hibrido", label: "Híbrido", chileautos: "Híbrido", prefijo: "hibrido" },
+  { value: "electrico", label: "Eléctrico", chileautos: "Eléctrico", prefijo: "electrico" },
+];
+const sinTildes = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+// Un aviso sin el dato (vacío) no se descarta; uno con un valor distinto, sí.
+const coincide = (valorAviso, prefijo) => !valorAviso || sinTildes(valorAviso).startsWith(prefijo);
+
 /* ---------- datos del vehículo ---------- */
 /** "ttHY.51-1" -> "TTHY51" (la inscripción del CAV trae además un dígito verificador). */
 export function normalizePatente(raw) {
@@ -49,13 +66,21 @@ export function calcularFiltros({ anio, km, margenAnio = 1, pctKm = MARGEN_KM })
  * Dirección de búsqueda en Chileautos, ordenada por precio más bajo.
  * Devuelve null si falta algún dato obligatorio.
  */
-export function buildChileautosUrl({ marca, modelo, anio, km, margenAnio = 1, pctKm = MARGEN_KM }) {
+export function buildChileautosUrl({ marca, modelo, anio, km, margenAnio = 1, pctKm = MARGEN_KM, transmision = "", combustible = "" }) {
   const ma = String(marca || "").trim();
   const mo = String(modelo || "").trim();
   if (!ma || !mo || !toPositiveInt(anio) || !toPositiveInt(km)) return null;
   const f = calcularFiltros({ anio, km, margenAnio, pctKm });
   const enc = (s) => encodeURIComponent(s).replace(/\./g, "%2E");
-  const q = `(And.(C.Marca.${enc(ma)}._.Modelo.${enc(mo)}.)_.Ano.range(${f.anioMin}..${f.anioMax})._.Kilometraje.range(${f.kmMin}..${f.kmMax}).)`;
+  const tr = TRANSMISIONES.find((t) => t.value === transmision);
+  const co = COMBUSTIBLES.find((c) => c.value === combustible);
+  const claveT = enc("Transmisión");
+  // La transmisión automática figura en Chileautos como "Automática" y, en pocos avisos, "Automático": se piden ambas.
+  const grupoTransmision = tr && tr.variantes.length > 1 ? `(Or.${tr.variantes.map((v) => `${claveT}.${enc(v)}`).join("._.")}.)_.` : "";
+  let extras = "";
+  if (tr && tr.variantes.length === 1) extras += `._.${claveT}.${enc(tr.variantes[0])}`;
+  if (co) extras += `._.Combustible.${enc(co.chileautos)}`;
+  const q = `(And.(C.Marca.${enc(ma)}._.Modelo.${enc(mo)}.)_.${grupoTransmision}Ano.range(${f.anioMin}..${f.anioMax})._.Kilometraje.range(${f.kmMin}..${f.kmMax})${extras}.)`;
   return `https://www.chileautos.cl/vehiculos/?q=${q}&sort=~Price`;
 }
 
@@ -95,12 +120,14 @@ const promedio = (nums) => nums.reduce((s, n) => s + n, 0) / nums.length;
 
 /**
  * @param listings  avisos del marcador: { id, titulo, anio, km, precio, destacado, href }
- * @param filtros   { anioMin, anioMax, kmMin, kmMax } (los mismos que se pidieron a Chileautos)
+ * @param filtros   { anioMin, anioMax, kmMin, kmMax, transmision?, combustible? } (los mismos que se pidieron a Chileautos)
  */
 export function estimarCompra(listings, filtros = {}, { descuento = DESCUENTO_COMPRA } = {}) {
   const descartados = [];
   const candidatos = [];
   const ids = new Set();
+  const filtrosTrans = TRANSMISIONES.find((t) => t.value === filtros.transmision);
+  const filtrosComb = COMBUSTIBLES.find((c) => c.value === filtros.combustible);
 
   for (const l of Array.isArray(listings) ? listings : []) {
     const precio = Number(l && l.precio) || 0;
@@ -111,6 +138,8 @@ export function estimarCompra(listings, filtros = {}, { descuento = DESCUENTO_CO
       : precio <= 0 ? "Sin precio"
       : l.anio && filtros.anioMin && (l.anio < filtros.anioMin || l.anio > filtros.anioMax) ? "Año fuera del filtro"
       : l.km && filtros.kmMax && (l.km < filtros.kmMin || l.km > filtros.kmMax) ? "Kilometraje fuera del filtro"
+      : filtrosTrans && !coincide(l.transmision, filtrosTrans.prefijo) ? "Transmisión fuera del filtro"
+      : filtrosComb && !coincide(l.combustible, filtrosComb.prefijo) ? "Combustible fuera del filtro"
       : esPrecioSimbolico(precio) ? "Precio simbólico"
       : null;
     if (l && l.id) ids.add(l.id);

@@ -13,7 +13,7 @@ import { extractPdfText, parseCavFields } from "./cav-parser.js";
 import { buildInspeccionPdf, buildTasacionPdf, pdfFileName } from "./pdf-report.js";
 import { saveDraft, loadDraft, clearDraft, isMeaningful } from "./drafts.js";
 import { computeTasacionTotals, computeValorFinal } from "./tasacion-totals.js";
-import { normalizePatente, isPatenteValida, splitModeloVersion, parseKm, calcularFiltros, buildChileautosUrl, parseAvisosPegados, estimarCompra } from "./compra-calc.js";
+import { normalizePatente, isPatenteValida, splitModeloVersion, parseKm, calcularFiltros, buildChileautosUrl, parseAvisosPegados, estimarCompra, TRANSMISIONES, COMBUSTIBLES } from "./compra-calc.js";
 import { buildBookmarkletHref } from "./chileautos-bookmarklet.js";
 import { photoKey, photoPrefix, makePhotoId, compressImage, collectPhotoIds, diffIds, MAX_PHOTOS_PER_ITEM, MAX_PHOTOS_PER_TASACION } from "./photos.js";
 
@@ -3095,6 +3095,8 @@ function TasacionCompra() {
   const [anio, setAnio] = useState("");
   const [version, setVersion] = useState("");
   const [margenAnio, setMargenAnio] = useState(1);
+  const [transmision, setTransmision] = useState("");
+  const [combustible, setCombustible] = useState("");
   const [cav, setCav] = useState({ name: "", data: "" });
   const [cavMsg, setCavMsg] = useState("");
   const [leyendo, setLeyendo] = useState(false);
@@ -3108,7 +3110,9 @@ function TasacionCompra() {
   const kmNum = parseKm(km);
   const patenteOk = isPatenteValida(patente);
   const filtros = calcularFiltros({ anio, km: kmNum, margenAnio });
-  const urlBusqueda = patenteOk ? buildChileautosUrl({ marca, modelo, anio, km: kmNum, margenAnio }) : null;
+  const urlBusqueda = patenteOk ? buildChileautosUrl({ marca, modelo, anio, km: kmNum, margenAnio, transmision, combustible }) : null;
+  const transLabel = (TRANSMISIONES.find((t) => t.value === transmision) || {}).label;
+  const combLabel = (COMBUSTIBLES.find((c) => c.value === combustible) || {}).label;
 
   const faltantes = [];
   if (!patenteOk) faltantes.push(patente ? "patente válida (ej. TTHY51)" : "patente");
@@ -3147,20 +3151,24 @@ function TasacionCompra() {
     if (!p.ok) return { error: p.error };
     if (p.data.sinResultados) return { sinResultados: true };
     if (!p.data.listings.length) return { error: "La página de Chileautos no tenía avisos. Revisa que el marcador se usó en la lista de resultados." };
-    const r = estimarCompra(p.data.listings, filtros);
+    const r = estimarCompra(p.data.listings, { ...filtros, transmision, combustible });
     let otraBusqueda = false;
     try {
       const u = decodeURIComponent(p.data.url || "").toLowerCase();
+      const trans = TRANSMISIONES.find((t) => t.value === transmision);
+      const comb = COMBUSTIBLES.find((c) => c.value === combustible);
       otraBusqueda = !(u.includes(`marca.${marca.trim().toLowerCase()}`) && u.includes(`modelo.${modelo.trim().toLowerCase()}`)
-        && u.includes(`range(${filtros.anioMin}..${filtros.anioMax})`));
+        && u.includes(`range(${filtros.anioMin}..${filtros.anioMax})`)
+        && (!trans || u.includes(`transmisión.${trans.variantes[0].toLowerCase()}`))
+        && (!comb || u.includes(`combustible.${comb.chileautos.toLowerCase()}`)));
     } catch (e) { otraBusqueda = false; }
     return { ...r, otraBusqueda };
-  }, [pegado, marca, modelo, anio, km, margenAnio]);
+  }, [pegado, marca, modelo, anio, km, margenAnio, transmision, combustible]);
 
   const copiarMarcador = async () => {
     try { await navigator.clipboard.writeText(buildBookmarkletHref()); setCopiado(true); setTimeout(() => setCopiado(false), 2500); } catch (e) { /* sin permiso: queda el botón arrastrable */ }
   };
-  const limpiar = () => { setPatente(""); setKm(""); setMarca(""); setModelo(""); setAnio(""); setVersion(""); setCav({ name: "", data: "" }); setCavMsg(""); setPegado(""); };
+  const limpiar = () => { setPatente(""); setKm(""); setMarca(""); setModelo(""); setAnio(""); setVersion(""); setTransmision(""); setCombustible(""); setCav({ name: "", data: "" }); setCavMsg(""); setPegado(""); };
 
   const Tarjeta = ({ titulo, sub, valor, destacado = false }) => (
     <div className={`p-4 border ${destacado ? "bg-stone-900 text-stone-100 border-stone-900" : "bg-white border-stone-200"}`}>
@@ -3216,6 +3224,22 @@ function TasacionCompra() {
           <TextField label="Modelo *" value={modelo} onChange={setModelo} placeholder="Ej. Yaris" />
           <TextField label="Año *" value={anio} onChange={(v) => setAnio(v.replace(/\D/g, "").slice(0, 4))} placeholder="Ej. 2020" />
           <TextField label="Versión" value={version} onChange={setVersion} placeholder="Ej. 1.5 GLI" />
+          <div>
+            <label className="text-xs text-stone-500 block mb-1">Transmisión</label>
+            <select value={transmision} onChange={(e) => setTransmision(e.target.value)}
+              className="w-full border border-stone-300 bg-white px-2 py-1.5 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-amber-500">
+              <option value="">Seleccionar</option>
+              {TRANSMISIONES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs text-stone-500 block mb-1">Combustible</label>
+            <select value={combustible} onChange={(e) => setCombustible(e.target.value)}
+              className="w-full border border-stone-300 bg-white px-2 py-1.5 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-amber-500">
+              <option value="">Seleccionar</option>
+              {COMBUSTIBLES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+            </select>
+          </div>
         </div>
       </div>
 
@@ -3227,7 +3251,8 @@ function TasacionCompra() {
               className="inline-block bg-stone-900 text-white px-4 py-2.5 text-sm font-medium hover:bg-stone-800">Abrir la búsqueda en Chileautos ↗</a>
             <p className="text-xs text-stone-500 mt-2">
               Filtros aplicados: {marca} {modelo} · año {filtros.anioMin === filtros.anioMax ? filtros.anioMin : `${filtros.anioMin}–${filtros.anioMax}`} ·
-              {" "}{filtros.kmMin.toLocaleString("es-CL")}–{filtros.kmMax.toLocaleString("es-CL")} km · orden: precio más bajo.
+              {" "}{filtros.kmMin.toLocaleString("es-CL")}–{filtros.kmMax.toLocaleString("es-CL")} km
+              {transLabel ? ` · transmisión ${transLabel.toLowerCase()}` : ""}{combLabel ? ` · combustible ${combLabel.toLowerCase()}` : ""} · orden: precio más bajo.
             </p>
             <p className="text-xs text-stone-500 mt-1">Si Chileautos muestra "Vehículos parecidos a lo que buscas", el modelo no existe con ese nombre: corrígelo arriba.</p>
           </>

@@ -201,13 +201,14 @@ dentro de `src/cav-parser.js`.
 Pestaña **Tasación de compra**: estima cuánto pagar por un vehículo con los avisos de Chileautos. No guarda nada.
 
 1. Se ingresan a mano la **patente** y el **kilometraje** (obligatorios). Marca, modelo, año y versión se escriben o se completan subiendo el CAV.
-2. El botón "Abrir la búsqueda en Chileautos" abre la lista ya filtrada (marca, modelo, año ±1, kilometraje ±20 %, orden por precio más bajo).
+2. El botón "Abrir la búsqueda en Chileautos" abre la lista ya filtrada (marca, modelo, año ±1, kilometraje ±20 %, orden por precio más bajo y, si se eligen, **transmisión** Mecánica/Automática y **combustible** Bencina/Diesel/Híbrido/Eléctrico).
 3. Un **marcador** del navegador (se arrastra una vez a la barra de favoritos) lee la página de Chileautos que el usuario tiene abierta y copia los avisos; se pegan en la app.
 4. Resultado: **precio promedio** (4 avisos más baratos), **precio sugerido de publicación** (promedio de la primera página) y **precio sugerido de compra** (promedio de los 4 primeros − $2.000.000).
 
 Decisiones y límites (verificados en chileautos.cl):
 - Chileautos y los sitios de consulta de patentes bloquean las consultas automáticas desde servidores (403 / protección anti-bots), por eso la lectura la hace el navegador del usuario y no un bot. **No se consulta patentechile.com**: es un buscador de datos de dueños y también está protegido.
 - Se descartan, mostrando el motivo: avisos destacados (patrocinados), sin precio, repetidos, fuera del filtro de año/km, precios simbólicos (111.111, 123.456…) y precios menores a la mitad de la mediana.
+- Transmisión y combustible (opcionales): "Mecánica" se pide como `Transmisión.Manual`; "Automática" como `Automática` o `Automático`. **Los acentos importan**: `Híbrido` y `Eléctrico` sin tilde devuelven 0 avisos. Si la tarjeta de un aviso trae otra transmisión o combustible, se descarta con el motivo.
 - Sintaxis de búsqueda comprobada: `?q=(And.(C.Marca.X._.Modelo.Y.)_.Ano.range(A..B)._.Kilometraje.range(K1..K2).)&sort=~Price`. Si Chileautos no reconoce el modelo muestra "Vehículos parecidos a lo que buscas" y la app lo avisa en vez de calcular.
 - Si Chileautos cambia su página, hay que actualizar `src/chileautos-bookmarklet.js` (sus pruebas están en `tests/`).
 - Es una estimación a partir de precios de publicación, no de ventas concretadas.

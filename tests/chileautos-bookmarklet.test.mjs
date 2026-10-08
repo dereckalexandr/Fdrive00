@@ -20,6 +20,7 @@ test("extrae año, versión, precio, km, id y enlace de una tarjeta real", () =>
   assert.equal(r.listings.length, 1);
   assert.deepEqual(r.listings[0], {
     id: "CP-AD-8561346", titulo: "2019 Toyota Yaris", version: "1.5 GLI 4X2 MT 4P",
+    transmision: "Manual", combustible: "Bencina",
     anio: 2019, km: 84000, precio: 8200000, destacado: false,
     href: "/vehiculos/detalles/2019-toyota-yaris-1-5-gli-4x2-mt-4p/CP-AD-8561346/",
   });
@@ -40,6 +41,19 @@ test("tarjetas reales de Chileautos: con y sin contador de fotos delante del tí
     assert.equal(l.anio, 2019);
   }
   assert.deepEqual(r.listings.map((l) => [l.precio, l.km]), [[8200000, 84000], [8800000, 72300]]);
+});
+
+test("lee la transmisión y el combustible de cada tarjeta (automática, diésel, híbrido, eléctrico)", () => {
+  const t = (trans, comb) => `2022 Marca Modelo\nVersión\n$10.000.000 CLP\nSUV\n${trans}\n${comb}\n40.000 km\nParticular`;
+  const casos = [["Automática", "Diesel"], ["Automático", "Híbrido"], ["Automática", "Eléctrico"], ["Manual", "Bencina"], ["Automática", "Híbrido enchufable"]];
+  const r = extractChileautosListings(doc(casos.map(([tr, co], i) => tarjeta({ texto: t(tr, co), href: `/vehiculos/detalles/2022-marca-modelo/CL-AD-${i}1/` }))), loc);
+  assert.deepEqual(r.listings.map((l) => [l.transmision, l.combustible]), casos);
+});
+
+test("si la tarjeta no trae transmisión o combustible, quedan vacíos (no se inventan)", () => {
+  const r = extractChileautosListings(doc([tarjeta({ texto: "2018 Marca Modelo\nVersión\n$8.000.000 CLP\n50.000 km", href: "/vehiculos/detalles/2018-marca-modelo/CL-AD-5/" })]), loc);
+  assert.equal(r.listings[0].transmision, "");
+  assert.equal(r.listings[0].combustible, "");
 });
 
 test("marca como destacado el aviso con rankingType en su enlace", () => {
