@@ -13,6 +13,8 @@ import { extractPdfText, parseCavFields } from "./cav-parser.js";
 import { buildInspeccionPdf, buildTasacionPdf, pdfFileName } from "./pdf-report.js";
 import { saveDraft, loadDraft, clearDraft, isMeaningful } from "./drafts.js";
 import { computeTasacionTotals, computeValorFinal } from "./tasacion-totals.js";
+import { normalizePatente, isPatenteValida, splitModeloVersion, parseKm, calcularFiltros, buildChileautosUrl, parseAvisosPegados, estimarCompra } from "./compra-calc.js";
+import { buildBookmarkletHref } from "./chileautos-bookmarklet.js";
 import { photoKey, photoPrefix, makePhotoId, compressImage, collectPhotoIds, diffIds, MAX_PHOTOS_PER_ITEM, MAX_PHOTOS_PER_TASACION } from "./photos.js";
 
 /* =========================================================
@@ -3078,6 +3080,246 @@ function AdminAuthGate({ onSuccess, onExit }) {
   );
 }
 
+/* =========================================================
+   TASACIÓN DE COMPRA (panel del administrador)
+   Estima cuánto pagar por un vehículo a partir de los avisos de Chileautos.
+   Nada se guarda: el cálculo vive solo en pantalla.
+========================================================= */
+const titleCase = (s) => String(s || "").toLowerCase().replace(/(^|[\s-])\S/g, (c) => c.toUpperCase());
+
+function TasacionCompra() {
+  const [patente, setPatente] = useState("");
+  const [km, setKm] = useState("");
+  const [marca, setMarca] = useState("");
+  const [modelo, setModelo] = useState("");
+  const [anio, setAnio] = useState("");
+  const [version, setVersion] = useState("");
+  const [margenAnio, setMargenAnio] = useState(1);
+  const [cav, setCav] = useState({ name: "", data: "" });
+  const [cavMsg, setCavMsg] = useState("");
+  const [leyendo, setLeyendo] = useState(false);
+  const [pegado, setPegado] = useState("");
+  const [copiado, setCopiado] = useState(false);
+  const bmRef = useRef(null);
+
+  // React no deja poner un enlace "javascript:" desde JSX, así que se asigna directo al elemento.
+  useEffect(() => { if (bmRef.current) bmRef.current.setAttribute("href", buildBookmarkletHref()); }, []);
+
+  const kmNum = parseKm(km);
+  const patenteOk = isPatenteValida(patente);
+  const filtros = calcularFiltros({ anio, km: kmNum, margenAnio });
+  const urlBusqueda = patenteOk ? buildChileautosUrl({ marca, modelo, anio, km: kmNum, margenAnio }) : null;
+
+  const faltantes = [];
+  if (!patenteOk) faltantes.push(patente ? "patente válida (ej. TTHY51)" : "patente");
+  if (!kmNum) faltantes.push("kilometraje");
+  if (!marca.trim()) faltantes.push("marca");
+  if (!modelo.trim()) faltantes.push("modelo");
+  if (!parseKm(anio)) faltantes.push("año");
+
+  const handleCavLoaded = async (name, data) => {
+    setCav({ name, data });
+    setCavMsg("");
+    setLeyendo(true);
+    try {
+      const fields = parseCavFields(await extractPdfText(data));
+      const mv = splitModeloVersion(fields.modelo);
+      const llenados = [];
+      if (fields.marca) { setMarca(titleCase(fields.marca)); llenados.push("marca"); }
+      if (mv.modelo) { setModelo(titleCase(mv.modelo)); llenados.push("modelo"); }
+      if (fields.anio) { setAnio(fields.anio); llenados.push("año"); }
+      if (mv.version) { setVersion(fields.modelo.slice(mv.modelo.length).trim()); llenados.push("versión"); }
+      setCavMsg(llenados.length
+        ? `Se completaron: ${llenados.join(", ")}. Revísalos: si el modelo tiene más de una palabra (ej. "Land Cruiser"), corrígelo.`
+        : "No se detectaron datos en este PDF. Completa marca, modelo y año a mano.");
+    } catch (e) {
+      console.warn("No se pudo leer el CAV:", e);
+      setCavMsg("No se pudo leer el PDF. Completa los datos a mano.");
+    } finally {
+      setLeyendo(false);
+    }
+  };
+
+  // Cálculo derivado del texto pegado: se actualiza solo al pegar o al cambiar filtros.
+  const calculo = useMemo(() => {
+    if (!pegado.trim()) return null;
+    const p = parseAvisosPegados(pegado);
+    if (!p.ok) return { error: p.error };
+    if (p.data.sinResultados) return { sinResultados: true };
+    if (!p.data.listings.length) return { error: "La página de Chileautos no tenía avisos. Revisa que el marcador se usó en la lista de resultados." };
+    const r = estimarCompra(p.data.listings, filtros);
+    let otraBusqueda = false;
+    try {
+      const u = decodeURIComponent(p.data.url || "").toLowerCase();
+      otraBusqueda = !(u.includes(`marca.${marca.trim().toLowerCase()}`) && u.includes(`modelo.${modelo.trim().toLowerCase()}`)
+        && u.includes(`range(${filtros.anioMin}..${filtros.anioMax})`));
+    } catch (e) { otraBusqueda = false; }
+    return { ...r, otraBusqueda };
+  }, [pegado, marca, modelo, anio, km, margenAnio]);
+
+  const copiarMarcador = async () => {
+    try { await navigator.clipboard.writeText(buildBookmarkletHref()); setCopiado(true); setTimeout(() => setCopiado(false), 2500); } catch (e) { /* sin permiso: queda el botón arrastrable */ }
+  };
+  const limpiar = () => { setPatente(""); setKm(""); setMarca(""); setModelo(""); setAnio(""); setVersion(""); setCav({ name: "", data: "" }); setCavMsg(""); setPegado(""); };
+
+  const Tarjeta = ({ titulo, sub, valor, destacado = false }) => (
+    <div className={`p-4 border ${destacado ? "bg-stone-900 text-stone-100 border-stone-900" : "bg-white border-stone-200"}`}>
+      <p className={`text-xs uppercase tracking-wide ${destacado ? "text-stone-400" : "text-stone-500"}`}>{titulo}</p>
+      <p className="font-mono text-2xl md:text-3xl mt-1">{clp(valor)}</p>
+      <p className={`text-xs mt-1 ${destacado ? "text-stone-400" : "text-stone-500"}`}>{sub}</p>
+    </div>
+  );
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="bg-white border border-stone-200 p-4 md:p-5">
+        <div className="flex items-start justify-between gap-3 mb-4">
+          <div>
+            <h3 className="font-serif text-lg text-stone-900">Tasación de compra</h3>
+            <p className="text-xs text-stone-500 mt-0.5">Estima cuánto pagar por un vehículo con los avisos de Chileautos. Nada de esto se guarda.</p>
+          </div>
+          <button type="button" onClick={limpiar} className="text-xs text-stone-500 hover:underline shrink-0 py-1">Limpiar</button>
+        </div>
+
+        <p className="text-xs uppercase tracking-widest text-stone-400 mb-2">1 · Datos del vehículo</p>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label className="text-xs text-stone-500 block mb-1">Patente *</label>
+            <input type="text" value={patente} onChange={(e) => setPatente(normalizePatente(e.target.value))} placeholder="Ej. TTHY51" maxLength={6}
+              className="w-full border border-stone-300 bg-white px-2 py-1.5 text-sm font-mono uppercase focus:outline-none focus:ring-2 focus:ring-amber-500" />
+            {patente.length === 6 && !patenteOk && <p className="text-xs text-rose-600 mt-1">Formato no válido (4 letras y 2 números, o 2 letras y 4 números).</p>}
+          </div>
+          <div>
+            <label className="text-xs text-stone-500 block mb-1">Kilometraje *</label>
+            <input type="text" inputMode="numeric" value={kmNum ? kmNum.toLocaleString("es-CL") : ""} onChange={(e) => setKm(e.target.value)} placeholder="Ej. 60.000"
+              className="w-full border border-stone-300 bg-white px-2 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-amber-500" />
+          </div>
+          <div>
+            <label className="text-xs text-stone-500 block mb-1">Búsqueda por año</label>
+            <select value={margenAnio} onChange={(e) => setMargenAnio(Number(e.target.value))}
+              className="w-full border border-stone-300 bg-white px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500">
+              <option value={1}>Año del vehículo ±1</option>
+              <option value={0}>Solo el año exacto</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="mt-4">
+          <label className="text-xs text-stone-500 block mb-1">CAV (opcional): completa marca, modelo, año y versión</label>
+          <PdfDropzone fileName={cav.name} fileData={cav.data} onFileLoaded={handleCavLoaded} onRemove={() => { setCav({ name: "", data: "" }); setCavMsg(""); }} />
+          {leyendo && <p className="text-xs text-stone-500 mt-2">Leyendo el CAV…</p>}
+          {!leyendo && cavMsg && <p className="text-xs text-stone-500 mt-2">{cavMsg}</p>}
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4">
+          <TextField label="Marca *" value={marca} onChange={setMarca} placeholder="Ej. Toyota" />
+          <TextField label="Modelo *" value={modelo} onChange={setModelo} placeholder="Ej. Yaris" />
+          <TextField label="Año *" value={anio} onChange={(v) => setAnio(v.replace(/\D/g, "").slice(0, 4))} placeholder="Ej. 2020" />
+          <TextField label="Versión" value={version} onChange={setVersion} placeholder="Ej. 1.5 GLI" />
+        </div>
+      </div>
+
+      <div className="bg-white border border-stone-200 p-4 md:p-5">
+        <p className="text-xs uppercase tracking-widest text-stone-400 mb-2">2 · Buscar en Chileautos</p>
+        {urlBusqueda ? (
+          <>
+            <a href={urlBusqueda} target="_blank" rel="noopener noreferrer"
+              className="inline-block bg-stone-900 text-white px-4 py-2.5 text-sm font-medium hover:bg-stone-800">Abrir la búsqueda en Chileautos ↗</a>
+            <p className="text-xs text-stone-500 mt-2">
+              Filtros aplicados: {marca} {modelo} · año {filtros.anioMin === filtros.anioMax ? filtros.anioMin : `${filtros.anioMin}–${filtros.anioMax}`} ·
+              {" "}{filtros.kmMin.toLocaleString("es-CL")}–{filtros.kmMax.toLocaleString("es-CL")} km · orden: precio más bajo.
+            </p>
+            <p className="text-xs text-stone-500 mt-1">Si Chileautos muestra "Vehículos parecidos a lo que buscas", el modelo no existe con ese nombre: corrígelo arriba.</p>
+          </>
+        ) : (
+          <p className="text-sm text-stone-500">Completa {faltantes.join(", ")} para armar la búsqueda.</p>
+        )}
+
+        <div className="mt-4 border-t border-stone-200 pt-4">
+          <p className="text-sm text-stone-700 font-medium mb-1">Marcador para copiar los avisos</p>
+          <p className="text-xs text-stone-500 mb-2">Chileautos no permite leer sus avisos desde un servidor, pero tu navegador sí puede. Se instala una sola vez:</p>
+          <ol className="text-xs text-stone-600 list-decimal pl-5 flex flex-col gap-1 mb-3">
+            <li>Muestra la barra de favoritos (Ctrl+Shift+B) y <strong>arrastra este botón</strong> a ella.</li>
+            <li>En la página de Chileautos que abriste, pulsa ese favorito: copia los avisos y muestra "N avisos copiados".</li>
+            <li>Vuelve aquí y pega abajo.</li>
+          </ol>
+          <div className="flex flex-wrap items-center gap-3">
+            <a ref={bmRef} onClick={(e) => e.preventDefault()} draggable="true"
+              className="inline-block border-2 border-dashed border-amber-500 bg-amber-50 text-amber-900 px-3 py-2 text-sm font-medium cursor-grab">⭐ Copiar avisos Chileautos</a>
+            <button type="button" onClick={copiarMarcador} className="text-xs text-stone-600 hover:underline py-2">
+              {copiado ? "Código copiado ✓" : "No puedo arrastrarlo: copiar el código del marcador"}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white border border-stone-200 p-4 md:p-5">
+        <p className="text-xs uppercase tracking-widest text-stone-400 mb-2">3 · Avisos copiados</p>
+        <textarea value={pegado} onChange={(e) => setPegado(e.target.value)} rows={3} placeholder="Pega aquí lo que copió el marcador (Ctrl+V)"
+          className="w-full border border-stone-300 bg-white px-2 py-1.5 text-xs font-mono text-stone-900 focus:outline-none focus:ring-2 focus:ring-amber-500" />
+        {calculo && calculo.error && <p className="text-xs text-rose-600 mt-2">{calculo.error}</p>}
+        {calculo && calculo.sinResultados && (
+          <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 px-3 py-2 mt-2">
+            Chileautos no tiene avisos exactos para este filtro (mostró "vehículos parecidos"). Revisa el modelo, o prueba con "Año ±1" y otro kilometraje.
+          </p>
+        )}
+      </div>
+
+      {calculo && calculo.ok && (
+        <div className="flex flex-col gap-3">
+          <p className="text-xs uppercase tracking-widest text-stone-400">4 · Resultado</p>
+          {calculo.otraBusqueda && (
+            <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 px-3 py-2">
+              Estos avisos parecen venir de otra búsqueda (otro modelo, año o kilometraje). Abre la búsqueda de arriba y vuelve a copiar.
+            </p>
+          )}
+          {calculo.advertencias.map((w) => <p key={w} className="text-xs text-amber-800">⚠ {w}</p>)}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <Tarjeta titulo="Precio promedio" sub={`Promedio de los ${calculo.primeros.length} avisos más baratos`} valor={calculo.promedioPrimeros} />
+            <Tarjeta titulo="Precio sugerido de publicación" sub={`Promedio de la primera página (${calculo.validos.length} avisos)`} valor={calculo.publicacion} />
+            <Tarjeta titulo="Precio sugerido de compra" sub={`Precio promedio − ${clp(calculo.descuento)}`} valor={calculo.compra} destacado />
+          </div>
+          <p className="text-xs text-stone-500">Estimación referencial a partir de precios de publicación, no de ventas concretadas.</p>
+
+          <details className="bg-white border border-stone-200 p-4 text-sm">
+            <summary className="cursor-pointer text-stone-700">Ver el detalle del cálculo ({calculo.validos.length} usados, {calculo.descartados.length} descartados)</summary>
+            <div className="overflow-x-auto mt-3">
+              <table className="w-full border-collapse text-xs">
+                <thead>
+                  <tr className="text-left uppercase tracking-wide text-stone-400 border-b border-stone-200">
+                    <th className="py-1.5 pr-2">Aviso</th><th className="py-1.5 pr-2">Año</th><th className="py-1.5 pr-2 text-right">Km</th><th className="py-1.5 pr-2 text-right">Precio</th><th className="py-1.5 pr-2">Estado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {calculo.validos.map((v, i) => (
+                    <tr key={v.id} className={`border-b border-stone-100 ${i < calculo.primeros.length ? "bg-amber-50" : ""}`}>
+                      <td className="py-1.5 pr-2"><a href={`https://www.chileautos.cl${v.href}`} target="_blank" rel="noopener noreferrer" className="text-sky-700 hover:underline">{v.titulo || v.id}{v.version ? ` · ${v.version}` : ""}</a></td>
+                      <td className="py-1.5 pr-2">{v.anio || "—"}</td>
+                      <td className="py-1.5 pr-2 text-right font-mono">{v.km ? v.km.toLocaleString("es-CL") : "—"}</td>
+                      <td className="py-1.5 pr-2 text-right font-mono">{clp(v.precio)}</td>
+                      <td className="py-1.5 pr-2 text-stone-600">{i < calculo.primeros.length ? "Entre los más baratos" : "Usado en la publicación"}</td>
+                    </tr>
+                  ))}
+                  {calculo.descartados.map((d, i) => (
+                    <tr key={`${d.id}-${i}`} className="border-b border-stone-100 text-stone-400">
+                      <td className="py-1.5 pr-2">{d.titulo || d.id}</td>
+                      <td className="py-1.5 pr-2">{d.anio || "—"}</td>
+                      <td className="py-1.5 pr-2 text-right font-mono">{d.km ? d.km.toLocaleString("es-CL") : "—"}</td>
+                      <td className="py-1.5 pr-2 text-right font-mono">{d.precio ? clp(d.precio) : "—"}</td>
+                      <td className="py-1.5 pr-2 text-rose-600">Descartado: {d.motivo}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </details>
+        </div>
+      )}
+      {calculo && calculo.ok === false && <p className="text-sm text-rose-600">{calculo.error}</p>}
+    </div>
+  );
+}
+
 function AdminDashboard({ vendors, setVendors, inspectors, setInspectors, onExit }) {
   const [tab, setTab] = useState("resumen");
   const [selectedYM, setSelectedYM] = useState(currentYM());
@@ -3283,10 +3525,11 @@ function AdminDashboard({ vendors, setVendors, inspectors, setInspectors, onExit
           </div>
           <button onClick={onExit} className="self-start md:self-auto border border-stone-700 px-3 py-1.5 text-sm text-stone-300 hover:bg-stone-800">Salir</button>
         </div>
-        <div className="max-w-5xl mx-auto px-6 flex gap-2 border-t border-stone-800">
+        <div className="max-w-5xl mx-auto px-6 flex gap-2 border-t border-stone-800 overflow-x-auto whitespace-nowrap">
           <button onClick={() => setTab("resumen")} className={`px-4 py-3 text-sm ${tab === "resumen" ? "text-amber-400 border-b-2 border-amber-400" : "text-stone-400"}`}>Resumen mensual</button>
           <button onClick={() => setTab("vendedores")} className={`px-4 py-3 text-sm ${tab === "vendedores" ? "text-amber-400 border-b-2 border-amber-400" : "text-stone-400"}`}>Ejecutivos</button>
           <button onClick={() => setTab("inspectores")} className={`px-4 py-3 text-sm ${tab === "inspectores" ? "text-amber-400 border-b-2 border-amber-400" : "text-stone-400"}`}>Inspectores</button>
+          <button onClick={() => setTab("compra")} className={`px-4 py-3 text-sm ${tab === "compra" ? "text-amber-400 border-b-2 border-amber-400" : "text-stone-400"}`}>Tasación de compra</button>
           <button onClick={() => setTab("datos")} className={`px-4 py-3 text-sm ${tab === "datos" ? "text-amber-400 border-b-2 border-amber-400" : "text-stone-400"}`}>Datos</button>
         </div>
       </div>
@@ -3737,6 +3980,8 @@ function AdminDashboard({ vendors, setVendors, inspectors, setInspectors, onExit
             )}
           </>
         )}
+
+        {tab === "compra" && <TasacionCompra />}
 
         {tab === "datos" && (
           <div className="bg-white border border-stone-200 p-5">
