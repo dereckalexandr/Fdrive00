@@ -13,7 +13,7 @@ import { extractPdfText, parseCavFields } from "./cav-parser.js";
 import { buildInspeccionPdf, buildTasacionPdf, pdfFileName } from "./pdf-report.js";
 import { saveDraft, loadDraft, clearDraft, isMeaningful } from "./drafts.js";
 import { computeTasacionTotals, computeValorFinal } from "./tasacion-totals.js";
-import { normalizePatente, isPatenteValida, splitModeloVersion, parseKm, calcularFiltros, buildChileautosUrl, parseAvisosPegados, estimarCompra, parseDatosPatente, modeloParaChileautos, TRANSMISIONES, COMBUSTIBLES, MARGENES_BRUTOS, MARGEN_BRUTO_DEFECTO } from "./compra-calc.js";
+import { normalizePatente, isPatenteValida, splitModeloVersion, parseKm, calcularFiltros, buildChileautosUrl, parseAvisosPegados, estimarCompra, parseDatosPatente, modeloParaChileautos, detalleModeloChileautos, TRANSMISIONES, COMBUSTIBLES, MARGENES_BRUTOS, MARGEN_BRUTO_DEFECTO } from "./compra-calc.js";
 import { buildBookmarkletHref } from "./chileautos-bookmarklet.js";
 import { buildPatenteBookmarkletHref } from "./patente-bookmarklet.js";
 import { photoKey, photoPrefix, makePhotoId, compressImage, collectPhotoIds, diffIds, MAX_PHOTOS_PER_ITEM, MAX_PHOTOS_PER_TASACION } from "./photos.js";
@@ -3120,7 +3120,7 @@ function TasacionCompra() {
   const patenteOk = isPatenteValida(patente);
   const filtros = calcularFiltros({ anio, km: kmNum, margenAnio });
   const urlBusqueda = patenteOk ? buildChileautosUrl({ marca, modelo, anio, km: kmNum, margenAnio, transmision, combustible }) : null;
-  const modeloBusqueda = modeloParaChileautos(modelo);
+  const { busqueda: modeloBusqueda, omitido: modeloOmitido } = detalleModeloChileautos(modelo);
   const transLabel = (TRANSMISIONES.find((t) => t.value === transmision) || {}).label;
   const combLabel = (COMBUSTIBLES.find((c) => c.value === combustible) || {}).label;
 
@@ -3310,9 +3310,10 @@ function TasacionCompra() {
               {" "}{filtros.kmMin.toLocaleString("es-CL")}–{filtros.kmMax.toLocaleString("es-CL")} km
               {transLabel ? ` · transmisión ${transLabel.toLowerCase()}` : ""}{combLabel ? ` · combustible ${combLabel.toLowerCase()}` : ""} · orden: precio más bajo.
             </p>
-            {modeloBusqueda !== modelo.trim() && (
+            {(modeloOmitido || modeloBusqueda !== modelo.trim()) && (
               <p className="text-xs text-amber-800 mt-1">
-                En Chileautos se busca el modelo como «{modeloBusqueda}» (la primera palabra, o el nombre completo en los modelos de varias palabras de la lista de excepciones). Se omite «{modelo.trim().slice(modeloBusqueda.length).trim()}» (motor, versión u otras palabras).
+                En Chileautos se busca el modelo como «{modeloBusqueda}»
+                {modeloOmitido ? <>. Se omite «{modeloOmitido}» (motor, versión u otras palabras).</> : " (así se escribe allí)."}
               </p>
             )}
             <p className="text-xs text-stone-500 mt-1">

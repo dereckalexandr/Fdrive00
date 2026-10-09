@@ -45,7 +45,8 @@ test("buildChileautosUrl usa la sintaxis comprobada en el sitio", () => {
 
 test("buildChileautosUrl codifica espacios y devuelve null si falta un dato obligatorio", () => {
   assert.ok(buildChileautosUrl({ marca: "Toyota", modelo: "Land Cruiser Prado", anio: 2020, km: 50000, excepciones: ["Land Cruiser"] }).includes("Modelo.Land%20Cruiser."));
-  assert.ok(buildChileautosUrl({ marca: "Toyota", modelo: "Land Cruiser Prado", anio: 2020, km: 50000 }).includes("Modelo.Land."), "sin excepción: solo la primera palabra");
+  assert.ok(buildChileautosUrl({ marca: "Toyota", modelo: "Land Cruiser Prado", anio: 2020, km: 50000 }).includes("Modelo.Land%20Cruiser."), "Land Cruiser está en la lista de excepciones");
+  assert.ok(buildChileautosUrl({ marca: "Toyota", modelo: "Rav4 2.0", anio: 2020, km: 50000, excepciones: [] }).includes("Modelo.Rav4."), "sin excepciones: solo la primera palabra");
   assert.equal(buildChileautosUrl({ marca: "", modelo: "Yaris", anio: 2020, km: 50000 }), null);
   assert.equal(buildChileautosUrl({ marca: "Toyota", modelo: "Yaris", anio: 2020, km: 0 }), null);
   assert.equal(buildChileautosUrl({ marca: "Toyota", modelo: "Yaris", anio: "", km: 50000 }), null);
@@ -277,10 +278,10 @@ import { modeloParaChileautos, EXCEPCIONES_MODELO } from "../src/compra-calc.js"
 
 test("modeloParaChileautos usa solo la primera palabra (lo anterior al primer espacio)", () => {
   assert.equal(modeloParaChileautos("Yaris 1.5 GLI MT"), "Yaris");
-  assert.equal(modeloParaChileautos("YARIS SPORT 1.5"), "YARIS");
   assert.equal(modeloParaChileautos("Accent RB 1.4"), "Accent");
   assert.equal(modeloParaChileautos("Rio 1,4 EX"), "Rio");
-  assert.equal(modeloParaChileautos("  Yaris   Sport  "), "Yaris");
+  assert.equal(modeloParaChileautos("  Yaris   1.5  "), "Yaris");
+  assert.equal(modeloParaChileautos("Hilux 2.4 DX", []), "Hilux"); // sin ninguna excepción
 });
 
 test("modeloParaChileautos deja igual los modelos de una sola palabra, aunque tengan guion o números", () => {
@@ -294,9 +295,9 @@ test("modeloParaChileautos deja igual los modelos de una sola palabra, aunque te
 test("EXCEPCIONES: los modelos de varias palabras de la lista se buscan completos", () => {
   const ex = ["Land Cruiser", "Corolla Cross", "Santa Fe", "Mazda 3"];
   assert.equal(modeloParaChileautos("Land Cruiser Prado 4.0", ex), "Land Cruiser");
-  assert.equal(modeloParaChileautos("COROLLA CROSS 2.0 XEI", ex), "COROLLA CROSS");
+  assert.equal(modeloParaChileautos("COROLLA CROSS 2.0 XEI", ex), "Corolla Cross"); // escritura de la lista
   assert.equal(modeloParaChileautos("Mazda 3 2.0 R", ex), "Mazda 3");
-  assert.equal(modeloParaChileautos("Santa Fé GLS", ex), "Santa Fé"); // sin distinguir tildes
+  assert.equal(modeloParaChileautos("Santa Fé GLS", ex), "Santa Fe"); // sin distinguir tildes; sale como en la lista
   // lo que no está en la lista sigue usando solo la primera palabra
   assert.equal(modeloParaChileautos("Corolla 1.8 XLI", ex), "Corolla");
   assert.equal(modeloParaChileautos("Yaris Sport", ex), "Yaris");
@@ -313,14 +314,56 @@ test("EXCEPCIONES: gana la más larga si hay varias que coinciden", () => {
 import { esModeloConocidoDeUnaPalabra } from "../src/compra-calc.js";
 
 test("LISTA DEL ADMINISTRADOR: 'Corolla Cross' se busca completo y 'Corolla' solo", () => {
-  assert.equal(modeloParaChileautos("COROLLA CROSS 2.0 XEI"), "COROLLA CROSS");
+  assert.equal(modeloParaChileautos("COROLLA CROSS 2.0 XEI"), "Corolla Cross"); // sale con la escritura de la lista
   assert.equal(modeloParaChileautos("Corolla Cross"), "Corolla Cross");
   assert.equal(modeloParaChileautos("Corolla 1.8 XLI"), "Corolla");
 });
 
+test("LISTA DEL ADMINISTRADOR: Land Cruiser, Santa Fe, Grand Vitara, Yaris Sport y Yaris Cross se buscan completos", () => {
+  const casos = [["LAND CRUISER PRADO 4.0", "Land Cruiser"], ["Land Cruiser", "Land Cruiser"], ["Santa Fe GLS 2.4", "Santa Fe"], ["GRAND VITARA 1.6 GLX", "Grand Vitara"],
+    ["Yaris Sport 1.5", "Yaris Sport"], ["YARIS CROSS HYBRID", "Yaris Cross"], ["Yaris Cross", "Yaris Cross"]];
+  for (const [entrada, esperado] of casos) assert.equal(modeloParaChileautos(entrada), esperado, entrada);
+  // el modelo base sigue buscándose solo con su primera palabra
+  assert.equal(modeloParaChileautos("Yaris 1.5 GLI"), "Yaris");
+  assert.equal(modeloParaChileautos("Grand"), "Grand");
+  assert.equal(modeloParaChileautos("Land"), "Land");
+});
+
+test("LISTA DEL ADMINISTRADOR: las tildes del texto pegado no cambian la búsqueda (Chileautos sí distingue tildes)", () => {
+  assert.equal(modeloParaChileautos("Santa Fé GLS"), "Santa Fe");
+  assert.equal(modeloParaChileautos("SANTA FE"), "Santa Fe");
+});
+
+test("CONVERSIÓN: 'CX5', 'CX 5' y 'CX-5' se buscan como 'CX-5'", () => {
+  for (const e of ["CX5", "cx5", "CX 5", "cx 5", "CX-5", "CX5 2.0 R", "CX 5 2.0 R", "CX-5 2.0 R"]) assert.equal(modeloParaChileautos(e), "CX-5", e);
+  assert.equal(modeloParaChileautos("CX 30 GT"), "CX-30");
+  assert.equal(modeloParaChileautos("CX90"), "CX-90");
+  assert.equal(modeloParaChileautos("CX-3"), "CX-3");
+});
+
+test("CONVERSIÓN: fuera del rango CX-3 a CX-90 no se convierte", () => {
+  assert.equal(modeloParaChileautos("CX 91"), "CX");
+  assert.equal(modeloParaChileautos("CX-100"), "CX-100");
+  assert.equal(modeloParaChileautos("CX-2"), "CX-2");
+});
+
+test("CONVERSIÓN: las otras series también aceptan la forma separada o pegada (X1, A3, Q5, Tiggo 7)", () => {
+  assert.equal(modeloParaChileautos("X 1 SDRIVE18I"), "X1");
+  assert.equal(modeloParaChileautos("X7 XDRIVE40I"), "X7");
+  assert.equal(modeloParaChileautos("A 3 SPORTBACK"), "A3");
+  assert.equal(modeloParaChileautos("Q 5 TFSI"), "Q5");
+  assert.equal(modeloParaChileautos("Tiggo7"), "Tiggo 7");
+  assert.equal(modeloParaChileautos("TIGGO-7 PRO"), "Tiggo 7");
+  assert.equal(modeloParaChileautos("Tiggo 8 Pro Max"), "Tiggo 8");
+});
+
+test("CONVERSIÓN: no toca modelos con guion que no son series (X-Trail, T-Cross) ni fuera de rango (X8, A8, Q9)", () => {
+  for (const m of ["X-Trail", "T-Cross", "X8", "A8", "Q9"]) assert.equal(modeloParaChileautos(m), m, m);
+});
+
 test("LISTA DEL ADMINISTRADOR: 'Tiggo 2' a 'Tiggo 8' se buscan con su número; fuera de rango queda 'Tiggo'", () => {
   for (let n = 2; n <= 8; n++) assert.equal(modeloParaChileautos(`Tiggo ${n} Pro 1.5`), `Tiggo ${n}`, `Tiggo ${n}`);
-  assert.equal(modeloParaChileautos("TIGGO 7 PRO"), "TIGGO 7");
+  assert.equal(modeloParaChileautos("TIGGO 7 PRO"), "Tiggo 7");
   assert.equal(modeloParaChileautos("Tiggo 1"), "Tiggo");
   assert.equal(modeloParaChileautos("Tiggo 9"), "Tiggo");
   assert.equal(modeloParaChileautos("Tiggo Pro"), "Tiggo");
@@ -339,33 +382,41 @@ test("LISTA DEL ADMINISTRADOR: qué palabras se consideran modelos conocidos (ra
   for (const p of no) assert.ok(!esModeloConocidoDeUnaPalabra(p), `no debería ser conocido: ${p}`);
 });
 
-test("LISTA DEL ADMINISTRADOR: la lista está cargada tal como se entregó (8 reglas)", () => {
-  assert.equal(EXCEPCIONES_MODELO.length, 8);
-  assert.ok(EXCEPCIONES_MODELO.includes("Corolla Cross"));
+test("LISTA DEL ADMINISTRADOR: la lista cargada tiene las 13 reglas (6 frases y 7 series)", () => {
+  assert.equal(EXCEPCIONES_MODELO.length, 13);
+  for (const f of ["Corolla Cross", "Land Cruiser", "Santa Fe", "Grand Vitara", "Yaris Sport", "Yaris Cross"]) assert.ok(EXCEPCIONES_MODELO.includes(f), f);
+  assert.equal(EXCEPCIONES_MODELO.filter((e) => typeof e !== "string").length, 7);
 });
 
-test("LISTA DEL ADMINISTRADOR: sigue sin haber excepción para Land Cruiser, Santa Fe, Grand Vitara o Mazda 3", () => {
-  assert.equal(modeloParaChileautos("Land Cruiser Prado"), "Land");
-  assert.equal(modeloParaChileautos("Santa Fe"), "Santa");
-  assert.equal(modeloParaChileautos("Grand Vitara"), "Grand");
+test("sigue sin haber excepción para modelos que no están en la lista (Mazda 3 como texto, Grand i10, Santa Cruz)", () => {
+  assert.equal(modeloParaChileautos("Grand i10 1.2"), "Grand");
+  assert.equal(modeloParaChileautos("Santa Cruz"), "Santa");
+  assert.equal(modeloParaChileautos("Land Rover"), "Land");
 });
 
 test("la dirección de búsqueda usa 'Tiggo 7' y 'Corolla Cross' completos con la lista cargada", () => {
   const u1 = decodeURIComponent(buildChileautosUrl({ marca: "Chery", modelo: "TIGGO 7 PRO", anio: 2022, km: 30000 }));
   const u2 = decodeURIComponent(buildChileautosUrl({ marca: "Toyota", modelo: "Corolla Cross 2.0", anio: 2022, km: 30000 }));
-  assert.ok(u1.includes("Modelo.TIGGO 7.)"), u1);
+  assert.ok(u1.includes("Modelo.Tiggo 7.)"), u1);
   assert.ok(u2.includes("Modelo.Corolla Cross.)"), u2);
 });
 
 test("la dirección de búsqueda usa la primera palabra del modelo y nunca lleva puntos del motor (rompen la sintaxis de Chileautos)", () => {
   const esperado = buildChileautosUrl({ marca: "Toyota", modelo: "Yaris", anio: 2020, km: 60000 });
-  for (const m of ["Yaris 1.5", "Yaris 1.5 GLI", "YARIS 1.5 GLI MT", "Yaris 1,5", "Yaris Sport 1.5 GLI"]) {
+  for (const m of ["Yaris 1.5", "Yaris 1.5 GLI", "YARIS 1.5 GLI MT", "Yaris 1,5"]) {
     // Chileautos no distingue mayúsculas de minúsculas (comprobado en el sitio)
     assert.equal(buildChileautosUrl({ marca: "Toyota", modelo: m, anio: 2020, km: 60000 }).toLowerCase(), esperado.toLowerCase(), m);
   }
   const modeloEnUrl = decodeURIComponent(buildChileautosUrl({ marca: "Toyota", modelo: "Yaris Sport 1.5 GLI", anio: 2020, km: 60000 })).match(/Modelo\.([^)]*)\.\)/)[1];
-  assert.equal(modeloEnUrl, "Yaris");
+  assert.equal(modeloEnUrl, "Yaris Sport"); // excepción de la lista
   assert.ok(!/\d\.\d/.test(modeloEnUrl));
+});
+
+test("la dirección de búsqueda usa los nombres convertidos (CX-5) y los de la lista (Santa Fe) con su codificación", () => {
+  const cx = decodeURIComponent(buildChileautosUrl({ marca: "Mazda", modelo: "CX5 2.0 R", anio: 2021, km: 40000 }));
+  const sf = buildChileautosUrl({ marca: "Hyundai", modelo: "Santa Fé GLS", anio: 2019, km: 80000 });
+  assert.ok(cx.includes("Modelo.CX-5.)"), cx);
+  assert.ok(sf.includes("Modelo.Santa%20Fe.)"), sf);
 });
 
 test("con una excepción cargada, la dirección usa el modelo completo de la lista", () => {

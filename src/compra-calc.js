@@ -77,11 +77,18 @@ export function calcularFiltros({ anio, km, margenAnio = 1, pctKm = MARGEN_KM })
  *     o en dos palabras si el prefijo termina en espacio ("Tiggo " 2..8 → Tiggo 2 … Tiggo 8);
  *   - { numeros: [desde, hasta] }: modelos que son solo un número (208, 3008…);
  *   - { letras: n }: modelos de n letras (ASX, RAV…).
- * Las de UNA sola palabra (CX-5, X1, 208, A3, ZS…) ya se conservan por la regla de la primera palabra; se listan igual
- * para dejar documentado qué modelos se consideran válidos. Las que realmente cambian la búsqueda son las de varias palabras.
+ * Las series con prefijo se NORMALIZAN al formato de la lista: "CX5", "cx 5" y "CX-5" se buscan como "CX-5";
+ * "X 1" como "X1"; "A 3" como "A3"; "Tiggo7" y "Tiggo-7" como "Tiggo 7".
+ * Las de UNA sola palabra (X1, 208, A3, ZS…) ya se conservan por la regla de la primera palabra; se listan igual
+ * para dejar documentado qué modelos se consideran válidos.
  */
 export const EXCEPCIONES_MODELO = [
   "Corolla Cross",
+  "Land Cruiser",
+  "Santa Fe",
+  "Grand Vitara",
+  "Yaris Sport",
+  "Yaris Cross",
   { prefijo: "CX-", desde: 3, hasta: 90 },
   { prefijo: "X", desde: 1, hasta: 7 },
   { numeros: [1, 9999] },
@@ -100,28 +107,53 @@ const sinTildesMinus = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/
  * filtros. Por eso se usa solo la primera palabra (lo anterior al primer espacio), salvo las EXCEPCIONES_MODELO.
  */
 export function modeloParaChileautos(modelo, excepciones = EXCEPCIONES_MODELO) {
+  return resolverModelo(modelo, excepciones).busqueda;
+}
+
+/**
+ * Lo mismo que modeloParaChileautos, pero además indica qué parte del texto se omitió
+ * (el motor, la versión u otras palabras) para poder avisárselo al usuario.
+ */
+export function detalleModeloChileautos(modelo, excepciones = EXCEPCIONES_MODELO) {
+  const r = resolverModelo(modelo, excepciones);
+  return { busqueda: r.busqueda, omitido: r.palabras.slice(r.consumo).join(" ") };
+}
+
+function resolverModelo(modelo, excepciones) {
   const palabras = String(modelo || "").trim().split(/\s+/).filter(Boolean);
-  if (palabras.length <= 1) return palabras.join(" ");
+  if (palabras.length === 0) return { busqueda: "", consumo: 0, palabras };
   const norm = palabras.map(sinTildesMinus);
   const lista = Array.isArray(excepciones) ? excepciones : [];
   const enRango = (n, desde, hasta) => Number.isInteger(n) && n >= desde && n <= hasta;
 
-  // 1) Excepciones de VARIAS palabras: frases de texto y series escritas en dos palabras ("Tiggo 2").
-  //    Gana la más larga que coincida con el comienzo del modelo, palabra por palabra.
+  // Cada coincidencia indica cuántas palabras del modelo consume y cómo se escribe en la búsqueda. Gana la que consume más.
   const candidatas = [];
   for (const e of lista) {
     if (typeof e === "string") {
       const f = e.trim().split(/\s+/).filter(Boolean);
-      if (f.length > 1 && f.length <= palabras.length && f.every((w, i) => sinTildesMinus(w) === norm[i])) candidatas.push(f.length);
-    } else if (e && typeof e.prefijo === "string" && /\s$/.test(e.prefijo)) {
-      const base = sinTildesMinus(e.prefijo).trim();
-      if (norm[0] === base && /^\d+$/.test(norm[1]) && enRango(parseInt(norm[1], 10), e.desde, e.hasta)) candidatas.push(2);
+      if (f.length > 1 && f.length <= palabras.length && f.every((w, i) => sinTildesMinus(w) === norm[i])) {
+        candidatas.push({ consumo: f.length, salida: f.join(" ") }); // se usa la escritura de la lista (Chileautos distingue tildes)
+      }
+    } else if (e && typeof e.prefijo === "string") {
+      // Serie con número: la base es el prefijo sin guion ni espacio final ("CX", "X", "A", "Q", "Tiggo").
+      const base = sinTildesMinus(e.prefijo).replace(/[\s-]+$/, "");
+      const escrita = (n) => e.prefijo + n; // formato de la lista: "CX-5", "X1", "Tiggo 7"
+      // a) una sola palabra, con o sin guion: "CX5", "CX-5", "Tiggo7", "Tiggo-7"
+      const pegado = norm[0].match(new RegExp("^" + base + "-?(\\d+)$"));
+      if (pegado && enRango(parseInt(pegado[1], 10), e.desde, e.hasta)) candidatas.push({ consumo: 1, salida: escrita(parseInt(pegado[1], 10)) });
+      // b) dos palabras: "CX 5", "X 1", "Tiggo 7"
+      if (palabras.length > 1 && norm[0] === base && /^\d+$/.test(norm[1]) && enRango(parseInt(norm[1], 10), e.desde, e.hasta)) {
+        candidatas.push({ consumo: 2, salida: escrita(parseInt(norm[1], 10)) });
+      }
     }
   }
-  if (candidatas.length) return palabras.slice(0, Math.max(...candidatas)).join(" ");
+  if (candidatas.length) {
+    const mejor = candidatas.sort((a, b) => b.consumo - a.consumo)[0];
+    return { busqueda: mejor.salida, consumo: mejor.consumo, palabras };
+  }
 
-  // 2) Excepciones de UNA palabra (CX-5, X1, 208, ASX…): se conserva esa palabra, igual que la regla general.
-  return palabras[0];
+  // Sin excepción: solo la primera palabra (los modelos de una palabra, como "Yaris", "208" o "ASX", quedan igual).
+  return { busqueda: palabras[0], consumo: 1, palabras };
 }
 
 /**
