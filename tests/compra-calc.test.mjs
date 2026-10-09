@@ -309,8 +309,52 @@ test("EXCEPCIONES: gana la más larga si hay varias que coinciden", () => {
   assert.equal(modeloParaChileautos("Land Cruiser Prado 4.0", ["Land Cruiser", "Land Cruiser Prado"]), "Land Cruiser Prado");
 });
 
-test("EXCEPCIONES: la lista que usa la app hoy está vacía (se completa con las del administrador)", () => {
-  assert.deepEqual(EXCEPCIONES_MODELO, []);
+/* ---------- la lista de excepciones que entregó el administrador ---------- */
+import { esModeloConocidoDeUnaPalabra } from "../src/compra-calc.js";
+
+test("LISTA DEL ADMINISTRADOR: 'Corolla Cross' se busca completo y 'Corolla' solo", () => {
+  assert.equal(modeloParaChileautos("COROLLA CROSS 2.0 XEI"), "COROLLA CROSS");
+  assert.equal(modeloParaChileautos("Corolla Cross"), "Corolla Cross");
+  assert.equal(modeloParaChileautos("Corolla 1.8 XLI"), "Corolla");
+});
+
+test("LISTA DEL ADMINISTRADOR: 'Tiggo 2' a 'Tiggo 8' se buscan con su número; fuera de rango queda 'Tiggo'", () => {
+  for (let n = 2; n <= 8; n++) assert.equal(modeloParaChileautos(`Tiggo ${n} Pro 1.5`), `Tiggo ${n}`, `Tiggo ${n}`);
+  assert.equal(modeloParaChileautos("TIGGO 7 PRO"), "TIGGO 7");
+  assert.equal(modeloParaChileautos("Tiggo 1"), "Tiggo");
+  assert.equal(modeloParaChileautos("Tiggo 9"), "Tiggo");
+  assert.equal(modeloParaChileautos("Tiggo Pro"), "Tiggo");
+});
+
+test("LISTA DEL ADMINISTRADOR: los modelos de una palabra (CX, X, A, Q, números y 3 letras) se conservan con su versión descartada", () => {
+  const casos = [["CX-5 2.0 R", "CX-5"], ["CX-30 GT", "CX-30"], ["CX-90 PHEV", "CX-90"], ["X1 SDRIVE20I", "X1"], ["X7 XDRIVE40I", "X7"],
+    ["208 ALLURE 1.2", "208"], ["3008 GT", "3008"], ["A1 SPORTBACK", "A1"], ["A7 TFSI", "A7"], ["Q3 TFSI", "Q3"], ["Q8 55", "Q8"], ["ASX 2.0", "ASX"], ["ZS EV", "ZS"]];
+  for (const [entrada, esperado] of casos) assert.equal(modeloParaChileautos(entrada), esperado, entrada);
+});
+
+test("LISTA DEL ADMINISTRADOR: qué palabras se consideran modelos conocidos (rangos exactos)", () => {
+  const si = ["CX-3", "CX-5", "CX-30", "CX-90", "x1", "X7", "1", "208", "9999", "ASX", "rav", "A1", "a7", "Q1", "Q8"];
+  const no = ["CX-2", "CX-91", "CX-100", "X8", "X0", "0", "10000", "AB", "ABCD", "A8", "Q9", "Yaris", "Tiggo"];
+  for (const p of si) assert.ok(esModeloConocidoDeUnaPalabra(p), `debería ser conocido: ${p}`);
+  for (const p of no) assert.ok(!esModeloConocidoDeUnaPalabra(p), `no debería ser conocido: ${p}`);
+});
+
+test("LISTA DEL ADMINISTRADOR: la lista está cargada tal como se entregó (8 reglas)", () => {
+  assert.equal(EXCEPCIONES_MODELO.length, 8);
+  assert.ok(EXCEPCIONES_MODELO.includes("Corolla Cross"));
+});
+
+test("LISTA DEL ADMINISTRADOR: sigue sin haber excepción para Land Cruiser, Santa Fe, Grand Vitara o Mazda 3", () => {
+  assert.equal(modeloParaChileautos("Land Cruiser Prado"), "Land");
+  assert.equal(modeloParaChileautos("Santa Fe"), "Santa");
+  assert.equal(modeloParaChileautos("Grand Vitara"), "Grand");
+});
+
+test("la dirección de búsqueda usa 'Tiggo 7' y 'Corolla Cross' completos con la lista cargada", () => {
+  const u1 = decodeURIComponent(buildChileautosUrl({ marca: "Chery", modelo: "TIGGO 7 PRO", anio: 2022, km: 30000 }));
+  const u2 = decodeURIComponent(buildChileautosUrl({ marca: "Toyota", modelo: "Corolla Cross 2.0", anio: 2022, km: 30000 }));
+  assert.ok(u1.includes("Modelo.TIGGO 7.)"), u1);
+  assert.ok(u2.includes("Modelo.Corolla Cross.)"), u2);
 });
 
 test("la dirección de búsqueda usa la primera palabra del modelo y nunca lleva puntos del motor (rompen la sintaxis de Chileautos)", () => {

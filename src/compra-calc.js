@@ -70,9 +70,26 @@ export function calcularFiltros({ anio, km, margenAnio = 1, pctKm = MARGEN_KM })
  * EXCEPCIONES a la regla "solo la primera palabra del modelo": modelos cuyo nombre en Chileautos tiene VARIAS
  * palabras (ej. "Land Cruiser", "Corolla Cross"). Si el modelo empieza con alguna de estas frases (sin distinguir
  * mayúsculas ni tildes), se busca con la frase completa en vez de con la primera palabra.
- * Se completa con la lista que entregue el administrador; hoy está vacía a propósito.
+ *
+ * Cada excepción puede ser:
+ *   - un texto: una frase de varias palabras ("Corolla Cross");
+ *   - { prefijo, desde, hasta }: una serie con número, escrita pegada ("CX-" 3..90 → CX-3 … CX-90, "A" 1..7 → A1 … A7)
+ *     o en dos palabras si el prefijo termina en espacio ("Tiggo " 2..8 → Tiggo 2 … Tiggo 8);
+ *   - { numeros: [desde, hasta] }: modelos que son solo un número (208, 3008…);
+ *   - { letras: n }: modelos de n letras (ASX, RAV…).
+ * Las de UNA sola palabra (CX-5, X1, 208, A3, ZS…) ya se conservan por la regla de la primera palabra; se listan igual
+ * para dejar documentado qué modelos se consideran válidos. Las que realmente cambian la búsqueda son las de varias palabras.
  */
-export const EXCEPCIONES_MODELO = [];
+export const EXCEPCIONES_MODELO = [
+  "Corolla Cross",
+  { prefijo: "CX-", desde: 3, hasta: 90 },
+  { prefijo: "X", desde: 1, hasta: 7 },
+  { numeros: [1, 9999] },
+  { letras: 3 },
+  { prefijo: "A", desde: 1, hasta: 7 },
+  { prefijo: "Q", desde: 1, hasta: 8 },
+  { prefijo: "Tiggo ", desde: 2, hasta: 8 },
+];
 
 const sinTildesMinus = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 
@@ -86,15 +103,45 @@ export function modeloParaChileautos(modelo, excepciones = EXCEPCIONES_MODELO) {
   const palabras = String(modelo || "").trim().split(/\s+/).filter(Boolean);
   if (palabras.length <= 1) return palabras.join(" ");
   const norm = palabras.map(sinTildesMinus);
-  // La excepción más larga que coincida con el comienzo del modelo, palabra por palabra.
-  const frases = (excepciones || [])
-    .map((e) => String(e || "").trim().split(/\s+/).filter(Boolean))
-    .filter((f) => f.length > 1)
-    .sort((a, b) => b.length - a.length);
-  for (const f of frases) {
-    if (f.length <= palabras.length && f.every((w, i) => sinTildesMinus(w) === norm[i])) return palabras.slice(0, f.length).join(" ");
+  const lista = Array.isArray(excepciones) ? excepciones : [];
+  const enRango = (n, desde, hasta) => Number.isInteger(n) && n >= desde && n <= hasta;
+
+  // 1) Excepciones de VARIAS palabras: frases de texto y series escritas en dos palabras ("Tiggo 2").
+  //    Gana la más larga que coincida con el comienzo del modelo, palabra por palabra.
+  const candidatas = [];
+  for (const e of lista) {
+    if (typeof e === "string") {
+      const f = e.trim().split(/\s+/).filter(Boolean);
+      if (f.length > 1 && f.length <= palabras.length && f.every((w, i) => sinTildesMinus(w) === norm[i])) candidatas.push(f.length);
+    } else if (e && typeof e.prefijo === "string" && /\s$/.test(e.prefijo)) {
+      const base = sinTildesMinus(e.prefijo).trim();
+      if (norm[0] === base && /^\d+$/.test(norm[1]) && enRango(parseInt(norm[1], 10), e.desde, e.hasta)) candidatas.push(2);
+    }
   }
+  if (candidatas.length) return palabras.slice(0, Math.max(...candidatas)).join(" ");
+
+  // 2) Excepciones de UNA palabra (CX-5, X1, 208, ASX…): se conserva esa palabra, igual que la regla general.
   return palabras[0];
+}
+
+/**
+ * ¿La primera palabra del modelo es un modelo válido de una sola palabra según las excepciones de serie, número o letras?
+ * Solo sirve para documentar y probar la lista; el resultado de modeloParaChileautos no cambia por esto.
+ */
+export function esModeloConocidoDeUnaPalabra(palabra, excepciones = EXCEPCIONES_MODELO) {
+  const p = sinTildesMinus(palabra);
+  return (excepciones || []).some((e) => {
+    if (!e || typeof e === "string") return false;
+    if (Array.isArray(e.numeros)) return /^\d+$/.test(p) && parseInt(p, 10) >= e.numeros[0] && parseInt(p, 10) <= e.numeros[1];
+    if (Number.isInteger(e.letras)) return new RegExp("^[a-z]{" + e.letras + "}$").test(p);
+    if (typeof e.prefijo === "string" && !/\s$/.test(e.prefijo)) {
+      const base = sinTildesMinus(e.prefijo);
+      if (!p.startsWith(base)) return false;
+      const resto = p.slice(base.length);
+      return /^\d+$/.test(resto) && parseInt(resto, 10) >= e.desde && parseInt(resto, 10) <= e.hasta;
+    }
+    return false;
+  });
 }
 
 /**
