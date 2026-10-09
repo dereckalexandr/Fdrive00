@@ -543,3 +543,58 @@ test("la tabla de marcas tiene la regla de Mercedes-Benz", () => {
   assert.equal(MARCAS_CHILEAUTOS.length, 1);
   assert.equal(MARCAS_CHILEAUTOS[0].nombre, "Mercedes-Benz");
 });
+
+/* ---------- palabras "ALL NEW" y "NEW" ---------- */
+import { OMITIR_EN_MODELO } from "../src/compra-calc.js";
+
+test("OMITIR: 'ALL NEW' y 'NEW' al comienzo del modelo no se usan en la búsqueda", () => {
+  const casos = [["ALL NEW RIO 1.4", "RIO"], ["NEW YARIS", "YARIS"], ["All New Sportage", "Sportage"], ["new accent", "accent"], ["all  new   rio", "rio"]];
+  for (const [entrada, esperado] of casos) assert.equal(modeloParaChileautos(entrada), esperado, entrada);
+});
+
+test("OMITIR: también se omiten en cualquier otra posición y con guion ('ALL-NEW')", () => {
+  assert.equal(modeloParaChileautos("ALL-NEW SPORTAGE"), "SPORTAGE");
+  assert.equal(modeloParaChileautos("Sportage NEW"), "Sportage");
+  assert.equal(modeloParaChileautos("YARIS ALL NEW 1.5"), "YARIS");
+  assert.equal(modeloParaChileautos("ALL NEW NEW RIO"), "RIO");
+});
+
+test("OMITIR: solo palabras completas ('NEWMAN', 'ALL', 'ALLNEW', 'Renegade' no se tocan)", () => {
+  assert.equal(modeloParaChileautos("NEWMAN 2.0"), "NEWMAN");
+  assert.equal(modeloParaChileautos("ALL"), "ALL");
+  assert.equal(modeloParaChileautos("ALLNEW RIO"), "ALLNEW");
+  assert.equal(modeloParaChileautos("Renegade"), "Renegade");
+  assert.equal(modeloParaChileautos("Grand Vitara"), "Grand Vitara");
+});
+
+test("OMITIR: se aplica ANTES de las excepciones y de la separación (todo se combina)", () => {
+  assert.equal(modeloParaChileautos("ALL NEW COROLLA CROSS 2.0"), "Corolla Cross");
+  assert.equal(modeloParaChileautos("NEW LAND CRUISER PRADO"), "Land Cruiser");
+  assert.equal(modeloParaChileautos("NEW GLA200"), "GLA 200");
+  assert.equal(modeloParaChileautos("ALL NEW CX5 2.0"), "CX-5");
+  assert.equal(modeloParaChileautos("ALL NEW TIGGO7"), "Tiggo 7");
+  assert.equal(modeloParaChileautos("NEW NP300"), "NP300");
+});
+
+test("OMITIR: el aviso de la pantalla incluye lo omitido ('ALL NEW' y la versión)", () => {
+  assert.deepEqual(detalleModeloChileautos("ALL NEW RIO 1.4"), { busqueda: "RIO", omitido: "ALL NEW 1.4" });
+  assert.deepEqual(detalleModeloChileautos("NEW YARIS"), { busqueda: "YARIS", omitido: "NEW" });
+  assert.deepEqual(detalleModeloChileautos("RIO 1.4"), { busqueda: "RIO", omitido: "1.4" });
+});
+
+test("OMITIR: si el modelo fuera solo 'NEW', no queda vacío", () => {
+  assert.equal(modeloParaChileautos("NEW"), "NEW");
+  assert.notEqual(buildChileautosUrl({ marca: "Kia", modelo: "NEW", anio: 2020, km: 50000 }), null);
+});
+
+test("OMITIR: la dirección de búsqueda no lleva 'ALL NEW' ni 'NEW'", () => {
+  const u = decodeURIComponent(buildChileautosUrl({ marca: "KIA", modelo: "ALL NEW RIO 1.4", anio: 2020, km: 50000 }));
+  assert.ok(u.includes("Modelo.RIO.)"), u);
+  assert.ok(!/new/i.test(u), u);
+});
+
+test("OMITIR: la lista es configurable y se puede dejar vacía", () => {
+  assert.deepEqual(OMITIR_EN_MODELO, ["All New", "New"]);
+  assert.equal(modeloParaChileautos("ALL NEW RIO", undefined, []), "ALL");
+  assert.equal(modeloParaChileautos("NUEVO RIO", undefined, ["Nuevo"]), "RIO");
+});

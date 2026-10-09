@@ -126,17 +126,17 @@ const sinTildesMinus = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/
  * conoce el modelo ("Yaris"). Además el punto es un separador de su sintaxis: con "1.5" en el modelo ignora TODOS los
  * filtros. Por eso se usa solo la primera palabra (lo anterior al primer espacio), salvo las EXCEPCIONES_MODELO.
  */
-export function modeloParaChileautos(modelo, excepciones = EXCEPCIONES_MODELO) {
-  return resolverModelo(modelo, excepciones).busqueda;
+export function modeloParaChileautos(modelo, excepciones = EXCEPCIONES_MODELO, omitir = OMITIR_EN_MODELO) {
+  return resolverModelo(modelo, excepciones, omitir).busqueda;
 }
 
 /**
  * Lo mismo que modeloParaChileautos, pero además indica qué parte del texto se omitió
  * (el motor, la versión u otras palabras) para poder avisárselo al usuario.
  */
-export function detalleModeloChileautos(modelo, excepciones = EXCEPCIONES_MODELO) {
-  const r = resolverModelo(modelo, excepciones);
-  return { busqueda: r.busqueda, omitido: r.palabras.slice(r.consumo).join(" ") };
+export function detalleModeloChileautos(modelo, excepciones = EXCEPCIONES_MODELO, omitir = OMITIR_EN_MODELO) {
+  const r = resolverModelo(modelo, excepciones, omitir);
+  return { busqueda: r.busqueda, omitido: [...r.quitadas, ...r.palabras.slice(r.consumo)].join(" ") };
 }
 
 // ¿La palabra (ya sin tildes ni mayúsculas) tiene la forma que pide el patrón? { letras: n } | { numeros: [desde, hasta] } | { texto }
@@ -165,25 +165,54 @@ function separarLetrasYNumeros(palabras) {
   return partes.length > 1 ? [...partes, ...palabras.slice(1)] : null;
 }
 
-function resolverModelo(modelo, excepciones) {
-  const palabras = String(modelo || "").trim().split(/\s+/).filter(Boolean);
-  if (palabras.length === 0) return { busqueda: "", consumo: 0, palabras };
+/**
+ * Palabras que se omiten en el modelo antes de buscar en Chileautos: los datos de patentechile las agregan como parte del
+ * nombre comercial ("ALL NEW RIO", "NEW YARIS") pero Chileautos no las usa. Se comparan sin distinguir mayúsculas ni tildes;
+ * "All New" también cubre "ALL-NEW". Se pueden agregar más.
+ */
+export const OMITIR_EN_MODELO = ["All New", "New"];
+
+// Quita del modelo (en cualquier posición) las frases a omitir. Si no quedara nada, se deja el modelo como estaba.
+function quitarPalabrasOmitidas(palabras, frases) {
+  const lista = (Array.isArray(frases) ? frases : [])
+    .map((f) => String(f || "").trim().split(/\s+/).filter(Boolean).map(sinTildesMinus))
+    .filter((f) => f.length > 0)
+    .sort((a, b) => b.length - a.length);
+  if (lista.length === 0) return { palabras, quitadas: [] };
+  const norm = palabras.map(sinTildesMinus);
+  const quedan = [];
+  const quitadas = [];
+  for (let i = 0; i < palabras.length; ) {
+    let consumo = 0;
+    for (const f of lista) {
+      if (f.length > 1 && i + f.length <= palabras.length && f.every((w, k) => norm[i + k] === w)) { consumo = f.length; break; }
+      if (norm[i] === f.join("-")) { consumo = 1; break; }
+    }
+    if (consumo) { quitadas.push(...palabras.slice(i, i + consumo)); i += consumo; } else { quedan.push(palabras[i]); i += 1; }
+  }
+  return quedan.length ? { palabras: quedan, quitadas } : { palabras, quitadas: [] };
+}
+
+function resolverModelo(modelo, excepciones, omitir = OMITIR_EN_MODELO) {
+  const originales = String(modelo || "").trim().split(/\s+/).filter(Boolean);
+  if (originales.length === 0) return { busqueda: "", consumo: 0, palabras: originales, quitadas: [] };
+  const { palabras, quitadas } = quitarPalabrasOmitidas(originales, omitir);
   const lista = Array.isArray(excepciones) ? excepciones : [];
 
   // 1) Tal como viene.
   const directa = evaluarExcepciones(palabras, lista);
-  if (directa) return { busqueda: directa.salida, consumo: directa.consumo, palabras };
+  if (directa) return { busqueda: directa.salida, consumo: directa.consumo, palabras, quitadas };
 
   // 2) Pegado ("GLA200"): se separan las letras de los números y se vuelve a probar. Solo se usa si así calza con una
   //    excepción; si no, se deja como viene, para no romper modelos de una palabra como NP300, RAV4, C3 o i10.
   const separadas = separarLetrasYNumeros(palabras);
   if (separadas) {
     const r = evaluarExcepciones(separadas, lista);
-    if (r) return { busqueda: r.salida, consumo: r.consumo, palabras: separadas };
+    if (r) return { busqueda: r.salida, consumo: r.consumo, palabras: separadas, quitadas };
   }
 
   // 3) Sin excepción: solo la primera palabra (los modelos de una palabra, como "Yaris", "208" o "ASX", quedan igual).
-  return { busqueda: palabras[0], consumo: 1, palabras };
+  return { busqueda: palabras[0], consumo: 1, palabras, quitadas };
 }
 
 // Mejor coincidencia de las excepciones con el comienzo de las palabras: { consumo, salida } o null. Gana la que consume más.
@@ -245,9 +274,9 @@ export function esModeloConocidoDeUnaPalabra(palabra, excepciones = EXCEPCIONES_
  * Dirección de búsqueda en Chileautos, ordenada por precio más bajo.
  * Devuelve null si falta algún dato obligatorio.
  */
-export function buildChileautosUrl({ marca, modelo, anio, km, margenAnio = 1, pctKm = MARGEN_KM, transmision = "", combustible = "", excepciones = EXCEPCIONES_MODELO }) {
+export function buildChileautosUrl({ marca, modelo, anio, km, margenAnio = 1, pctKm = MARGEN_KM, transmision = "", combustible = "", excepciones = EXCEPCIONES_MODELO, omitir = OMITIR_EN_MODELO }) {
   const ma = marcaParaChileautos(marca);
-  const mo = modeloParaChileautos(modelo, excepciones);
+  const mo = modeloParaChileautos(modelo, excepciones, omitir);
   if (!ma || !mo || !toPositiveInt(anio) || !toPositiveInt(km)) return null;
   const f = calcularFiltros({ anio, km, margenAnio, pctKm });
   const enc = (s) => encodeURIComponent(s).replace(/\./g, "%2E");
