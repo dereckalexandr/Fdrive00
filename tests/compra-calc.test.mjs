@@ -428,3 +428,40 @@ test("con una excepción cargada, la dirección usa el modelo completo de la lis
 test("si el modelo empieza con un motor ('1.5 GLI'), igual se obtiene una dirección (no queda vacío)", () => {
   assert.notEqual(buildChileautosUrl({ marca: "Toyota", modelo: "1.5 GLI", anio: 2020, km: 60000 }), null);
 });
+
+/* ---------- la marca que se envía a Chileautos ---------- */
+import { marcaParaChileautos, MARCAS_CHILEAUTOS } from "../src/compra-calc.js";
+
+test("Mercedes Benz se busca como 'Mercedes-Benz' (con guion), con cualquier grafía de origen", () => {
+  for (const m of ["MERCEDES BENZ", "Mercedes Benz", "mercedes benz", "mercedes  benz", "MERCEDES-BENZ", "Mercedes-Benz", "mercedez benz", "MERCEDEZ-BENZ", "Mercedez Benz", "mercedesbenz", " Mercedes Benz "]) {
+    assert.equal(marcaParaChileautos(m), "Mercedes-Benz", JSON.stringify(m));
+  }
+});
+
+test("las demás marcas quedan como vienen (solo se recortan espacios sobrantes)", () => {
+  assert.equal(marcaParaChileautos("Toyota"), "Toyota");
+  assert.equal(marcaParaChileautos("  Kia "), "Kia");
+  assert.equal(marcaParaChileautos("Great  Wall"), "Great Wall");
+  assert.equal(marcaParaChileautos("BMW"), "BMW");
+  assert.equal(marcaParaChileautos("Mercedes"), "Mercedes");
+  assert.equal(marcaParaChileautos("Mercedes-Benz Trucks"), "Mercedes-Benz Trucks");
+  assert.equal(marcaParaChileautos(""), "");
+  assert.equal(marcaParaChileautos(null), "");
+});
+
+test("la dirección de búsqueda lleva 'Mercedes-Benz' con guion aunque la marca venga con espacio", () => {
+  for (const marca of ["MERCEDES BENZ", "Mercedez Benz", "Mercedes-Benz"]) {
+    const url = buildChileautosUrl({ marca, modelo: "Clase", anio: 2020, km: 50000 });
+    assert.ok(decodeURIComponent(url).includes("Marca.Mercedes-Benz._."), marca);
+    assert.ok(!/Mercedes%20Benz|Mercedez/i.test(url), marca);
+  }
+});
+
+test("una marca vacía sigue sin generar dirección", () => {
+  assert.equal(buildChileautosUrl({ marca: "  ", modelo: "Yaris", anio: 2020, km: 50000 }), null);
+});
+
+test("la tabla de marcas tiene la regla de Mercedes-Benz", () => {
+  assert.equal(MARCAS_CHILEAUTOS.length, 1);
+  assert.equal(MARCAS_CHILEAUTOS[0].nombre, "Mercedes-Benz");
+});

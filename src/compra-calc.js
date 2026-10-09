@@ -67,6 +67,23 @@ export function calcularFiltros({ anio, km, margenAnio = 1, pctKm = MARGEN_KM })
 }
 
 /**
+ * MARCAS que se escriben distinto en los datos de origen y en Chileautos. Cada regla: si la marca (sin tildes, en
+ * minúsculas) cumple `patron`, se busca con `nombre`. Chileautos escribe "Mercedes-Benz" con guion; los datos de patente
+ * suelen traer "MERCEDES BENZ" (con espacio) y a veces "Mercedez" con z.
+ */
+export const MARCAS_CHILEAUTOS = [
+  { patron: /^mercede[sz][\s-]*benz$/, nombre: "Mercedes-Benz" },
+];
+
+/** Nombre de la marca tal como se busca en Chileautos (sin espacios sobrantes; con los ajustes de MARCAS_CHILEAUTOS). */
+export function marcaParaChileautos(marca) {
+  const limpia = String(marca || "").trim().replace(/\s+/g, " ");
+  const base = limpia.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  const regla = MARCAS_CHILEAUTOS.find((r) => r.patron.test(base));
+  return regla ? regla.nombre : limpia;
+}
+
+/**
  * EXCEPCIONES a la regla "solo la primera palabra del modelo": modelos cuyo nombre en Chileautos tiene VARIAS
  * palabras (ej. "Land Cruiser", "Corolla Cross"). Si el modelo empieza con alguna de estas frases (sin distinguir
  * mayúsculas ni tildes), se busca con la frase completa en vez de con la primera palabra.
@@ -181,7 +198,7 @@ export function esModeloConocidoDeUnaPalabra(palabra, excepciones = EXCEPCIONES_
  * Devuelve null si falta algún dato obligatorio.
  */
 export function buildChileautosUrl({ marca, modelo, anio, km, margenAnio = 1, pctKm = MARGEN_KM, transmision = "", combustible = "", excepciones = EXCEPCIONES_MODELO }) {
-  const ma = String(marca || "").trim();
+  const ma = marcaParaChileautos(marca);
   const mo = modeloParaChileautos(modelo, excepciones);
   if (!ma || !mo || !toPositiveInt(anio) || !toPositiveInt(km)) return null;
   const f = calcularFiltros({ anio, km, margenAnio, pctKm });

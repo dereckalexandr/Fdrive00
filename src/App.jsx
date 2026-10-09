@@ -13,7 +13,7 @@ import { extractPdfText, parseCavFields } from "./cav-parser.js";
 import { buildInspeccionPdf, buildTasacionPdf, pdfFileName } from "./pdf-report.js";
 import { saveDraft, loadDraft, clearDraft, isMeaningful } from "./drafts.js";
 import { computeTasacionTotals, computeValorFinal } from "./tasacion-totals.js";
-import { normalizePatente, isPatenteValida, splitModeloVersion, parseKm, calcularFiltros, buildChileautosUrl, parseAvisosPegados, estimarCompra, parseDatosPatente, modeloParaChileautos, detalleModeloChileautos, TRANSMISIONES, COMBUSTIBLES, MARGENES_BRUTOS, MARGEN_BRUTO_DEFECTO } from "./compra-calc.js";
+import { normalizePatente, isPatenteValida, splitModeloVersion, parseKm, calcularFiltros, buildChileautosUrl, parseAvisosPegados, estimarCompra, parseDatosPatente, modeloParaChileautos, detalleModeloChileautos, marcaParaChileautos, TRANSMISIONES, COMBUSTIBLES, MARGENES_BRUTOS, MARGEN_BRUTO_DEFECTO } from "./compra-calc.js";
 import { buildBookmarkletHref } from "./chileautos-bookmarklet.js";
 import { buildPatenteBookmarkletHref } from "./patente-bookmarklet.js";
 import { photoKey, photoPrefix, makePhotoId, compressImage, collectPhotoIds, diffIds, MAX_PHOTOS_PER_ITEM, MAX_PHOTOS_PER_TASACION } from "./photos.js";
@@ -3121,6 +3121,7 @@ function TasacionCompra() {
   const filtros = calcularFiltros({ anio, km: kmNum, margenAnio });
   const urlBusqueda = patenteOk ? buildChileautosUrl({ marca, modelo, anio, km: kmNum, margenAnio, transmision, combustible }) : null;
   const { busqueda: modeloBusqueda, omitido: modeloOmitido } = detalleModeloChileautos(modelo);
+  const marcaBusqueda = marcaParaChileautos(marca);
   const transLabel = (TRANSMISIONES.find((t) => t.value === transmision) || {}).label;
   const combLabel = (COMBUSTIBLES.find((c) => c.value === combustible) || {}).label;
 
@@ -3167,7 +3168,7 @@ function TasacionCompra() {
       const u = decodeURIComponent(p.data.url || "").toLowerCase();
       const trans = TRANSMISIONES.find((t) => t.value === transmision);
       const comb = COMBUSTIBLES.find((c) => c.value === combustible);
-      otraBusqueda = !(u.includes(`marca.${marca.trim().toLowerCase()}`) && u.includes(`modelo.${modeloParaChileautos(modelo).toLowerCase()}`)
+      otraBusqueda = !(u.includes(`marca.${marcaBusqueda.toLowerCase()}`) && u.includes(`modelo.${modeloParaChileautos(modelo).toLowerCase()}`)
         && u.includes(`range(${filtros.anioMin}..${filtros.anioMax})`)
         && (!trans || u.includes(`transmisión.${trans.variantes[0].toLowerCase()}`))
         && (!comb || u.includes(`combustible.${comb.chileautos.toLowerCase()}`)));
@@ -3306,7 +3307,7 @@ function TasacionCompra() {
             <a href={urlBusqueda} target="_blank" rel="noopener noreferrer"
               className="inline-block bg-stone-900 text-white px-4 py-2.5 text-sm font-medium hover:bg-stone-800">Abrir la búsqueda en Chileautos ↗</a>
             <p className="text-xs text-stone-500 mt-2">
-              Filtros aplicados: {marca} {modeloBusqueda} · año {filtros.anioMin === filtros.anioMax ? filtros.anioMin : `${filtros.anioMin}–${filtros.anioMax}`} ·
+              Filtros aplicados: {marcaBusqueda} {modeloBusqueda} · año {filtros.anioMin === filtros.anioMax ? filtros.anioMin : `${filtros.anioMin}–${filtros.anioMax}`} ·
               {" "}{filtros.kmMin.toLocaleString("es-CL")}–{filtros.kmMax.toLocaleString("es-CL")} km
               {transLabel ? ` · transmisión ${transLabel.toLowerCase()}` : ""}{combLabel ? ` · combustible ${combLabel.toLowerCase()}` : ""} · orden: precio más bajo.
             </p>
