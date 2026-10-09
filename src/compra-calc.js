@@ -103,6 +103,34 @@ export function parseAvisosPegados(texto) {
   return { ok: true, data };
 }
 
+/* ---------- datos copiados de la ficha de patentechile.com ---------- */
+/**
+ * Valida el texto que copia el marcador de patente. Solo se aceptan patente, marca, modelo y año
+ * (aunque el JSON trajera algo más, no se usa). Devuelve { ok:true, data } o { ok:false, error, etiquetas }.
+ */
+export function parseDatosPatente(texto) {
+  const t = String(texto || "").trim();
+  if (!t) return { ok: false, error: "Pega aquí el texto que copió el marcador." };
+  let data;
+  try { data = JSON.parse(t); } catch (e) {
+    return { ok: false, error: "El texto no es el que copia el marcador. Pulsa el favorito en la ficha del vehículo y pega de nuevo." };
+  }
+  if (!data || data.fuente !== "patentechile") {
+    return { ok: false, error: "El texto no corresponde a una ficha de patentechile.com copiada con el marcador." };
+  }
+  const marca = String(data.marca || "").trim();
+  const modelo = String(data.modelo || "").trim();
+  const anio = parseInt(data.anio, 10) || 0;
+  if (!marca || !modelo || !anio) {
+    return {
+      ok: false,
+      error: "No pude leer marca, modelo y año de esa página. Busca la patente en el sitio, abre la ficha del vehículo y vuelve a pulsar el favorito.",
+      etiquetas: Array.isArray(data.etiquetas) ? data.etiquetas.map(String).slice(0, 40) : [],
+    };
+  }
+  return { ok: true, data: { patente: normalizePatente(data.patente), marca, modelo, anio } };
+}
+
 /* ---------- limpieza de avisos ---------- */
 /** Precios "de mentira" que se ponen para aparecer primero al ordenar por precio (111.111, 123.456, 100.001…). */
 export function esPrecioSimbolico(precio) {

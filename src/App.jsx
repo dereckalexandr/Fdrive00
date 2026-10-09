@@ -13,8 +13,9 @@ import { extractPdfText, parseCavFields } from "./cav-parser.js";
 import { buildInspeccionPdf, buildTasacionPdf, pdfFileName } from "./pdf-report.js";
 import { saveDraft, loadDraft, clearDraft, isMeaningful } from "./drafts.js";
 import { computeTasacionTotals, computeValorFinal } from "./tasacion-totals.js";
-import { normalizePatente, isPatenteValida, splitModeloVersion, parseKm, calcularFiltros, buildChileautosUrl, parseAvisosPegados, estimarCompra, TRANSMISIONES, COMBUSTIBLES, MARGENES_BRUTOS, MARGEN_BRUTO_DEFECTO } from "./compra-calc.js";
+import { normalizePatente, isPatenteValida, splitModeloVersion, parseKm, calcularFiltros, buildChileautosUrl, parseAvisosPegados, estimarCompra, parseDatosPatente, TRANSMISIONES, COMBUSTIBLES, MARGENES_BRUTOS, MARGEN_BRUTO_DEFECTO } from "./compra-calc.js";
 import { buildBookmarkletHref } from "./chileautos-bookmarklet.js";
+import { buildPatenteBookmarkletHref } from "./patente-bookmarklet.js";
 import { photoKey, photoPrefix, makePhotoId, compressImage, collectPhotoIds, diffIds, MAX_PHOTOS_PER_ITEM, MAX_PHOTOS_PER_TASACION } from "./photos.js";
 
 /* =========================================================
@@ -3104,9 +3105,16 @@ function TasacionCompra() {
   const [pegado, setPegado] = useState("");
   const [copiado, setCopiado] = useState(false);
   const bmRef = useRef(null);
+  const bmPatenteRef = useRef(null);
+  const [pegadoPatente, setPegadoPatente] = useState("");
+  const [msgPatente, setMsgPatente] = useState(null);
+  const [copiadoPatente, setCopiadoPatente] = useState(false);
 
   // React no deja poner un enlace "javascript:" desde JSX, así que se asigna directo al elemento.
-  useEffect(() => { if (bmRef.current) bmRef.current.setAttribute("href", buildBookmarkletHref()); }, []);
+  useEffect(() => {
+    if (bmRef.current) bmRef.current.setAttribute("href", buildBookmarkletHref());
+    if (bmPatenteRef.current) bmPatenteRef.current.setAttribute("href", buildPatenteBookmarkletHref());
+  }, []);
 
   const kmNum = parseKm(km);
   const patenteOk = isPatenteValida(patente);
@@ -3169,7 +3177,25 @@ function TasacionCompra() {
   const copiarMarcador = async () => {
     try { await navigator.clipboard.writeText(buildBookmarkletHref()); setCopiado(true); setTimeout(() => setCopiado(false), 2500); } catch (e) { /* sin permiso: queda el botón arrastrable */ }
   };
-  const limpiar = () => { setPatente(""); setKm(""); setMarca(""); setModelo(""); setAnio(""); setVersion(""); setTransmision(""); setCombustible(""); setMargenBruto(MARGEN_BRUTO_DEFECTO); setCav({ name: "", data: "" }); setCavMsg(""); setPegado(""); };
+  const copiarMarcadorPatente = async () => {
+    try { await navigator.clipboard.writeText(buildPatenteBookmarkletHref()); setCopiadoPatente(true); setTimeout(() => setCopiadoPatente(false), 2500); } catch (e) { /* sin permiso: queda el botón arrastrable */ }
+  };
+  // Al pegar lo que copió el marcador de patentechile.com se completan marca, modelo y año. La patente
+  // se ingresa a mano: solo se rellena si estaba vacía, y si no coincide con la copiada se avisa.
+  const aplicarDatosPatente = (texto) => {
+    setPegadoPatente(texto);
+    if (!texto.trim()) { setMsgPatente(null); return; }
+    const p = parseDatosPatente(texto);
+    if (!p.ok) { setMsgPatente({ mal: true, texto: p.error, etiquetas: p.etiquetas || [] }); return; }
+    const d = p.data;
+    setMarca(titleCase(d.marca)); setModelo(titleCase(d.modelo)); setAnio(String(d.anio));
+    const avisos = [];
+    if (d.patente && !patente) setPatente(d.patente);
+    if (d.patente && patente && patente !== d.patente) avisos.push(`La patente de la ficha (${d.patente}) no coincide con la que ingresaste (${patente}). Revisa que sea el vehículo correcto.`);
+    if (d.modelo.trim().split(/\s+/).length > 1) avisos.push("El modelo trae varias palabras. Para Chileautos deja solo el nombre del modelo (ej. \"Yaris\", sin la versión), salvo modelos como \"Land Cruiser\".");
+    setMsgPatente({ mal: false, texto: `Se completaron marca, modelo y año${d.patente && !patente ? " y la patente" : ""}.`, avisos });
+  };
+  const limpiar = () => { setPegadoPatente(""); setMsgPatente(null); setPatente(""); setKm(""); setMarca(""); setModelo(""); setAnio(""); setVersion(""); setTransmision(""); setCombustible(""); setMargenBruto(MARGEN_BRUTO_DEFECTO); setCav({ name: "", data: "" }); setCavMsg(""); setPegado(""); };
 
   const Tarjeta = ({ titulo, sub, valor, destacado = false }) => (
     <div className={`p-4 border ${destacado ? "bg-stone-900 text-stone-100 border-stone-900" : "bg-white border-stone-200"}`}>
@@ -3218,6 +3244,34 @@ function TasacionCompra() {
           <PdfDropzone fileName={cav.name} fileData={cav.data} onFileLoaded={handleCavLoaded} onRemove={() => { setCav({ name: "", data: "" }); setCavMsg(""); }} />
           {leyendo && <p className="text-xs text-stone-500 mt-2">Leyendo el CAV…</p>}
           {!leyendo && cavMsg && <p className="text-xs text-stone-500 mt-2">{cavMsg}</p>}
+        </div>
+
+        <div className="mt-4 border-t border-stone-200 pt-4">
+          <p className="text-sm text-stone-700 font-medium mb-1">O con patentechile.com (alternativa al CAV)</p>
+          <p className="text-xs text-stone-500 mb-2">
+            Entra al sitio, busca la patente a mano y, con la ficha del vehículo abierta, pulsa el favorito. Copia <strong>solo</strong> patente, marca, modelo y año:
+            nunca nombre, RUT ni dirección del dueño. El sitio puede pedir una verificación de seguridad: la completas tú.
+          </p>
+          <div className="flex flex-wrap items-center gap-3 mb-3">
+            <a href="https://www.patentechile.com/" target="_blank" rel="noopener noreferrer"
+              className="inline-block bg-stone-900 text-white px-4 py-2 text-sm font-medium hover:bg-stone-800">Abrir patentechile.com ↗</a>
+            <a ref={bmPatenteRef} onClick={(e) => e.preventDefault()} draggable="true"
+              className="inline-block border-2 border-dashed border-amber-500 bg-amber-50 text-amber-900 px-3 py-2 text-sm font-medium cursor-grab">⭐ Copiar datos de patente</a>
+            <button type="button" onClick={copiarMarcadorPatente} className="text-xs text-stone-600 hover:underline py-2">
+              {copiadoPatente ? "Código copiado ✓" : "No puedo arrastrarlo: copiar el código del marcador"}
+            </button>
+          </div>
+          <textarea value={pegadoPatente} onChange={(e) => aplicarDatosPatente(e.target.value)} rows={2} placeholder="Pega aquí lo que copió el marcador de patente (Ctrl+V)"
+            className="w-full border border-stone-300 bg-white px-2 py-1.5 text-xs font-mono text-stone-900 focus:outline-none focus:ring-2 focus:ring-amber-500" />
+          {msgPatente && (
+            <div className="mt-2 flex flex-col gap-1">
+              <p className={`text-xs ${msgPatente.mal ? "text-rose-600" : "text-emerald-700"}`}>{msgPatente.texto}</p>
+              {(msgPatente.avisos || []).map((a) => <p key={a} className="text-xs text-amber-800">⚠ {a}</p>)}
+              {msgPatente.mal && msgPatente.etiquetas && msgPatente.etiquetas.length > 0 && (
+                <p className="text-xs text-stone-500">Campos que vio la página (sin sus valores): {msgPatente.etiquetas.join(" · ")}. Si quieres que lo ajuste, envíame esta lista.</p>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4">

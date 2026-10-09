@@ -18,6 +18,8 @@
  *    a lo que buscas" y esos avisos NO corresponden a la búsqueda.
  * ----------------------------------------------------------------
  */
+import { armarMarcador } from "./bookmarklet-core.js";
+
 export function extractChileautosListings(doc, loc) {
   const toInt = (s) => parseInt(String(s || "").replace(/\D/g, ""), 10) || 0;
   const listings = [];
@@ -80,15 +82,14 @@ export function extractChileautosListings(doc, loc) {
   };
 }
 
+/** Texto del cuadro que aparece en Chileautos al copiar (autocontenida, sin comentarios). */
+function mensajeChileautos(r) {
+  if (r.sinResultados) return { texto: "Drive Futuro: Chileautos no tiene avisos exactos para este filtro.", mal: true };
+  if (!r.listings.length) return { texto: "Drive Futuro: no encontré avisos en esta página. Úsalo en la lista de resultados.", mal: true };
+  return { texto: "Drive Futuro: " + r.listings.length + " avisos copiados. Vuelve a la app y pégalos.", mal: false };
+}
+
 /** Código `javascript:` del marcador (copia los avisos al portapapeles y avisa en la página). */
 export function buildBookmarkletHref() {
-  const cuerpo = `
-var x=${extractChileautosListings.toString()};
-var r=x(document,location),j=JSON.stringify(r);
-function aviso(t,mal){var d=document.createElement('div');d.textContent=t;d.setAttribute('style','position:fixed;top:12px;right:12px;z-index:2147483647;max-width:320px;padding:12px 16px;border-radius:6px;font:14px/1.4 sans-serif;color:#fff;background:'+(mal?'#b45309':'#065f46')+';box-shadow:0 4px 14px rgba(0,0,0,.3)');document.body.appendChild(d);setTimeout(function(){d.remove()},7000)}
-function listo(){aviso(r.sinResultados?'Drive Futuro: Chileautos no tiene avisos exactos para este filtro.':'Drive Futuro: '+r.listings.length+' avisos copiados. Vuelve a la app y pégalos.',r.sinResultados||!r.listings.length)}
-function respaldo(){var t=document.createElement('textarea');t.value=j;t.setAttribute('style','position:fixed;opacity:0');document.body.appendChild(t);t.select();var ok=false;try{ok=document.execCommand('copy')}catch(e){}t.remove();if(ok)listo();else prompt('Copia este texto (Ctrl+C) y pégalo en Drive Futuro:',j)}
-try{navigator.clipboard.writeText(j).then(listo,respaldo)}catch(e){respaldo()}
-`;
-  return "javascript:" + encodeURIComponent("(function(){" + cuerpo.replace(/\n/g, "") + "})()");
+  return armarMarcador(extractChileautosListings, mensajeChileautos);
 }
