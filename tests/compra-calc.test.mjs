@@ -270,3 +270,38 @@ test("si el margen supera al precio promedio, la compra queda en $0 y se avisa",
   assert.equal(r.compra, 0);
   assert.ok(r.advertencias.some((w) => /margen bruto/.test(w)));
 });
+
+/* ---------- el modelo que se envía a Chileautos ---------- */
+import { modeloParaChileautos } from "../src/compra-calc.js";
+
+test("modeloParaChileautos quita el motor y la versión pegados al modelo", () => {
+  assert.equal(modeloParaChileautos("Yaris 1.5 GLI MT"), "Yaris");
+  assert.equal(modeloParaChileautos("YARIS SPORT 1.5"), "YARIS SPORT");
+  assert.equal(modeloParaChileautos("Accent RB 1.4"), "Accent RB");
+  assert.equal(modeloParaChileautos("Rio 1,4 EX"), "Rio");
+  assert.equal(modeloParaChileautos("Mazda 3 2.0 R"), "Mazda 3");
+});
+
+test("modeloParaChileautos conserva los modelos que ya vienen bien, aunque tengan números o varias palabras", () => {
+  for (const m of ["Yaris", "Mazda 3", "CX-5", "208", "2008", "T-Cross", "X-Trail", "NP300", "Land Cruiser Prado", "Corolla Cross", "Santa Fe", "Clase C"]) {
+    assert.equal(modeloParaChileautos(m), m);
+  }
+  assert.equal(modeloParaChileautos("  Yaris   Sport  "), "Yaris Sport");
+  assert.equal(modeloParaChileautos(""), "");
+  assert.equal(modeloParaChileautos(null), "");
+});
+
+test("la dirección de búsqueda nunca lleva puntos del motor en el modelo (rompen la sintaxis de Chileautos)", () => {
+  const esperado = buildChileautosUrl({ marca: "Toyota", modelo: "Yaris", anio: 2020, km: 60000 });
+  for (const m of ["Yaris 1.5", "Yaris 1.5 GLI", "YARIS 1.5 GLI MT", "Yaris 1,5"]) {
+    // Chileautos no distingue mayúsculas de minúsculas (comprobado en el sitio)
+    assert.equal(buildChileautosUrl({ marca: "Toyota", modelo: m, anio: 2020, km: 60000 }).toLowerCase(), esperado.toLowerCase(), m);
+  }
+  const modeloEnUrl = decodeURIComponent(buildChileautosUrl({ marca: "Toyota", modelo: "Yaris Sport 1.5 GLI", anio: 2020, km: 60000 })).match(/Modelo\.([^)]*)\.\)/)[1];
+  assert.equal(modeloEnUrl, "Yaris Sport");
+  assert.ok(!/\d\.\d/.test(modeloEnUrl));
+});
+
+test("si el modelo es solo un motor ('1.5'), no se recorta a vacío", () => {
+  assert.notEqual(buildChileautosUrl({ marca: "Toyota", modelo: "1.5 GLI", anio: 2020, km: 60000 }), null);
+});

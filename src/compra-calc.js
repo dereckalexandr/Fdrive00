@@ -67,12 +67,24 @@ export function calcularFiltros({ anio, km, margenAnio = 1, pctKm = MARGEN_KM })
 }
 
 /**
+ * Nombre del modelo tal como se busca en Chileautos. Los datos de patente o CAV suelen traer el motor y la
+ * versión pegados al modelo ("YARIS 1.5 GLI MT"); Chileautos solo conoce el modelo ("Yaris"), y además el punto
+ * es un separador de su sintaxis de búsqueda, así que un modelo con "1.5" hace que ignore TODOS los filtros.
+ * Se corta en la primera palabra que parece un motor (dígito, punto o coma, dígito). "Mazda 3", "CX-5" o "208" se conservan.
+ */
+export function modeloParaChileautos(modelo) {
+  const palabras = String(modelo || "").trim().split(/\s+/).filter(Boolean);
+  const i = palabras.findIndex((p) => /\d[.,]\d/.test(p));
+  return (i > 0 ? palabras.slice(0, i) : palabras).join(" ");
+}
+
+/**
  * Dirección de búsqueda en Chileautos, ordenada por precio más bajo.
  * Devuelve null si falta algún dato obligatorio.
  */
 export function buildChileautosUrl({ marca, modelo, anio, km, margenAnio = 1, pctKm = MARGEN_KM, transmision = "", combustible = "" }) {
   const ma = String(marca || "").trim();
-  const mo = String(modelo || "").trim();
+  const mo = modeloParaChileautos(modelo);
   if (!ma || !mo || !toPositiveInt(anio) || !toPositiveInt(km)) return null;
   const f = calcularFiltros({ anio, km, margenAnio, pctKm });
   const enc = (s) => encodeURIComponent(s).replace(/\./g, "%2E");
