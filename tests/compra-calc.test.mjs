@@ -274,7 +274,7 @@ test("si el margen supera al precio promedio, la compra queda en $0 y se avisa",
 });
 
 /* ---------- el modelo que se envía a Chileautos ---------- */
-import { modeloParaChileautos, EXCEPCIONES_MODELO } from "../src/compra-calc.js";
+import { modeloParaChileautos, detalleModeloChileautos, EXCEPCIONES_MODELO } from "../src/compra-calc.js";
 
 test("modeloParaChileautos usa solo la primera palabra (lo anterior al primer espacio)", () => {
   assert.equal(modeloParaChileautos("Yaris 1.5 GLI MT"), "Yaris");
@@ -382,10 +382,50 @@ test("LISTA DEL ADMINISTRADOR: qué palabras se consideran modelos conocidos (ra
   for (const p of no) assert.ok(!esModeloConocidoDeUnaPalabra(p), `no debería ser conocido: ${p}`);
 });
 
-test("LISTA DEL ADMINISTRADOR: la lista cargada tiene las 13 reglas (6 frases y 7 series)", () => {
-  assert.equal(EXCEPCIONES_MODELO.length, 13);
+test("LISTA DEL ADMINISTRADOR: la lista cargada tiene las 14 reglas (6 frases, 7 series y 1 secuencia)", () => {
+  assert.equal(EXCEPCIONES_MODELO.length, 14);
   for (const f of ["Corolla Cross", "Land Cruiser", "Santa Fe", "Grand Vitara", "Yaris Sport", "Yaris Cross"]) assert.ok(EXCEPCIONES_MODELO.includes(f), f);
-  assert.equal(EXCEPCIONES_MODELO.filter((e) => typeof e !== "string").length, 7);
+  assert.equal(EXCEPCIONES_MODELO.filter((e) => typeof e !== "string" && !e.secuencia).length, 7);
+  assert.equal(EXCEPCIONES_MODELO.filter((e) => e && e.secuencia).length, 1);
+});
+
+test("SECUENCIA 'aaa' a 'zzz' + espacio + '111' a '999': se busca con las dos palabras (GLA 200, CLA 250…)", () => {
+  const casos = [["GLA 200", "GLA 200"], ["gla 200 4matic", "gla 200"], ["CLA 250 AMG", "CLA 250"], ["GLC 300 D", "GLC 300"], ["GLE 450", "GLE 450"], ["NPR 816", "NPR 816"], ["RAV 400", "RAV 400"]];
+  for (const [entrada, esperado] of casos) assert.equal(modeloParaChileautos(entrada), esperado, entrada);
+  assert.equal(detalleModeloChileautos("CLA 250 AMG 4MATIC").omitido, "AMG 4MATIC");
+});
+
+test("SECUENCIA: bordes del número (111 y 999 entran; 110, 1000, 99 y 4 no)", () => {
+  assert.equal(modeloParaChileautos("ABC 111"), "ABC 111");
+  assert.equal(modeloParaChileautos("ABC 999"), "ABC 999");
+  for (const n of ["110", "100", "1000", "99", "4", "0111", "20.0", "2,5", "abc"]) assert.equal(modeloParaChileautos(`ABC ${n}`), "ABC", `ABC ${n}`);
+});
+
+test("SECUENCIA: la primera palabra debe tener exactamente 3 letras", () => {
+  for (const m of ["AB 200", "ABCD 200", "GL4 200", "GL- 200", "A1B 200", "123 200"]) {
+    assert.equal(modeloParaChileautos(m), m.split(" ")[0], m);
+  }
+});
+
+test("SECUENCIA: no pisa a las otras reglas (Tiggo 7, CX 5, Yaris Cross, Land Cruiser siguen igual)", () => {
+  assert.equal(modeloParaChileautos("Tiggo 7 Pro"), "Tiggo 7");
+  assert.equal(modeloParaChileautos("CX 5"), "CX-5");
+  assert.equal(modeloParaChileautos("Yaris Cross 1.5"), "Yaris Cross");
+  assert.equal(modeloParaChileautos("Land Cruiser Prado"), "Land Cruiser");
+  assert.equal(modeloParaChileautos("ASX 2.0"), "ASX");
+  assert.equal(modeloParaChileautos("RAV 4"), "RAV");
+  assert.equal(modeloParaChileautos("Clase C 200"), "Clase");
+});
+
+test("SECUENCIA: la dirección de búsqueda usa 'GLA 200' completo para una Mercedes", () => {
+  const u = decodeURIComponent(buildChileautosUrl({ marca: "MERCEDES BENZ", modelo: "GLA 200 1.3", anio: 2021, km: 40000 }));
+  assert.ok(u.includes("Marca.Mercedes-Benz._.Modelo.GLA 200.)"), u);
+});
+
+test("SECUENCIA: también funciona con una lista propia, con 'texto' y con rangos", () => {
+  const ex = [{ secuencia: [{ texto: "Clase" }, { letras: 1 }] }];
+  assert.equal(modeloParaChileautos("Clase C 200", ex), "Clase C");
+  assert.equal(modeloParaChileautos("Clase 5", ex), "Clase");
 });
 
 test("sigue sin haber excepción para modelos que no están en la lista (Mazda 3 como texto, Grand i10, Santa Cruz)", () => {

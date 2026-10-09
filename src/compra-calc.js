@@ -93,7 +93,9 @@ export function marcaParaChileautos(marca) {
  *   - { prefijo, desde, hasta }: una serie con número, escrita pegada ("CX-" 3..90 → CX-3 … CX-90, "A" 1..7 → A1 … A7)
  *     o en dos palabras si el prefijo termina en espacio ("Tiggo " 2..8 → Tiggo 2 … Tiggo 8);
  *   - { numeros: [desde, hasta] }: modelos que son solo un número (208, 3008…);
- *   - { letras: n }: modelos de n letras (ASX, RAV…).
+ *   - { letras: n }: modelos de n letras (ASX, RAV…);
+ *   - { secuencia: [patrón, patrón…] }: varias palabras seguidas, cada una con la forma de un patrón
+ *     ({ letras: n } | { numeros: [desde, hasta] } | { texto }). Ej.: 3 letras + un número de 111 a 999 → "GLA 200".
  * Las series con prefijo se NORMALIZAN al formato de la lista: "CX5", "cx 5" y "CX-5" se buscan como "CX-5";
  * "X 1" como "X1"; "A 3" como "A3"; "Tiggo7" y "Tiggo-7" como "Tiggo 7".
  * Las de UNA sola palabra (X1, 208, A3, ZS…) ya se conservan por la regla de la primera palabra; se listan igual
@@ -113,6 +115,7 @@ export const EXCEPCIONES_MODELO = [
   { prefijo: "A", desde: 1, hasta: 7 },
   { prefijo: "Q", desde: 1, hasta: 8 },
   { prefijo: "Tiggo ", desde: 2, hasta: 8 },
+  { secuencia: [{ letras: 3 }, { numeros: [111, 999] }] },
 ];
 
 const sinTildesMinus = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
@@ -136,6 +139,15 @@ export function detalleModeloChileautos(modelo, excepciones = EXCEPCIONES_MODELO
   return { busqueda: r.busqueda, omitido: r.palabras.slice(r.consumo).join(" ") };
 }
 
+// ¿La palabra (ya sin tildes ni mayúsculas) tiene la forma que pide el patrón? { letras: n } | { numeros: [desde, hasta] } | { texto }
+function coincidePalabra(patron, w) {
+  if (!patron) return false;
+  if (Number.isInteger(patron.letras)) return new RegExp("^[a-z]{" + patron.letras + "}$").test(w);
+  if (Array.isArray(patron.numeros)) return /^[1-9]\d*$/.test(w) && parseInt(w, 10) >= patron.numeros[0] && parseInt(w, 10) <= patron.numeros[1];
+  if (typeof patron.texto === "string") return sinTildesMinus(patron.texto) === w;
+  return false;
+}
+
 function resolverModelo(modelo, excepciones) {
   const palabras = String(modelo || "").trim().split(/\s+/).filter(Boolean);
   if (palabras.length === 0) return { busqueda: "", consumo: 0, palabras };
@@ -150,6 +162,12 @@ function resolverModelo(modelo, excepciones) {
       const f = e.trim().split(/\s+/).filter(Boolean);
       if (f.length > 1 && f.length <= palabras.length && f.every((w, i) => sinTildesMinus(w) === norm[i])) {
         candidatas.push({ consumo: f.length, salida: f.join(" ") }); // se usa la escritura de la lista (Chileautos distingue tildes)
+      }
+    } else if (e && Array.isArray(e.secuencia)) {
+      // Secuencia de palabras con forma: ej. 3 letras + un número entre 111 y 999 ("GLA 200").
+      const n = e.secuencia.length;
+      if (n > 1 && n <= palabras.length && e.secuencia.every((p, i) => coincidePalabra(p, norm[i]))) {
+        candidatas.push({ consumo: n, salida: palabras.slice(0, n).join(" ") });
       }
     } else if (e && typeof e.prefijo === "string") {
       // Serie con número: la base es el prefijo sin guion ni espacio final ("CX", "X", "A", "Q", "Tiggo").
