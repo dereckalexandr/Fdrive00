@@ -44,7 +44,8 @@ test("buildChileautosUrl usa la sintaxis comprobada en el sitio", () => {
 });
 
 test("buildChileautosUrl codifica espacios y devuelve null si falta un dato obligatorio", () => {
-  assert.ok(buildChileautosUrl({ marca: "Toyota", modelo: "Land Cruiser Prado", anio: 2020, km: 50000 }).includes("Modelo.Land%20Cruiser%20Prado."));
+  assert.ok(buildChileautosUrl({ marca: "Toyota", modelo: "Land Cruiser Prado", anio: 2020, km: 50000, excepciones: ["Land Cruiser"] }).includes("Modelo.Land%20Cruiser."));
+  assert.ok(buildChileautosUrl({ marca: "Toyota", modelo: "Land Cruiser Prado", anio: 2020, km: 50000 }).includes("Modelo.Land."), "sin excepción: solo la primera palabra");
   assert.equal(buildChileautosUrl({ marca: "", modelo: "Yaris", anio: 2020, km: 50000 }), null);
   assert.equal(buildChileautosUrl({ marca: "Toyota", modelo: "Yaris", anio: 2020, km: 0 }), null);
   assert.equal(buildChileautosUrl({ marca: "Toyota", modelo: "Yaris", anio: "", km: 50000 }), null);
@@ -272,36 +273,63 @@ test("si el margen supera al precio promedio, la compra queda en $0 y se avisa",
 });
 
 /* ---------- el modelo que se envía a Chileautos ---------- */
-import { modeloParaChileautos } from "../src/compra-calc.js";
+import { modeloParaChileautos, EXCEPCIONES_MODELO } from "../src/compra-calc.js";
 
-test("modeloParaChileautos quita el motor y la versión pegados al modelo", () => {
+test("modeloParaChileautos usa solo la primera palabra (lo anterior al primer espacio)", () => {
   assert.equal(modeloParaChileautos("Yaris 1.5 GLI MT"), "Yaris");
-  assert.equal(modeloParaChileautos("YARIS SPORT 1.5"), "YARIS SPORT");
-  assert.equal(modeloParaChileautos("Accent RB 1.4"), "Accent RB");
+  assert.equal(modeloParaChileautos("YARIS SPORT 1.5"), "YARIS");
+  assert.equal(modeloParaChileautos("Accent RB 1.4"), "Accent");
   assert.equal(modeloParaChileautos("Rio 1,4 EX"), "Rio");
-  assert.equal(modeloParaChileautos("Mazda 3 2.0 R"), "Mazda 3");
+  assert.equal(modeloParaChileautos("  Yaris   Sport  "), "Yaris");
 });
 
-test("modeloParaChileautos conserva los modelos que ya vienen bien, aunque tengan números o varias palabras", () => {
-  for (const m of ["Yaris", "Mazda 3", "CX-5", "208", "2008", "T-Cross", "X-Trail", "NP300", "Land Cruiser Prado", "Corolla Cross", "Santa Fe", "Clase C"]) {
+test("modeloParaChileautos deja igual los modelos de una sola palabra, aunque tengan guion o números", () => {
+  for (const m of ["Yaris", "CX-5", "208", "2008", "T-Cross", "X-Trail", "NP300", "Corolla"]) {
     assert.equal(modeloParaChileautos(m), m);
   }
-  assert.equal(modeloParaChileautos("  Yaris   Sport  "), "Yaris Sport");
   assert.equal(modeloParaChileautos(""), "");
   assert.equal(modeloParaChileautos(null), "");
 });
 
-test("la dirección de búsqueda nunca lleva puntos del motor en el modelo (rompen la sintaxis de Chileautos)", () => {
+test("EXCEPCIONES: los modelos de varias palabras de la lista se buscan completos", () => {
+  const ex = ["Land Cruiser", "Corolla Cross", "Santa Fe", "Mazda 3"];
+  assert.equal(modeloParaChileautos("Land Cruiser Prado 4.0", ex), "Land Cruiser");
+  assert.equal(modeloParaChileautos("COROLLA CROSS 2.0 XEI", ex), "COROLLA CROSS");
+  assert.equal(modeloParaChileautos("Mazda 3 2.0 R", ex), "Mazda 3");
+  assert.equal(modeloParaChileautos("Santa Fé GLS", ex), "Santa Fé"); // sin distinguir tildes
+  // lo que no está en la lista sigue usando solo la primera palabra
+  assert.equal(modeloParaChileautos("Corolla 1.8 XLI", ex), "Corolla");
+  assert.equal(modeloParaChileautos("Yaris Sport", ex), "Yaris");
+  // la excepción debe coincidir desde el comienzo y palabra por palabra
+  assert.equal(modeloParaChileautos("Cruiser Land", ex), "Cruiser");
+  assert.equal(modeloParaChileautos("Land", ex), "Land");
+});
+
+test("EXCEPCIONES: gana la más larga si hay varias que coinciden", () => {
+  assert.equal(modeloParaChileautos("Land Cruiser Prado 4.0", ["Land Cruiser", "Land Cruiser Prado"]), "Land Cruiser Prado");
+});
+
+test("EXCEPCIONES: la lista que usa la app hoy está vacía (se completa con las del administrador)", () => {
+  assert.deepEqual(EXCEPCIONES_MODELO, []);
+});
+
+test("la dirección de búsqueda usa la primera palabra del modelo y nunca lleva puntos del motor (rompen la sintaxis de Chileautos)", () => {
   const esperado = buildChileautosUrl({ marca: "Toyota", modelo: "Yaris", anio: 2020, km: 60000 });
-  for (const m of ["Yaris 1.5", "Yaris 1.5 GLI", "YARIS 1.5 GLI MT", "Yaris 1,5"]) {
+  for (const m of ["Yaris 1.5", "Yaris 1.5 GLI", "YARIS 1.5 GLI MT", "Yaris 1,5", "Yaris Sport 1.5 GLI"]) {
     // Chileautos no distingue mayúsculas de minúsculas (comprobado en el sitio)
     assert.equal(buildChileautosUrl({ marca: "Toyota", modelo: m, anio: 2020, km: 60000 }).toLowerCase(), esperado.toLowerCase(), m);
   }
   const modeloEnUrl = decodeURIComponent(buildChileautosUrl({ marca: "Toyota", modelo: "Yaris Sport 1.5 GLI", anio: 2020, km: 60000 })).match(/Modelo\.([^)]*)\.\)/)[1];
-  assert.equal(modeloEnUrl, "Yaris Sport");
+  assert.equal(modeloEnUrl, "Yaris");
   assert.ok(!/\d\.\d/.test(modeloEnUrl));
 });
 
-test("si el modelo es solo un motor ('1.5'), no se recorta a vacío", () => {
+test("con una excepción cargada, la dirección usa el modelo completo de la lista", () => {
+  const url = buildChileautosUrl({ marca: "Toyota", modelo: "Corolla Cross 2.0 XEI", anio: 2022, km: 30000, excepciones: ["Corolla Cross"] });
+  assert.ok(decodeURIComponent(url).includes("Modelo.Corolla Cross.)"));
+  assert.ok(!decodeURIComponent(url).includes("2.0"));
+});
+
+test("si el modelo empieza con un motor ('1.5 GLI'), igual se obtiene una dirección (no queda vacío)", () => {
   assert.notEqual(buildChileautosUrl({ marca: "Toyota", modelo: "1.5 GLI", anio: 2020, km: 60000 }), null);
 });

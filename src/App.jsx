@@ -3312,7 +3312,7 @@ function TasacionCompra() {
             </p>
             {modeloBusqueda !== modelo.trim() && (
               <p className="text-xs text-amber-800 mt-1">
-                Se busca el modelo como «{modeloBusqueda}»: se quitó «{modelo.trim().slice(modeloBusqueda.length).trim()}» (motor o versión), que Chileautos no usa como modelo.
+                En Chileautos se busca solo con la primera palabra del modelo: «{modeloBusqueda}». Se omite «{modelo.trim().slice(modeloBusqueda.length).trim()}» (motor, versión u otras palabras).
               </p>
             )}
             <p className="text-xs text-stone-500 mt-1">

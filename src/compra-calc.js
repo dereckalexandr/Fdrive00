@@ -67,24 +67,43 @@ export function calcularFiltros({ anio, km, margenAnio = 1, pctKm = MARGEN_KM })
 }
 
 /**
- * Nombre del modelo tal como se busca en Chileautos. Los datos de patente o CAV suelen traer el motor y la
- * versión pegados al modelo ("YARIS 1.5 GLI MT"); Chileautos solo conoce el modelo ("Yaris"), y además el punto
- * es un separador de su sintaxis de búsqueda, así que un modelo con "1.5" hace que ignore TODOS los filtros.
- * Se corta en la primera palabra que parece un motor (dígito, punto o coma, dígito). "Mazda 3", "CX-5" o "208" se conservan.
+ * EXCEPCIONES a la regla "solo la primera palabra del modelo": modelos cuyo nombre en Chileautos tiene VARIAS
+ * palabras (ej. "Land Cruiser", "Corolla Cross"). Si el modelo empieza con alguna de estas frases (sin distinguir
+ * mayúsculas ni tildes), se busca con la frase completa en vez de con la primera palabra.
+ * Se completa con la lista que entregue el administrador; hoy está vacía a propósito.
  */
-export function modeloParaChileautos(modelo) {
+export const EXCEPCIONES_MODELO = [];
+
+const sinTildesMinus = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+
+/**
+ * Nombre del modelo tal como se busca en Chileautos.
+ * Los datos de patentechile traen el modelo con el motor y la versión ("YARIS 1.5 GLI MT"), pero Chileautos solo
+ * conoce el modelo ("Yaris"). Además el punto es un separador de su sintaxis: con "1.5" en el modelo ignora TODOS los
+ * filtros. Por eso se usa solo la primera palabra (lo anterior al primer espacio), salvo las EXCEPCIONES_MODELO.
+ */
+export function modeloParaChileautos(modelo, excepciones = EXCEPCIONES_MODELO) {
   const palabras = String(modelo || "").trim().split(/\s+/).filter(Boolean);
-  const i = palabras.findIndex((p) => /\d[.,]\d/.test(p));
-  return (i > 0 ? palabras.slice(0, i) : palabras).join(" ");
+  if (palabras.length <= 1) return palabras.join(" ");
+  const norm = palabras.map(sinTildesMinus);
+  // La excepción más larga que coincida con el comienzo del modelo, palabra por palabra.
+  const frases = (excepciones || [])
+    .map((e) => String(e || "").trim().split(/\s+/).filter(Boolean))
+    .filter((f) => f.length > 1)
+    .sort((a, b) => b.length - a.length);
+  for (const f of frases) {
+    if (f.length <= palabras.length && f.every((w, i) => sinTildesMinus(w) === norm[i])) return palabras.slice(0, f.length).join(" ");
+  }
+  return palabras[0];
 }
 
 /**
  * Dirección de búsqueda en Chileautos, ordenada por precio más bajo.
  * Devuelve null si falta algún dato obligatorio.
  */
-export function buildChileautosUrl({ marca, modelo, anio, km, margenAnio = 1, pctKm = MARGEN_KM, transmision = "", combustible = "" }) {
+export function buildChileautosUrl({ marca, modelo, anio, km, margenAnio = 1, pctKm = MARGEN_KM, transmision = "", combustible = "", excepciones = EXCEPCIONES_MODELO }) {
   const ma = String(marca || "").trim();
-  const mo = modeloParaChileautos(modelo);
+  const mo = modeloParaChileautos(modelo, excepciones);
   if (!ma || !mo || !toPositiveInt(anio) || !toPositiveInt(km)) return null;
   const f = calcularFiltros({ anio, km, margenAnio, pctKm });
   const enc = (s) => encodeURIComponent(s).replace(/\./g, "%2E");
