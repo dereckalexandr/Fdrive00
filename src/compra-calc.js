@@ -148,11 +148,47 @@ function coincidePalabra(patron, w) {
   return false;
 }
 
+/**
+ * Separa con un espacio las letras de los números de la primera palabra ("GLA200" → ["GLA", "200"],
+ * "GLA200D" → ["GLA", "200", "D"]). Las palabras con guion ("CX-5", "T-Cross") no se tocan. Devuelve null si no hay nada que separar.
+ */
+function separarLetrasYNumeros(palabras) {
+  const primera = palabras[0];
+  let salida = "";
+  for (let i = 0; i < primera.length; i++) {
+    const c = primera[i];
+    const antes = i > 0 ? primera[i - 1] : "";
+    const cambia = antes && ((/\p{L}/u.test(antes) && /\d/.test(c)) || (/\d/.test(antes) && /\p{L}/u.test(c)));
+    salida += (cambia ? " " : "") + c;
+  }
+  const partes = salida.split(" ");
+  return partes.length > 1 ? [...partes, ...palabras.slice(1)] : null;
+}
+
 function resolverModelo(modelo, excepciones) {
   const palabras = String(modelo || "").trim().split(/\s+/).filter(Boolean);
   if (palabras.length === 0) return { busqueda: "", consumo: 0, palabras };
-  const norm = palabras.map(sinTildesMinus);
   const lista = Array.isArray(excepciones) ? excepciones : [];
+
+  // 1) Tal como viene.
+  const directa = evaluarExcepciones(palabras, lista);
+  if (directa) return { busqueda: directa.salida, consumo: directa.consumo, palabras };
+
+  // 2) Pegado ("GLA200"): se separan las letras de los números y se vuelve a probar. Solo se usa si así calza con una
+  //    excepción; si no, se deja como viene, para no romper modelos de una palabra como NP300, RAV4, C3 o i10.
+  const separadas = separarLetrasYNumeros(palabras);
+  if (separadas) {
+    const r = evaluarExcepciones(separadas, lista);
+    if (r) return { busqueda: r.salida, consumo: r.consumo, palabras: separadas };
+  }
+
+  // 3) Sin excepción: solo la primera palabra (los modelos de una palabra, como "Yaris", "208" o "ASX", quedan igual).
+  return { busqueda: palabras[0], consumo: 1, palabras };
+}
+
+// Mejor coincidencia de las excepciones con el comienzo de las palabras: { consumo, salida } o null. Gana la que consume más.
+function evaluarExcepciones(palabras, lista) {
+  const norm = palabras.map(sinTildesMinus);
   const enRango = (n, desde, hasta) => Number.isInteger(n) && n >= desde && n <= hasta;
 
   // Cada coincidencia indica cuántas palabras del modelo consume y cómo se escribe en la búsqueda. Gana la que consume más.
@@ -182,13 +218,7 @@ function resolverModelo(modelo, excepciones) {
       }
     }
   }
-  if (candidatas.length) {
-    const mejor = candidatas.sort((a, b) => b.consumo - a.consumo)[0];
-    return { busqueda: mejor.salida, consumo: mejor.consumo, palabras };
-  }
-
-  // Sin excepción: solo la primera palabra (los modelos de una palabra, como "Yaris", "208" o "ASX", quedan igual).
-  return { busqueda: palabras[0], consumo: 1, palabras };
+  return candidatas.length ? candidatas.sort((a, b) => b.consumo - a.consumo)[0] : null;
 }
 
 /**

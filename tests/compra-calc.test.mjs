@@ -402,9 +402,47 @@ test("SECUENCIA: bordes del número (111 y 999 entran; 110, 1000, 99 y 4 no)", (
 });
 
 test("SECUENCIA: la primera palabra debe tener exactamente 3 letras", () => {
-  for (const m of ["AB 200", "ABCD 200", "GL4 200", "GL- 200", "A1B 200", "123 200"]) {
+  for (const m of ["AB 200", "ABCD 200", "GL4 200", "GL- 200", "123 200"]) {
     assert.equal(modeloParaChileautos(m), m.split(" ")[0], m);
   }
+});
+
+/* ---------- letras y números pegados ("GLA200") ---------- */
+test("SEPARACIÓN: 'GLA200' se separa con un espacio y se busca como 'GLA 200'", () => {
+  const casos = [["GLA200", "GLA 200"], ["gla200", "gla 200"], ["GLA200 4MATIC", "GLA 200"], ["GLA200D", "GLA 200"], ["CLA250 AMG", "CLA 250"], ["GLC300D", "GLC 300"], ["ABC123", "ABC 123"], ["  GLA200  ", "GLA 200"]];
+  for (const [entrada, esperado] of casos) assert.equal(modeloParaChileautos(entrada), esperado, entrada);
+  assert.equal(detalleModeloChileautos("GLA200 4MATIC").omitido, "4MATIC");
+  assert.equal(detalleModeloChileautos("GLA200D").omitido, "D");
+});
+
+test("SEPARACIÓN: respeta los mismos bordes (111 a 999) que la excepción con espacio", () => {
+  for (const m of ["ABC110", "ABC1000", "GLA2000", "ABC99", "ABC4"]) assert.equal(modeloParaChileautos(m), m, m);
+  assert.equal(modeloParaChileautos("ABC111"), "ABC 111");
+  assert.equal(modeloParaChileautos("ABC999"), "ABC 999");
+});
+
+test("SEPARACIÓN: no rompe modelos de una palabra con número (NP300, RAV4, C3, i10, Q50, X70, 3008)", () => {
+  for (const m of ["NP300", "RAV4", "C3", "i10", "Q50", "X70", "3008", "208", "ASX", "T-Cross", "X-Trail", "CX-5", "Yaris"]) {
+    assert.equal(modeloParaChileautos(m), m, m);
+  }
+});
+
+test("SEPARACIÓN: las series pegadas a una letra de versión se reconocen (X5M, Q5S, A4Avant)", () => {
+  assert.equal(modeloParaChileautos("X5M"), "X5");
+  assert.equal(modeloParaChileautos("Q5S"), "Q5");
+  assert.equal(modeloParaChileautos("A4Avant"), "A4");
+  assert.equal(modeloParaChileautos("CX5"), "CX-5");
+  assert.equal(modeloParaChileautos("Tiggo7"), "Tiggo 7");
+});
+
+test("SEPARACIÓN: solo se separa la primera palabra, no la versión que viene después", () => {
+  assert.equal(modeloParaChileautos("Yaris 1.5GLI"), "Yaris");
+  assert.equal(modeloParaChileautos("GLA200 2.0T"), "GLA 200");
+});
+
+test("SEPARACIÓN: la dirección de búsqueda usa 'GLA 200' para una Mercedes pegada como GLA200", () => {
+  const u = decodeURIComponent(buildChileautosUrl({ marca: "MERCEDES BENZ", modelo: "GLA200 1.3", anio: 2021, km: 40000 }));
+  assert.ok(u.includes("Marca.Mercedes-Benz._.Modelo.GLA 200.)"), u);
 });
 
 test("SECUENCIA: no pisa a las otras reglas (Tiggo 7, CX 5, Yaris Cross, Land Cruiser siguen igual)", () => {
