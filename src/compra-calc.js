@@ -54,14 +54,19 @@ const toPositiveInt = (v) => {
 };
 export const parseKm = toPositiveInt;
 
-/** Rangos de año y kilometraje que se le piden a Chileautos. */
+/**
+ * Rangos de año y kilometraje que se le piden a Chileautos.
+ * Kilometraje: SIEMPRE desde el mínimo (0 km, sin piso) hasta el kilometraje ingresado más el % de margen
+ * (+20 %), redondeado hacia arriba a miles. Ej.: 60.000 km → de 0 a 72.000 km.
+ */
+export const KM_MINIMO = 0;
 export function calcularFiltros({ anio, km, margenAnio = 1, pctKm = MARGEN_KM }) {
   const a = toPositiveInt(anio);
   const k = toPositiveInt(km);
   return {
     anioMin: a - margenAnio,
     anioMax: a + margenAnio,
-    kmMin: Math.max(0, Math.floor((k * (1 - pctKm)) / 1000) * 1000),
+    kmMin: KM_MINIMO,
     kmMax: Math.ceil((k * (1 + pctKm)) / 1000) * 1000,
   };
 }

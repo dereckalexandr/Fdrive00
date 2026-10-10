@@ -28,10 +28,10 @@ test("splitModeloVersion separa la primera palabra (modelo) del resto (versión)
 });
 
 /* ---------- dirección de búsqueda ---------- */
-test("calcularFiltros: año ±1 y kilometraje ±20 % redondeado a miles", () => {
-  assert.deepEqual(calcularFiltros({ anio: 2020, km: 60000 }), { anioMin: 2019, anioMax: 2021, kmMin: 48000, kmMax: 72000 });
-  assert.deepEqual(calcularFiltros({ anio: 2020, km: 60000, margenAnio: 0 }), { anioMin: 2020, anioMax: 2020, kmMin: 48000, kmMax: 72000 });
-  assert.equal(calcularFiltros({ anio: 2020, km: 12345 }).kmMin, 9000);
+test("calcularFiltros: año ±1 y kilometraje desde 0 hasta el ingresado + 20 % (redondeado a miles)", () => {
+  assert.deepEqual(calcularFiltros({ anio: 2020, km: 60000 }), { anioMin: 2019, anioMax: 2021, kmMin: 0, kmMax: 72000 });
+  assert.deepEqual(calcularFiltros({ anio: 2020, km: 60000, margenAnio: 0 }), { anioMin: 2020, anioMax: 2020, kmMin: 0, kmMax: 72000 });
+  assert.equal(calcularFiltros({ anio: 2020, km: 12345 }).kmMin, 0);
   assert.equal(calcularFiltros({ anio: 2020, km: 12345 }).kmMax, 15000);
 });
 
@@ -39,7 +39,7 @@ test("buildChileautosUrl usa la sintaxis comprobada en el sitio", () => {
   const url = buildChileautosUrl({ marca: "Toyota", modelo: "Yaris", anio: 2020, km: 60000 });
   assert.equal(
     url,
-    "https://www.chileautos.cl/vehiculos/?q=(And.(C.Marca.Toyota._.Modelo.Yaris.)_.Ano.range(2019..2021)._.Kilometraje.range(48000..72000).)&sort=~Price"
+    "https://www.chileautos.cl/vehiculos/?q=(And.(C.Marca.Toyota._.Modelo.Yaris.)_.Ano.range(2019..2021)._.Kilometraje.range(0..72000).)&sort=~Price"
   );
 });
 
@@ -54,7 +54,7 @@ test("buildChileautosUrl codifica espacios y devuelve null si falta un dato obli
 
 test("buildChileautosUrl: km con puntos ('60.000') se interpreta bien", () => {
   const url = buildChileautosUrl({ marca: "Kia", modelo: "Rio", anio: 2019, km: "60.000" });
-  assert.ok(url.includes("Kilometraje.range(48000..72000)"));
+  assert.ok(url.includes("Kilometraje.range(0..72000)"));
 });
 
 /* ---------- texto pegado ---------- */
@@ -75,7 +75,7 @@ test("esPrecioSimbolico detecta los precios de relleno vistos en Chileautos", ()
 
 /* ---------- estimación ---------- */
 const av = (id, precio, extra = {}) => ({ id, precio, anio: 2020, km: 60000, destacado: false, ...extra });
-const F = { anioMin: 2019, anioMax: 2021, kmMin: 48000, kmMax: 72000 };
+const F = { anioMin: 2019, anioMax: 2021, kmMin: 0, kmMax: 72000 };
 
 test("estimarCompra: promedio de los 5 primeros; publicación = promedio + 500.000; compra = promedio − 2 millones", () => {
   const r = estimarCompra([av("a", 8000000), av("b", 9000000), av("c", 10000000), av("d", 11000000), av("e", 12000000), av("f", 13000000), av("g", 14000000)], F);
@@ -162,7 +162,7 @@ import { TRANSMISIONES, COMBUSTIBLES } from "../src/compra-calc.js";
 
 const BASE = { marca: "Toyota", modelo: "Yaris", anio: 2020, km: 60000 };
 const G = "(C.Marca.Toyota._.Modelo.Yaris.)";
-const R = "Ano.range(2019..2021)._.Kilometraje.range(48000..72000)";
+const R = "Ano.range(2019..2021)._.Kilometraje.range(0..72000)";
 const url = (extra) => buildChileautosUrl({ ...BASE, ...extra });
 const q = (cuerpo) => `https://www.chileautos.cl/vehiculos/?q=${cuerpo}&sort=~Price`;
 
@@ -597,4 +597,39 @@ test("OMITIR: la lista es configurable y se puede dejar vacía", () => {
   assert.deepEqual(OMITIR_EN_MODELO, ["All New", "New"]);
   assert.equal(modeloParaChileautos("ALL NEW RIO", undefined, []), "ALL");
   assert.equal(modeloParaChileautos("NUEVO RIO", undefined, ["Nuevo"]), "RIO");
+});
+
+/* ---------- kilometraje: siempre desde el mínimo ---------- */
+import { KM_MINIMO } from "../src/compra-calc.js";
+
+test("KILOMETRAJE: el límite inferior es siempre el mínimo (0), sin importar el kilometraje ingresado", () => {
+  assert.equal(KM_MINIMO, 0);
+  for (const km of [1, 500, 5000, 12345, 60000, 99999, 150000, 300000]) {
+    assert.equal(calcularFiltros({ anio: 2020, km }).kmMin, 0, String(km));
+  }
+});
+
+test("KILOMETRAJE: el tope es el ingresado + 20 %, redondeado hacia arriba a miles", () => {
+  const casos = [[5000, 6000], [12345, 15000], [60000, 72000], [99999, 120000], [150000, 180000], [100, 1000]];
+  for (const [km, esperado] of casos) assert.equal(calcularFiltros({ anio: 2020, km }).kmMax, esperado, String(km));
+  assert.equal(calcularFiltros({ anio: 2020, km: 60000, pctKm: 0.1 }).kmMax, 66000); // el % sigue siendo configurable
+});
+
+test("KILOMETRAJE: la dirección de búsqueda pide de 0 al tope", () => {
+  const url = decodeURIComponent(buildChileautosUrl({ marca: "Toyota", modelo: "Yaris", anio: 2020, km: 60000 }));
+  assert.ok(url.includes("Kilometraje.range(0..72000)"), url);
+  assert.ok(!/Kilometraje\.range\((?!0\.\.)/.test(url), "el límite inferior no puede ser otro número");
+  const u2 = decodeURIComponent(buildChileautosUrl({ marca: "Kia", modelo: "Rio", anio: 2019, km: "45.500" }));
+  assert.ok(u2.includes("Kilometraje.range(0..55000)"), u2);
+});
+
+test("KILOMETRAJE: un aviso con menos kilómetros que el ingresado ya no se descarta", () => {
+  const F0 = { anioMin: 2019, anioMax: 2021, ...calcularFiltros({ anio: 2020, km: 60000 }) };
+  const r = estimarCompra([
+    av("a", 8000000, { km: 5000 }), av("b", 8100000, { km: 30000 }), av("c", 8200000, { km: 60000 }), av("d", 8300000, { km: 72000 }),
+    av("e", 8400000, { km: 72001 }),   // pasa del tope
+  ], F0);
+  const m = Object.fromEntries(r.descartados.map((d) => [d.id, d.motivo]));
+  assert.deepEqual(r.validos.map((v) => v.id), ["a", "b", "c", "d"]);
+  assert.equal(m.e, "Kilometraje fuera del filtro");
 });

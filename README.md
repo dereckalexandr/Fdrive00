@@ -201,7 +201,7 @@ dentro de `src/cav-parser.js`.
 Pestaña **Tasación de compra**: estima cuánto pagar por un vehículo con los avisos de Chileautos. No guarda nada.
 
 1. Se ingresan a mano la **patente** y el **kilometraje** (obligatorios). Marca, modelo, año y versión se escriben, se completan subiendo el CAV o con el marcador de patentechile.com (ver abajo).
-2. El botón "Abrir la búsqueda en Chileautos" abre la lista ya filtrada (marca, modelo, año ±1, kilometraje ±20 %, orden por precio más bajo y, si se eligen, **transmisión** Mecánica/Automática y **combustible** Bencina/Diesel/Híbrido/Eléctrico).
+2. El botón "Abrir la búsqueda en Chileautos" abre la lista ya filtrada (marca, modelo, año ±1, kilometraje **desde 0 km hasta el ingresado + 20 %** (60.000 km → 0 a 72.000 km), orden por precio más bajo y, si se eligen, **transmisión** Mecánica/Automática y **combustible** Bencina/Diesel/Híbrido/Eléctrico).
 3. Un **marcador** del navegador (se arrastra una vez a la barra de favoritos) lee la página de Chileautos que el usuario tiene abierta y copia los avisos; se pegan en la app.
 4. Resultado: **precio promedio** (los 5 avisos más baratos), **precio sugerido de publicación** (precio promedio + $500.000) y **precio sugerido de compra** (precio promedio − **margen bruto**). El margen bruto se elige antes de calcular en una lista ($1.500.000 a $10.000.000; parte en $2.000.000) y solo mueve el precio de compra. Las constantes están en `src/compra-calc.js` (`N_PRIMEROS`, `INCREMENTO_PUBLICACION`, `MARGENES_BRUTOS`).
 

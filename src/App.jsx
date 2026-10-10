@@ -3308,7 +3308,7 @@ function TasacionCompra() {
               className="inline-block bg-stone-900 text-white px-4 py-2.5 text-sm font-medium hover:bg-stone-800">Abrir la búsqueda en Chileautos ↗</a>
             <p className="text-xs text-stone-500 mt-2">
               Filtros aplicados: {marcaBusqueda} {modeloBusqueda} · año {filtros.anioMin === filtros.anioMax ? filtros.anioMin : `${filtros.anioMin}–${filtros.anioMax}`} ·
-              {" "}{filtros.kmMin.toLocaleString("es-CL")}–{filtros.kmMax.toLocaleString("es-CL")} km
+              {" "}{filtros.kmMin > 0 ? `${filtros.kmMin.toLocaleString("es-CL")}–` : "hasta "}{filtros.kmMax.toLocaleString("es-CL")} km
               {transLabel ? ` · transmisión ${transLabel.toLowerCase()}` : ""}{combLabel ? ` · combustible ${combLabel.toLowerCase()}` : ""} · orden: precio más bajo.
             </p>
             {(modeloOmitido || modeloBusqueda !== modelo.trim()) && (
