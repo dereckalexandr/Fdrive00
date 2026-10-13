@@ -42,16 +42,16 @@ export const PERMISOS = [
   { id: "reportes.globales", grupo: "Administración", nombre: "Ver reportes de todos los locales", disponible: true },
   { id: "reportes.local", grupo: "Administración", nombre: "Ver reportes de su local", disponible: false },
   // Comercial
-  { id: "leads.propios", grupo: "Comercial", nombre: "Ver y gestionar sus propios leads", disponible: false },
-  { id: "leads.local", grupo: "Comercial", nombre: "Ver los leads de su local", disponible: false },
-  { id: "leads.asignar", grupo: "Comercial", nombre: "Asignar y reasignar leads", disponible: false },
-  { id: "ventas.operar", grupo: "Comercial", nombre: "Operar ventas", disponible: false },
+  { id: "leads.propios", grupo: "Comercial", nombre: "Ver y gestionar sus propios leads", disponible: true },
+  { id: "leads.local", grupo: "Comercial", nombre: "Ver los leads de su local", disponible: true },
+  { id: "leads.asignar", grupo: "Comercial", nombre: "Asignar y reasignar leads", disponible: true },
+  { id: "ventas.operar", grupo: "Comercial", nombre: "Operar ventas", disponible: true },
   { id: "compras.operar", grupo: "Comercial", nombre: "Operar compras", disponible: false },
   { id: "consignaciones.operar", grupo: "Comercial", nombre: "Operar consignaciones", disponible: false },
-  { id: "inventario.ver", grupo: "Comercial", nombre: "Ver el inventario", disponible: false },
-  { id: "inventario.editar", grupo: "Comercial", nombre: "Editar el inventario", disponible: false },
+  { id: "inventario.ver", grupo: "Comercial", nombre: "Ver el inventario", disponible: true },
+  { id: "inventario.editar", grupo: "Comercial", nombre: "Editar el inventario", disponible: true },
   { id: "cotizaciones.crear", grupo: "Comercial", nombre: "Crear cotizaciones y cierres", disponible: false },
-  { id: "agenda.usar", grupo: "Comercial", nombre: "Seguimiento y agenda", disponible: false },
+  { id: "agenda.usar", grupo: "Comercial", nombre: "Seguimiento y agenda", disponible: true },
   { id: "comisiones.propias", grupo: "Comercial", nombre: "Ver sus propias comisiones", disponible: false },
   { id: "comisiones.local", grupo: "Comercial", nombre: "Ver las comisiones de su local", disponible: false },
   { id: "metas.gestionar", grupo: "Comercial", nombre: "Definir metas", disponible: false },
@@ -212,7 +212,6 @@ export function validarUsuario(input, { esAlta = true } = {}) {
    antes de guardar, para que nadie guarde basura aunque manipule la petición. */
 export const CONFIG_DEFECTO = {
   fuentes_lead: ["Sitio web", "Llamada", "WhatsApp", "Redes sociales", "Referido", "Visita al local"],
-  estados_lead: ["Nuevo", "Contactado", "En seguimiento", "Cotizado", "Reservado", "Cerrado ganado", "Cerrado perdido"],
   motivos_perdida: ["Precio", "Compró en otro lugar", "Sin respuesta", "Cambió de idea", "Financiamiento rechazado"],
   comision_ventas_pct: 0,
   comision_compras_pct: 0,
@@ -220,7 +219,7 @@ export const CONFIG_DEFECTO = {
   meta_mensual_unidades: 0,
 };
 
-const CLAVES_LISTA_TEXTO = ["fuentes_lead", "estados_lead", "motivos_perdida"];
+const CLAVES_LISTA_TEXTO = ["fuentes_lead", "motivos_perdida"];
 const CLAVES_PORCENTAJE = ["comision_ventas_pct", "comision_compras_pct", "comision_consignaciones_pct"];
 
 /** Devuelve { ok, value } con el valor limpio, o { ok:false }. */

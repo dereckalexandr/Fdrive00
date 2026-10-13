@@ -1,0 +1,179 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import {
+  ETAPAS, ETAPAS_ACTIVAS, normalizarPatente, patenteValida, soloDigitos,
+  validarVehiculo, ocultarCosto, validarCliente, validarLead, validarCambioEtapa, elegirAsignado,
+  validarTarea, claseTarea, agruparTareas, contarPorEtapa, leadsPorAtender, puedeEditarLead,
+} from "../supabase/functions/api/ventas-core.js";
+
+const VEH = { patente: "ab cd-12", marca: "Toyota", modelo: "Yaris", anio: 2020, km: 45000, precioLista: 9500000, costo: 8000000 };
+
+test("Patente: normaliza y valida los dos formatos chilenos", () => {
+  assert.equal(normalizarPatente("ab cd-12"), "ABCD12");
+  assert.ok(patenteValida("ABCD12"));
+  assert.ok(patenteValida("ab1234"));
+  assert.ok(!patenteValida("ABC123"));
+  assert.ok(!patenteValida(""));
+  assert.equal(soloDigitos("+56 9 1234 5678"), "56912345678");
+});
+
+test("Vehículo: alta correcta con valores por defecto", () => {
+  const r = validarVehiculo(VEH);
+  assert.ok(r.ok);
+  assert.equal(r.value.patente, "ABCD12");
+  assert.equal(r.value.estado, "disponible");
+  assert.equal(r.value.precio_lista, 9500000);
+  assert.equal(r.value.transmision, null);
+  assert.deepEqual(r.value.fotos, []);
+});
+
+test("Vehículo: rechaza datos malos", () => {
+  assert.equal(validarVehiculo({ ...VEH, patente: "123" }).error, "patente_invalida");
+  assert.equal(validarVehiculo({ ...VEH, marca: "" }).error, "marca_modelo_requeridos");
+  assert.equal(validarVehiculo({ ...VEH, anio: 1900 }).error, "anio_invalido");
+  assert.equal(validarVehiculo({ ...VEH, anio: "" }).error, "anio_invalido");
+  assert.equal(validarVehiculo({ ...VEH, km: -5 }).error, "km_invalido");
+  assert.equal(validarVehiculo({ ...VEH, precioLista: "abc" }).error, "precio_invalido");
+  assert.equal(validarVehiculo({ ...VEH, estado: "robado" }).error, "estado_invalido");
+  assert.equal(validarVehiculo({ ...VEH, transmision: "Cuántica" }).error, "transmision_invalida");
+  assert.equal(validarVehiculo({ ...VEH, combustible: "Agua" }).error, "combustible_invalido");
+  assert.equal(validarVehiculo(null).error, "patente_invalida");
+});
+
+test("Vehículo: fotos solo con ids válidos, sin repetir, máximo 8", () => {
+  const ids = Array.from({ length: 12 }, (_, i) => `foto${i}abcdef`);
+  const r = validarVehiculo({ ...VEH, fotos: ["../hack", "ok1234ab", "ok1234ab", ...ids] });
+  assert.ok(!r.value.fotos.includes("../hack"));
+  assert.equal(r.value.fotos.filter((f) => f === "ok1234ab").length, 1);
+  assert.equal(r.value.fotos.length, 8);
+});
+
+test("El costo del vehículo se oculta a quien no puede editar el inventario", () => {
+  const v = { id: 1, patente: "ABCD12", costo: 8000000, precio_lista: 9500000 };
+  assert.equal(ocultarCosto(v, false).costo, undefined);
+  assert.equal(ocultarCosto(v, false).precio_lista, 9500000);
+  assert.equal(ocultarCosto(v, true).costo, 8000000);
+});
+
+test("Cliente: validaciones", () => {
+  const ok = validarCliente({ nombre: "  Ana   Soto ", rut: "12.345.678-5", telefono: "+56 9 1234 5678", email: "ANA@x.cl" });
+  assert.ok(ok.ok);
+  assert.equal(ok.value.nombre, "Ana Soto");
+  assert.equal(ok.value.rut, "12345678-5");
+  assert.equal(ok.value.email, "ana@x.cl");
+  assert.equal(validarCliente({ nombre: "A", telefono: "912345678" }).error, "nombre_invalido");
+  assert.equal(validarCliente({ nombre: "Ana Soto", rut: "12345678-9", telefono: "912345678" }).error, "rut_invalido");
+  assert.equal(validarCliente({ nombre: "Ana Soto", telefono: "123" }).error, "telefono_invalido");
+  assert.equal(validarCliente({ nombre: "Ana Soto", email: "no" }).error, "email_invalido");
+  assert.equal(validarCliente({ nombre: "Ana Soto" }).error, "contacto_requerido");
+  // El RUT es opcional.
+  assert.equal(validarCliente({ nombre: "Ana Soto", telefono: "912345678" }).value.rut, null);
+});
+
+test("Lead: parte de pago y financiamiento solo se guardan si se marcan", () => {
+  const sin = validarLead({ vehiculoInteres: "Un SUV", fuente: "Llamada", parteDePago: { tiene: false, marca: "x" }, financiamiento: { quiere: false, pie: 5 } });
+  assert.deepEqual(sin.value.parte_pago, {});
+  assert.deepEqual(sin.value.financiamiento, {});
+
+  const con = validarLead({
+    parteDePago: { tiene: true, patente: "ab-cd12", marca: "Kia", modelo: "Rio", anio: 2015, km: 90000, valor: 3000000 },
+    financiamiento: { quiere: true, pie: 2000000, banco: "Banco X", estado: "por_evaluar" },
+  });
+  assert.equal(con.value.parte_pago.patente, "ABCD12");
+  assert.equal(con.value.parte_pago.valor, 3000000);
+  assert.equal(con.value.financiamiento.pie, 2000000);
+
+  assert.equal(validarLead({ parteDePago: { tiene: true, anio: 1800 } }).error, "parte_pago_invalida");
+  assert.equal(validarLead({ parteDePago: { tiene: true, patente: "123" } }).error, "patente_invalida");
+  assert.equal(validarLead({ financiamiento: { quiere: true, estado: "inventado" } }).error, "financiamiento_invalido");
+});
+
+test("Etapas: solo se puede mover a las disponibles; perder exige motivo", () => {
+  assert.deepEqual(ETAPAS_ACTIVAS, ["nuevo", "contactado", "seguimiento", "perdido"]);
+  assert.equal(ETAPAS.length, 7);
+  assert.equal(validarCambioEtapa({ desde: "nuevo", hacia: "ganado" }).error, "etapa_no_disponible");
+  assert.equal(validarCambioEtapa({ desde: "nuevo", hacia: "cotizado" }).error, "etapa_no_disponible");
+  assert.equal(validarCambioEtapa({ desde: "nuevo", hacia: "nuevo" }).error, "sin_cambio");
+  assert.equal(validarCambioEtapa({ desde: "nuevo", hacia: "perdido" }).error, "motivo_requerido");
+  const perder = validarCambioEtapa({ desde: "seguimiento", hacia: "perdido", motivo: "Precio" });
+  assert.deepEqual(perder.value, { etapa: "perdido", motivo_perdida: "Precio" });
+  // Al volver a una etapa abierta se limpia el motivo.
+  assert.equal(validarCambioEtapa({ desde: "perdido", hacia: "seguimiento", puedeReabrir: true }).value.motivo_perdida, null);
+});
+
+test("Un lead cerrado solo lo reabre el supervisor", () => {
+  assert.equal(validarCambioEtapa({ desde: "perdido", hacia: "contactado" }).error, "lead_cerrado");
+  assert.ok(validarCambioEtapa({ desde: "perdido", hacia: "contactado", puedeReabrir: true }).ok);
+});
+
+test("Reparto rotativo: quien nunca recibió, luego quien lleva más tiempo", () => {
+  const c = [{ id: "b", nombre: "B" }, { id: "a", nombre: "A" }, { id: "c", nombre: "C" }];
+  assert.equal(elegirAsignado(c, {}).id, "a", "todos nuevos: desempate estable por id");
+  assert.equal(elegirAsignado(c, { a: "2026-10-01T10:00:00Z", b: "2026-10-02T10:00:00Z" }).id, "c", "c nunca recibió");
+  assert.equal(elegirAsignado(c, { a: "2026-10-03T10:00:00Z", b: "2026-10-01T10:00:00Z", c: "2026-10-02T10:00:00Z" }).id, "b");
+  assert.equal(elegirAsignado([], {}), null);
+  assert.equal(elegirAsignado(null, {}), null);
+});
+
+test("Reparto rotativo: repartidos varios leads seguidos quedan parejos", () => {
+  const c = [{ id: "a" }, { id: "b" }, { id: "c" }];
+  const ultima = {};
+  const cuenta = { a: 0, b: 0, c: 0 };
+  for (let i = 0; i < 9; i++) {
+    const quien = elegirAsignado(c, ultima);
+    ultima[quien.id] = new Date(Date.UTC(2026, 9, 1, 10, i)).toISOString();
+    cuenta[quien.id]++;
+  }
+  assert.deepEqual(cuenta, { a: 3, b: 3, c: 3 });
+});
+
+test("Tareas: validación", () => {
+  const ok = validarTarea({ titulo: "  Llamar   a Ana ", tipo: "llamada", venceEn: "2026-10-14T15:00:00Z" });
+  assert.ok(ok.ok);
+  assert.equal(ok.value.titulo, "Llamar a Ana");
+  assert.equal(validarTarea({ titulo: "ab", venceEn: "2026-10-14T15:00:00Z" }).error, "titulo_invalido");
+  assert.equal(validarTarea({ titulo: "Llamar", tipo: "magia", venceEn: "2026-10-14T15:00:00Z" }).error, "tipo_invalido");
+  assert.equal(validarTarea({ titulo: "Llamar", venceEn: "mañana" }).error, "fecha_invalida");
+});
+
+test("Tareas: vencida, hoy o próxima según el día en Chile", () => {
+  const ahora = new Date("2026-10-14T15:00:00Z"); // 12:00 en Santiago (UTC-3 en octubre)
+  assert.equal(claseTarea("2026-10-14T20:00:00Z", ahora), "hoy");
+  assert.equal(claseTarea("2026-10-13T10:00:00Z", ahora), "vencida");
+  assert.equal(claseTarea("2026-10-15T14:00:00Z", ahora), "proxima");
+  // 02:00 UTC del día 15 es todavía el 14 por la noche en Chile: sigue siendo "hoy".
+  assert.equal(claseTarea("2026-10-15T02:00:00Z", ahora), "hoy");
+});
+
+test("Tareas: se agrupan y ordenan, y las hechas no aparecen", () => {
+  const ahora = new Date("2026-10-14T15:00:00Z");
+  const g = agruparTareas([
+    { id: 1, vence_en: "2026-10-14T22:00:00Z" }, { id: 2, vence_en: "2026-10-14T13:00:00Z" },
+    { id: 3, vence_en: "2026-10-12T13:00:00Z" }, { id: 4, vence_en: "2026-10-20T13:00:00Z" },
+    { id: 5, vence_en: "2026-10-14T13:00:00Z", hecha: true },
+  ], ahora);
+  assert.deepEqual(g.vencidas.map((t) => t.id), [3]);
+  assert.deepEqual(g.hoy.map((t) => t.id), [2, 1]);
+  assert.deepEqual(g.proximas.map((t) => t.id), [4]);
+});
+
+test("Embudo: conteos por etapa y leads por atender", () => {
+  const leads = [
+    { etapa: "nuevo", ultimo_contacto: null }, { etapa: "nuevo", ultimo_contacto: "2026-10-01T00:00:00Z" },
+    { etapa: "contactado" }, { etapa: "perdido" }, { etapa: "rara" },
+  ];
+  const c = contarPorEtapa(leads);
+  assert.equal(c.nuevo, 2); assert.equal(c.contactado, 1); assert.equal(c.perdido, 1); assert.equal(c.ganado, 0);
+  assert.equal(leadsPorAtender(leads).length, 1);
+});
+
+test("Permiso para editar un lead: dueño habilitado para ventas, o supervisor", () => {
+  const lead = { asignado_a: "u1" };
+  const base = { esAdmin: false, lead };
+  assert.ok(puedeEditarLead({ ...base, usuarioId: "u1", permisos: ["leads.propios", "ventas.operar"] }));
+  assert.ok(!puedeEditarLead({ ...base, usuarioId: "u1", permisos: ["leads.propios"] }), "sin habilitación de ventas");
+  assert.ok(!puedeEditarLead({ ...base, usuarioId: "u2", permisos: ["leads.propios", "ventas.operar"] }), "lead ajeno");
+  assert.ok(!puedeEditarLead({ ...base, usuarioId: "u2", permisos: ["leads.local"] }), "ver el local no es modificar");
+  assert.ok(puedeEditarLead({ ...base, usuarioId: "u2", permisos: ["leads.asignar"] }));
+  assert.ok(puedeEditarLead({ ...base, esAdmin: true, usuarioId: "master", permisos: [] }));
+});

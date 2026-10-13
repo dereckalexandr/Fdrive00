@@ -148,6 +148,15 @@ const supabaseAuth = {
       throw e;
     }
   },
+  // Módulo comercial (inventario, clientes, leads, tareas). Cuenta maestra o persona del CRM.
+  async ventas(op, params = {}) {
+    try {
+      return await call({ action: "ventas", token: sessionToken, op, ...params });
+    } catch (e) {
+      if (e.status === 401) window.dispatchEvent(new Event("df-session-expired"));
+      throw e;
+    }
+  },
   logout() { sessionToken = null; lastProfileLogin = null; },
 };
 

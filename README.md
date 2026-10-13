@@ -233,7 +233,7 @@ La plataforma está creciendo hacia un CRM con 8 perfiles (Administrador general
 - **Permisos**: matriz de permisos por rol, editable y con "Restablecer". El rol Administrador general siempre tiene todo y no se asigna a personas (hoy es la cuenta maestra por correo y clave).
 - **Reportes**: usuarios por rol y por local, inspecciones y tasaciones de los últimos 6 meses y por persona. Los reportes comerciales llegarán con los perfiles de Ejecutivo y Jefe Local.
 - **Bitácora**: quién hizo qué y cuándo (usuarios, permisos, configuración, locales), con antes/después. Solo se agrega, nunca se edita.
-- **Configuración**: locales, fuentes de leads, etapas del embudo, motivos de pérdida, comisiones y meta mensual.
+- **Configuración**: locales, fuentes de leads, motivos de pérdida, comisiones y meta mensual.
 
 **Cómo ingresan las personas:** en la pantalla de inicio, tarjeta **Personal** (RUT + clave). Llegan a su **estación de trabajo**, que hoy muestra los módulos existentes según sus permisos (Inspecciones y tasaciones, Tasación de compra) y lista lo que viene en camino. Los perfiles anteriores de Ejecutivo e Inspector por código siguen funcionando igual.
 
@@ -243,6 +243,33 @@ La plataforma está creciendo hacia un CRM con 8 perfiles (Administrador general
 - Un usuario con `inspecciones.usar` / `tasaciones.usar` solo toca sus propias inspecciones, tasaciones y fotos. Toda la administración del CRM (acción `crm`) la puede hacer **solo la cuenta maestra** en esta etapa.
 - `supabase/functions/api/crm-core.js` es la única fuente de la lista de roles y permisos (lo usan el servidor, la pantalla y las pruebas). Para agregar un permiso: súmalo a `PERMISOS` y a los roles que correspondan en `PERMISOS_POR_ROL`.
 - Pruebas: `tests/crm-core.test.mjs` (reglas) y `tests/crm-api.test.mjs`, que ejecuta la función real contra una base falsa en memoria (ingreso, permisos, desactivación, bitácora, bloqueo).
+
+## CRM · Entrega 2A: módulo comercial del Ejecutivo (ventas)
+
+Primera parte del perfil Ejecutivo. Las cotizaciones y reservas (2B) y el cierre, comisiones y metas (2C) vienen después.
+
+**Instalar (una sola vez, después de `supabase-crm-setup.sql`):**
+1. Supabase → *SQL Editor* → pegar `supabase-crm-ventas.sql` → *Run*. Crea `vehiculos`, `clientes`, `leads`, `lead_eventos` y `tareas` (RLS activado, sin políticas). Se puede repetir sin riesgo.
+2. Redesplegar la función: `node scripts/deploy-api.mjs`.
+
+**Qué incluye** (para quien tenga permisos de leads o inventario: tarjeta **Ventas** en su estación de trabajo, y pestaña **Comercial** en el panel del administrador):
+- **Inicio**: leads por atender, tareas de hoy y vencidas, leads en seguimiento y meta del mes (el avance real llega con el cierre de venta).
+- **Leads** en columnas (Nuevo → Contactado → En seguimiento → Cerrado perdido); se arrastra una tarjeta, o en el celular se usa el selector de etapa. Cada lead guarda cliente, vehículo de interés (del inventario o texto libre), fuente, **vehículo en parte de pago** y **financiamiento** (pie, banco, estado de la evaluación).
+- **Ficha del lead**: llamar / WhatsApp / correo con un toque, registrar contactos y notas (el primer contacto pasa el lead de "Nuevo" a "Contactado"), agendar tareas, reasignar (supervisor) e historial completo.
+- **Agenda**: tareas vencidas, de hoy y próximas; el supervisor ve las de todo el local.
+- **Inventario** cargado a mano: patente, marca, modelo, versión, año, km, color, transmisión, combustible, precio de lista, costo, estado (En preparación / Disponible / Reservado / Vendido), notas y hasta 6 fotos. El **costo y el margen solo los ven quienes editan el inventario**. Los vehículos no se borran: se archivan.
+- **Clientes** con contacto, RUT opcional (si ya existe, el lead reutiliza al cliente).
+
+**Reglas (todas se validan en el servidor):**
+- El Ejecutivo ve y modifica **solo los leads que le asignaron** y solo si está habilitado para **Ventas** (permiso `ventas.operar`). Si se lo quitan, sigue viendo los suyos pero no los modifica. Un lead nuevo creado por un Ejecutivo queda a su nombre.
+- Quien tiene `leads.local` (por ejemplo Marketing) ve los leads del local sin poder modificarlos. Quien tiene `leads.asignar` (Jefe Local) ve y modifica todo el local y reasigna.
+- **Asignación mixta**: el supervisor elige a quién o deja el **reparto rotativo** (le toca a quien lleva más tiempo sin recibir un lead; solo entre personas activas y habilitadas para ventas). Si no hay nadie habilitado, el lead queda sin asignar para que el supervisor lo reparta.
+- Cada persona trabaja solo con datos de **su local**. La cuenta maestra elige el local.
+- Solo se puede mover a las etapas ya disponibles (las de cotizado, reservado y ganado se activan en 2B y 2C). Para perder un lead se exige un **motivo** (lista editable en Configuración). Un lead cerrado solo lo reabre el supervisor.
+- El día de una tarea (vencida / hoy / próxima) se calcula en hora de Chile.
+- Quedan en la bitácora: alta y cambios de vehículos (con precio, costo, estado y km antes/después), clientes, creación, movimiento y reasignación de leads.
+- Las fotos del inventario se guardan como `vfoto::<vehículo>::<id>` en `kv_store`; las ve quien trabaja con inventario o leads y solo las sube quien edita el inventario.
+- Código: reglas puras en `supabase/functions/api/ventas-core.js`, operaciones del servidor en `ventas.ts`, pantallas en `src/crm-ventas.jsx` y `src/crm-inventario.jsx`. Pruebas: `tests/ventas-core.test.mjs` y `tests/ventas-api.test.mjs` (la función real contra una base falsa).
 
 ## Desplegar en un hosting público
 

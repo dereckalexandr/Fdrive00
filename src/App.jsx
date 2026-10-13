@@ -17,6 +17,7 @@ import { normalizePatente, isPatenteValida, splitModeloVersion, parseKm, calcula
 import { buildBookmarkletHref } from "./chileautos-bookmarklet.js";
 import { buildPatenteBookmarkletHref } from "./patente-bookmarklet.js";
 import { AdminCrmPanel, PESTANAS_CRM } from "./crm-admin.jsx";
+import { ModuloVentas } from "./crm-ventas.jsx";
 import { LoginPersonal, CambioClaveObligatorio, EstacionTrabajo } from "./crm-estacion.jsx";
 import { photoKey, photoPrefix, makePhotoId, compressImage, collectPhotoIds, diffIds, MAX_PHOTOS_PER_ITEM, MAX_PHOTOS_PER_TASACION } from "./photos.js";
 
@@ -4324,11 +4325,28 @@ function AppRoutes() {
   }
 
   if (me && screen === "estacion") {
-    return <EstacionTrabajo me={me} onAbrir={(modulo) => setScreen(modulo === "compra" ? "compraPersonal" : "inspectorPersonal")} onSalir={exitToLanding} />;
+    return <EstacionTrabajo me={me} onAbrir={(modulo) => setScreen(modulo === "compra" ? "compraPersonal" : modulo === "ventas" ? "ventasPersonal" : "inspectorPersonal")} onSalir={exitToLanding} />;
   }
 
   if (me && screen === "inspectorPersonal") {
     return <InspectorDashboard inspector={{ id: me.id, nombre: me.nombre }} onExit={() => setScreen("estacion")} />;
+  }
+
+  if (me && screen === "ventasPersonal") {
+    return (
+      <div className="min-h-screen bg-stone-100 pb-16">
+        <div className="bg-stone-900 text-stone-100">
+          <div className="max-w-6xl mx-auto px-6 py-6 flex items-center justify-between gap-4">
+            <div>
+              <p className="text-xs uppercase tracking-widest text-stone-400 mb-1">{me.nombre}{me.local ? ` · ${me.local.nombre}` : ""}</p>
+              <h1 className="font-serif text-2xl md:text-3xl">Ventas</h1>
+            </div>
+            <button onClick={() => setScreen("estacion")} className="border border-stone-700 px-3 py-1.5 text-sm text-stone-300 hover:bg-stone-800">Volver</button>
+          </div>
+        </div>
+        <div className="max-w-6xl mx-auto px-6 mt-6"><ModuloVentas permisos={me.permisos} /></div>
+      </div>
+    );
   }
 
   if (me && screen === "compraPersonal") {

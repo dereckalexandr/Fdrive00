@@ -8,6 +8,7 @@
  */
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import { ModuloVentas } from "./crm-ventas.jsx";
 import {
   ROLES, ROLES_ASIGNABLES, PERMISOS, HABILITACIONES_EJECUTIVO,
   permisosEfectivos, limpiarExtra, validarRut, formatearRut, claveValida,
@@ -576,7 +577,6 @@ function ConfigTab() {
       {msg.texto && <Aviso tipo={msg.tipo}>{msg.texto}</Aviso>}
       <LocalesPanel />
       <ListaEditor clave="fuentes_lead" titulo="Fuentes de leads" ayuda="De dónde llegan los clientes interesados." valores={c.fuentes_lead} onGuardado={ok} onError={mal} />
-      <ListaEditor clave="estados_lead" titulo="Etapas del embudo" ayuda="Recorrido de un lead, de izquierda a derecha. El orden importa." valores={c.estados_lead} onGuardado={ok} onError={mal} />
       <ListaEditor clave="motivos_perdida" titulo="Motivos de pérdida" ayuda="Para registrar por qué no se concretó un negocio." valores={c.motivos_perdida} onGuardado={ok} onError={mal} />
       <Tarjeta titulo="Comisiones y metas" ayuda="Valores generales. Más adelante se podrán ajustar por persona o por local.">
         <NumeroEditor clave="comision_ventas_pct" etiqueta="Comisión por ventas" valor={c.comision_ventas_pct} sufijo="%" paso="0.1" onGuardado={ok} onError={mal} />
@@ -738,6 +738,7 @@ function ReportesTab() {
 ========================================================= */
 export const PESTANAS_CRM = [
   ["crm-usuarios", "Usuarios"],
+  ["crm-ventas", "Comercial"],
   ["crm-permisos", "Permisos"],
   ["crm-reportes", "Reportes"],
   ["crm-bitacora", "Bitácora"],
@@ -748,6 +749,7 @@ export function AdminCrmPanel({ tab }) {
   return (
     <>
       {tab === "crm-usuarios" && <UsuariosTab />}
+      {tab === "crm-ventas" && <ModuloVentas esAdmin />}
       {tab === "crm-permisos" && <PermisosTab />}
       {tab === "crm-reportes" && <ReportesTab />}
       {tab === "crm-bitacora" && <BitacoraTab />}

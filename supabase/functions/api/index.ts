@@ -21,6 +21,7 @@ import {
   ROLES, PERMISO_IDS, permisosDeRol, permisosEfectivos, limpiarExtra,
   normalizarRut, validarRut, claveValida, claveProvisoria, validarUsuario, validarConfig, configCompleta, ROLES_ASIGNABLES,
 } from "./crm-core.js";
+import { ventasOp } from "./ventas.ts";
 
 const sb = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -163,6 +164,12 @@ function canKv(s: Session, op: string, key: string): boolean {
   if (key === "admin_auth") return false; // solo uso interno de esta función
   if (s.role === "admin") return true;
   if ((op === "get") && READ_ONLY_SHARED.has(key)) return true;
+  // Fotos del inventario (vfoto::<vehiculo>::<foto>): las ve quien ve el inventario; las sube o borra quien lo edita.
+  if (s.role === "user" && key.startsWith("vfoto::")) {
+    const p = s.perms ?? [];
+    if (op === "get") return p.includes("inventario.ver") || p.includes("inventario.editar") || p.includes("leads.propios") || p.includes("leads.local");
+    return p.includes("inventario.editar");
+  }
   if (op === "get" || op === "set") return ownPrefixes(s).some((p) => key.startsWith(p));
   // El inspector puede eliminar SUS PROPIAS inspecciones y tasaciones (no las de otros, ni los ejecutivos nada).
   if (op === "delete" && (s.role === "inspector" || s.role === "user")) return ownPrefixes(s).some((p) => key.startsWith(p));
@@ -192,19 +199,20 @@ async function rolePermOverrides(): Promise<Record<string, string[]>> {
   return overrides;
 }
 
-const liveUsers = new Map<string, { at: number; value: { activo: boolean; roles: string[]; permisos: string[] } | null }>();
+type VivoUsuario = { activo: boolean; roles: string[]; permisos: string[]; nombre: string; localId: string | null };
+const liveUsers = new Map<string, { at: number; value: VivoUsuario | null }>();
 const dropLiveCache = () => { liveUsers.clear(); rolesCache = null; };
 
 /** Estado ACTUAL de una persona (activa, roles, permisos). Cache de 15 s para no consultar en cada tecla. */
 async function liveUser(id: string) {
   const hit = liveUsers.get(id);
   if (hit && Date.now() - hit.at < LIVE_CACHE_MS) return hit.value;
-  const { data, error } = await sb.from("usuarios").select("activo, roles, permisos_extra").eq("id", id).maybeSingle();
+  const { data, error } = await sb.from("usuarios").select("activo, roles, permisos_extra, nombre, local_id").eq("id", id).maybeSingle();
   if (error) throw error;
-  let value = null;
+  let value: VivoUsuario | null = null;
   if (data && data.activo) {
     const overrides = await rolePermOverrides();
-    value = { activo: true, roles: data.roles ?? [], permisos: permisosEfectivos(data.roles ?? [], overrides, data.permisos_extra) };
+    value = { activo: true, roles: data.roles ?? [], permisos: permisosEfectivos(data.roles ?? [], overrides, data.permisos_extra), nombre: data.nombre, localId: data.local_id ?? null };
   }
   liveUsers.set(id, { at: Date.now(), value });
   return value;
@@ -581,6 +589,20 @@ Deno.serve(async (req) => {
       const s = await readSession(body.token);
       if (!s) return json({ error: "unauthorized" }, 401);
       return await crmOp(s, body);
+    }
+
+    // Módulo comercial: inventario, clientes, leads y tareas. Cuenta maestra o persona del CRM.
+    if (action === "ventas") {
+      const s = await readSession(body.token);
+      if (!s || (s.role !== "admin" && s.role !== "user")) return json({ error: "unauthorized" }, 401);
+      let user = null;
+      if (s.role === "user") {
+        const vivo = await liveUser(s.id);
+        if (!vivo) return json({ error: "unauthorized" }, 401);
+        user = { id: s.id, nombre: vivo.nombre, localId: vivo.localId, permisos: vivo.permisos };
+      }
+      const actor: Actor = s.role === "admin" ? adminActor(s) : { tipo: "usuario", id: s.id, nombre: user!.nombre };
+      return await ventasOp({ sb, json, audit, isMissingTable, rolePermOverrides, esAdmin: s.role === "admin", actor, user }, body);
     }
 
     /* ----- almacenamiento ----- */

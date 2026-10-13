@@ -106,6 +106,7 @@ const authShim = {
   async userLogin() { throw new Error("server_not_configured"); },
   async userChangePassword() { throw new Error("server_not_configured"); },
   async crm() { throw new Error("server_not_configured"); },
+  async ventas() { throw new Error("server_not_configured"); },
   logout() {},
 };
 
