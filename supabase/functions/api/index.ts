@@ -7,12 +7,20 @@
 //   vendor     -> record::<id>::*  (lectura/escritura), afp_config y uf_valor (solo lectura)
 //   inspector  -> inspeccion::<id>::*, tasacion::<id>::* y foto::<id>::* (lectura/escritura/eliminación),
 //                 afp_config y uf_valor (solo lectura)
+//   user       -> persona del CRM (ingresa con RUT y clave). Sus permisos se leen de la base en cada
+//                 petición (se pueden cambiar o quitar en el momento): "inspecciones.usar" abre
+//                 inspeccion::<id>::*; "tasaciones.usar" abre tasacion::<id>::* y foto::<id>::*.
+//   Las operaciones de administración del CRM (acción "crm") solo las puede hacer la cuenta maestra.
 //
 // Secretos requeridos (supabase secrets set ...):
 //   SESSION_SECRET        cadena aleatoria larga para firmar sesiones
 //   ADMIN_EMAIL           correo del administrador maestro
 //   ADMIN_PASSWORD_HASH   hash PBKDF2 de la clave maestra (scripts/set-admin-password.mjs)
 import { createClient } from "npm:@supabase/supabase-js@2";
+import {
+  ROLES, PERMISO_IDS, permisosDeRol, permisosEfectivos, limpiarExtra,
+  normalizarRut, validarRut, claveValida, claveProvisoria, validarUsuario, validarConfig, configCompleta, ROLES_ASIGNABLES,
+} from "./crm-core.js";
 
 const sb = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -68,7 +76,7 @@ async function hmacKey() {
   return crypto.subtle.importKey("raw", enc.encode(SESSION_SECRET), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
 }
 
-type Session = { role: "admin" | "vendor" | "inspector"; id: string; exp: number };
+type Session = { role: "admin" | "vendor" | "inspector" | "user"; id: string; exp: number; perms?: string[] };
 
 async function signSession(role: Session["role"], id: string, ttl: number) {
   const body = b64url(enc.encode(JSON.stringify({ role, id, exp: Math.floor(Date.now() / 1000) + ttl })));
@@ -138,6 +146,13 @@ async function dbJsonList(key: string): Promise<any[]> {
 }
 
 function ownPrefixes(s: Session): string[] {
+  if (s.role === "user") {
+    const p = s.perms ?? [];
+    const out: string[] = [];
+    if (p.includes("inspecciones.usar")) out.push(`inspeccion::${s.id}::`);
+    if (p.includes("tasaciones.usar")) out.push(`tasacion::${s.id}::`, `foto::${s.id}::`);
+    return out;
+  }
   if (s.role === "vendor") return [`record::${s.id}::`];
   // foto::<id>::* son las fotos de las tasaciones (un registro por foto, ya reducida en el dispositivo).
   if (s.role === "inspector") return [`inspeccion::${s.id}::`, `tasacion::${s.id}::`, `foto::${s.id}::`];
@@ -150,13 +165,257 @@ function canKv(s: Session, op: string, key: string): boolean {
   if ((op === "get") && READ_ONLY_SHARED.has(key)) return true;
   if (op === "get" || op === "set") return ownPrefixes(s).some((p) => key.startsWith(p));
   // El inspector puede eliminar SUS PROPIAS inspecciones y tasaciones (no las de otros, ni los ejecutivos nada).
-  if (op === "delete" && s.role === "inspector") return ownPrefixes(s).some((p) => key.startsWith(p));
+  if (op === "delete" && (s.role === "inspector" || s.role === "user")) return ownPrefixes(s).some((p) => key.startsWith(p));
   return false;
 }
 
 function canList(s: Session, prefix: string): boolean {
   if (s.role === "admin") return true;
   return ownPrefixes(s).some((p) => prefix.startsWith(p));
+}
+
+/* ---------- CRM: usuarios, permisos, bitácora ---------- */
+const USER_TTL_S = 60 * 60 * 8;
+const LIVE_CACHE_MS = 15_000;
+
+// Tablas del CRM no creadas todavía (falta ejecutar supabase-crm-setup.sql).
+const isMissingTable = (e: any) => e?.code === "42P01" || e?.code === "PGRST205" || /does not exist|schema cache/i.test(String(e?.message ?? ""));
+
+let rolesCache: { at: number; overrides: Record<string, string[]> } | null = null;
+async function rolePermOverrides(): Promise<Record<string, string[]>> {
+  if (rolesCache && Date.now() - rolesCache.at < LIVE_CACHE_MS) return rolesCache.overrides;
+  const { data, error } = await sb.from("roles_permisos").select("rol, permisos");
+  if (error) throw error;
+  const overrides: Record<string, string[]> = {};
+  for (const r of data ?? []) overrides[r.rol] = r.permisos ?? [];
+  rolesCache = { at: Date.now(), overrides };
+  return overrides;
+}
+
+const liveUsers = new Map<string, { at: number; value: { activo: boolean; roles: string[]; permisos: string[] } | null }>();
+const dropLiveCache = () => { liveUsers.clear(); rolesCache = null; };
+
+/** Estado ACTUAL de una persona (activa, roles, permisos). Cache de 15 s para no consultar en cada tecla. */
+async function liveUser(id: string) {
+  const hit = liveUsers.get(id);
+  if (hit && Date.now() - hit.at < LIVE_CACHE_MS) return hit.value;
+  const { data, error } = await sb.from("usuarios").select("activo, roles, permisos_extra").eq("id", id).maybeSingle();
+  if (error) throw error;
+  let value = null;
+  if (data && data.activo) {
+    const overrides = await rolePermOverrides();
+    value = { activo: true, roles: data.roles ?? [], permisos: permisosEfectivos(data.roles ?? [], overrides, data.permisos_extra) };
+  }
+  liveUsers.set(id, { at: Date.now(), value });
+  return value;
+}
+
+const pubUser = (u: any) => ({
+  id: u.id, rut: u.rut, nombre: u.nombre, email: u.email, telefono: u.telefono, roles: u.roles ?? [],
+  extra: limpiarExtra(u.permisos_extra), localId: u.local_id, activo: u.activo,
+  debeCambiarClave: u.debe_cambiar_clave, ultimoAcceso: u.ultimo_acceso, creadoEn: u.creado_en,
+});
+
+async function meOf(u: any) {
+  const overrides = await rolePermOverrides();
+  let local = null;
+  if (u.local_id) {
+    const { data } = await sb.from("locales").select("id, nombre").eq("id", u.local_id).maybeSingle();
+    local = data ?? null;
+  }
+  return { ...pubUser(u), permisos: permisosEfectivos(u.roles ?? [], overrides, u.permisos_extra), local };
+}
+
+type Actor = { tipo: "admin" | "usuario" | "sistema"; id?: string; nombre?: string };
+async function audit(actor: Actor, accion: string, entidad?: string, entidadId?: string, detalle: Record<string, unknown> = {}) {
+  try {
+    const { error } = await sb.from("bitacora").insert({
+      actor_tipo: actor.tipo, actor_id: actor.id ?? null, actor_nombre: actor.nombre ?? null,
+      accion, entidad: entidad ?? null, entidad_id: entidadId ?? null, detalle,
+    });
+    if (error) console.error("bitacora error:", error.message);
+  } catch (e) { console.error("bitacora error:", e); }
+}
+
+const adminActor = (s: Session): Actor => ({ tipo: "admin", id: s.id, nombre: s.id === "master" ? ADMIN_EMAIL : "Administrador adicional" });
+
+let dummyHash: string | null = null;
+async function consumeLoginTime(password: string) {
+  dummyHash ??= await hashSecret("relleno-para-igualar-tiempos");
+  await verifySecret(password, dummyHash);
+}
+
+/** Operaciones del panel de administración del CRM. Solo la cuenta maestra. */
+async function crmOp(s: Session, body: any): Promise<Response> {
+  if (s.role !== "admin") return json({ error: "forbidden" }, 403);
+  const actor = adminActor(s);
+  const op = String(body.op ?? "");
+
+  const dbFail = (e: any) => {
+    if (isMissingTable(e)) return json({ error: "crm_not_installed" }, 503);
+    if (e?.code === "23505") return json({ error: "duplicado" }, 409);
+    throw e;
+  };
+
+  /* --- locales --- */
+  if (op === "locales.list") {
+    const { data, error } = await sb.from("locales").select("*").order("creado_en");
+    if (error) return dbFail(error);
+    return json({ locales: data });
+  }
+  if (op === "locales.create" || op === "locales.update") {
+    const nombre = String(body.nombre ?? "").trim().replace(/\s+/g, " ");
+    const direccion = String(body.direccion ?? "").trim().slice(0, 160) || null;
+    if (nombre.length < 2 || nombre.length > 60) return json({ error: "nombre_invalido" }, 400);
+    if (op === "locales.create") {
+      const { data, error } = await sb.from("locales").insert({ nombre, direccion }).select().single();
+      if (error) return dbFail(error);
+      await audit(actor, "local.crear", "local", data.id, { nombre });
+      return json({ local: data });
+    }
+    const patch: Record<string, unknown> = { nombre, direccion };
+    if (typeof body.activo === "boolean") patch.activo = body.activo;
+    const { data, error } = await sb.from("locales").update(patch).eq("id", String(body.id)).select().single();
+    if (error) return dbFail(error);
+    await audit(actor, "local.editar", "local", data.id, patch);
+    return json({ local: data });
+  }
+
+  /* --- usuarios --- */
+  if (op === "usuarios.list") {
+    const { data, error } = await sb.from("usuarios").select("*").order("nombre");
+    if (error) return dbFail(error);
+    return json({ usuarios: (data ?? []).map(pubUser) });
+  }
+  if (op === "usuarios.create") {
+    const v = validarUsuario(body.datos, { esAlta: true });
+    if (!v.ok) return json({ error: v.error }, 400);
+    if (v.value.localId) {
+      const { data: loc } = await sb.from("locales").select("id").eq("id", v.value.localId).maybeSingle();
+      if (!loc) return json({ error: "local_invalido" }, 400);
+    }
+    let clave = String(body.clave ?? "");
+    const generada = !clave;
+    if (generada) clave = claveProvisoria(crypto.getRandomValues(new Uint8Array(10)));
+    else if (!claveValida(clave)) return json({ error: "clave_invalida" }, 400);
+    const { data, error } = await sb.from("usuarios").insert({
+      rut: v.value.rut, nombre: v.value.nombre, email: v.value.email, telefono: v.value.telefono,
+      roles: v.value.roles, permisos_extra: v.value.extra, local_id: v.value.localId,
+      clave_hash: await hashSecret(clave), debe_cambiar_clave: true,
+    }).select().single();
+    if (error) return dbFail(error);
+    await audit(actor, "usuario.crear", "usuario", data.id, { rut: data.rut, nombre: data.nombre, roles: data.roles });
+    return json({ usuario: pubUser(data), claveProvisoria: clave });
+  }
+  if (op === "usuarios.update") {
+    const v = validarUsuario(body.datos, { esAlta: false });
+    if (!v.ok) return json({ error: v.error }, 400);
+    const id = String(body.id ?? "");
+    if (v.value.localId) {
+      const { data: loc } = await sb.from("locales").select("id").eq("id", v.value.localId).maybeSingle();
+      if (!loc) return json({ error: "local_invalido" }, 400);
+    }
+    const { data: antes } = await sb.from("usuarios").select("*").eq("id", id).maybeSingle();
+    if (!antes) return json({ error: "no_existe" }, 404);
+    const { data, error } = await sb.from("usuarios").update({
+      nombre: v.value.nombre, email: v.value.email, telefono: v.value.telefono, roles: v.value.roles,
+      permisos_extra: v.value.extra, local_id: v.value.localId, actualizado_en: new Date().toISOString(),
+    }).eq("id", id).select().single();
+    if (error) return dbFail(error);
+    dropLiveCache();
+    await audit(actor, "usuario.editar", "usuario", id, {
+      nombre: data.nombre,
+      roles: { antes: antes.roles, despues: data.roles },
+      permisos_extra: { antes: antes.permisos_extra, despues: data.permisos_extra },
+      local: { antes: antes.local_id, despues: data.local_id },
+    });
+    return json({ usuario: pubUser(data) });
+  }
+  if (op === "usuarios.setActivo") {
+    const activo = body.activo === true;
+    const { data, error } = await sb.from("usuarios").update({ activo, actualizado_en: new Date().toISOString() }).eq("id", String(body.id ?? "")).select().single();
+    if (error) return dbFail(error);
+    dropLiveCache();
+    await audit(actor, activo ? "usuario.activar" : "usuario.desactivar", "usuario", data.id, { rut: data.rut, nombre: data.nombre });
+    return json({ usuario: pubUser(data) });
+  }
+  if (op === "usuarios.resetClave") {
+    const clave = claveProvisoria(crypto.getRandomValues(new Uint8Array(10)));
+    const { data, error } = await sb.from("usuarios").update({
+      clave_hash: await hashSecret(clave), debe_cambiar_clave: true, actualizado_en: new Date().toISOString(),
+    }).eq("id", String(body.id ?? "")).select().single();
+    if (error) return dbFail(error);
+    await audit(actor, "usuario.reiniciar_clave", "usuario", data.id, { rut: data.rut, nombre: data.nombre });
+    return json({ usuario: pubUser(data), claveProvisoria: clave });
+  }
+
+  /* --- permisos por rol --- */
+  if (op === "permisos.get") {
+    try {
+      const overrides = await rolePermOverrides();
+      const porRol: Record<string, string[]> = {};
+      for (const r of ROLES) porRol[r.id] = permisosDeRol(r.id, overrides);
+      return json({ porRol, personalizados: Object.keys(overrides) });
+    } catch (e) { return dbFail(e); }
+  }
+  if (op === "permisos.setRol") {
+    const rol = String(body.rol ?? "");
+    // El administrador general siempre tiene todo: no se recorta.
+    if (!ROLES_ASIGNABLES.includes(rol)) return json({ error: "rol_invalido" }, 400);
+    if (!Array.isArray(body.permisos)) return json({ error: "invalid_input" }, 400);
+    const permisos = Array.from(new Set((body.permisos as unknown[]).map(String).filter((p) => PERMISO_IDS.includes(p))));
+    const antes = permisosDeRol(rol, await rolePermOverrides().catch(() => ({})));
+    const { error } = await sb.from("roles_permisos").upsert({ rol, permisos, actualizado_en: new Date().toISOString() }, { onConflict: "rol" });
+    if (error) return dbFail(error);
+    dropLiveCache();
+    await audit(actor, "permisos.editar_rol", "rol", rol, {
+      agregados: permisos.filter((p) => !antes.includes(p)),
+      quitados: antes.filter((p) => !permisos.includes(p)),
+    });
+    return json({ ok: true, permisos });
+  }
+  if (op === "permisos.reiniciarRol") {
+    const rol = String(body.rol ?? "");
+    if (!ROLES_ASIGNABLES.includes(rol)) return json({ error: "rol_invalido" }, 400);
+    const { error } = await sb.from("roles_permisos").delete().eq("rol", rol);
+    if (error) return dbFail(error);
+    dropLiveCache();
+    await audit(actor, "permisos.reiniciar_rol", "rol", rol);
+    return json({ ok: true, permisos: permisosDeRol(rol, {}) });
+  }
+
+  /* --- configuración del negocio --- */
+  if (op === "config.get") {
+    const { data, error } = await sb.from("config_negocio").select("clave, valor");
+    if (error) return dbFail(error);
+    const guardada: Record<string, unknown> = {};
+    for (const r of data ?? []) guardada[r.clave] = r.valor;
+    return json({ config: configCompleta(guardada) });
+  }
+  if (op === "config.set") {
+    const clave = String(body.clave ?? "");
+    const r = validarConfig(clave, body.valor);
+    if (!r.ok) return json({ error: "invalid_input" }, 400);
+    const { data: previo } = await sb.from("config_negocio").select("valor").eq("clave", clave).maybeSingle();
+    const { error } = await sb.from("config_negocio").upsert({ clave, valor: r.value, actualizado_en: new Date().toISOString() }, { onConflict: "clave" });
+    if (error) return dbFail(error);
+    await audit(actor, "config.editar", "config", clave, { antes: previo?.valor ?? null, despues: r.value });
+    return json({ ok: true, valor: r.value });
+  }
+
+  /* --- bitácora --- */
+  if (op === "bitacora.list") {
+    const limite = Math.min(Math.max(parseInt(String(body.limite ?? 50), 10) || 50, 1), 200);
+    const desde = Math.max(parseInt(String(body.desde ?? 0), 10) || 0, 0);
+    let q = sb.from("bitacora").select("*", { count: "exact" }).order("creado_en", { ascending: false }).range(desde, desde + limite - 1);
+    const prefijo = String(body.prefijo ?? "").trim();
+    if (prefijo) q = q.like("accion", prefijo.replace(/[\\%_]/g, (m) => "\\" + m) + "%");
+    const { data, error, count } = await q;
+    if (error) return dbFail(error);
+    return json({ filas: data, total: count ?? 0 });
+  }
+
+  return json({ error: "unknown_op" }, 400);
 }
 
 /* ---------- HTTP ---------- */
@@ -272,10 +531,69 @@ Deno.serve(async (req) => {
       return json({ token: await signSession(role, profile.id, PROFILE_TTL_S), profile });
     }
 
+    /* ----- personas del CRM (RUT y clave) ----- */
+    if (action === "userLogin") {
+      const rut = typeof body.rut === "string" && validarRut(body.rut) ? normalizarRut(body.rut) : "";
+      const password = typeof body.password === "string" ? body.password : "";
+      // Se limita por IP y también por RUT, para frenar a quien pruebe claves de una misma persona.
+      if (blocked(ip, "user") || (rut && blocked(rut, "userrut"))) return json({ error: "too_many_attempts" }, 429);
+      let u: any = null;
+      if (rut) {
+        const { data, error } = await sb.from("usuarios").select("*").eq("rut", rut).maybeSingle();
+        if (error) {
+          if (isMissingTable(error)) return json({ error: "crm_not_installed" }, 503);
+          throw error;
+        }
+        u = data;
+      }
+      const claveOk = u ? await verifySecret(password, u.clave_hash) : (await consumeLoginTime(password), false);
+      if (!u || !u.activo || !claveOk) {
+        await fail(ip, "user");
+        if (rut) await fail(rut, "userrut");
+        return json({ error: "invalid_credentials" }, 401);
+      }
+      await sb.from("usuarios").update({ ultimo_acceso: new Date().toISOString() }).eq("id", u.id);
+      return json({ token: await signSession("user", u.id, USER_TTL_S), me: await meOf(u) });
+    }
+
+    if (action === "userChangePassword") {
+      const s = await readSession(body.token);
+      if (!s || s.role !== "user") return json({ error: "unauthorized" }, 401);
+      if (blocked(ip, "userpw")) return json({ error: "too_many_attempts" }, 429);
+      if (!claveValida(body.nueva)) return json({ error: "clave_invalida" }, 400);
+      const { data: u, error } = await sb.from("usuarios").select("*").eq("id", s.id).maybeSingle();
+      if (error) throw error;
+      if (!u || !u.activo) return json({ error: "unauthorized" }, 401);
+      if (!(await verifySecret(String(body.actual ?? ""), u.clave_hash))) {
+        await fail(ip, "userpw");
+        return json({ error: "invalid_credentials" }, 401);
+      }
+      if (body.actual === body.nueva) return json({ error: "clave_igual" }, 400);
+      const { data: nuevo, error: e2 } = await sb.from("usuarios").update({
+        clave_hash: await hashSecret(body.nueva), debe_cambiar_clave: false, actualizado_en: new Date().toISOString(),
+      }).eq("id", u.id).select().single();
+      if (e2) throw e2;
+      await audit({ tipo: "usuario", id: u.id, nombre: u.nombre }, "usuario.cambiar_clave", "usuario", u.id);
+      return json({ me: await meOf(nuevo) });
+    }
+
+    if (action === "crm") {
+      const s = await readSession(body.token);
+      if (!s) return json({ error: "unauthorized" }, 401);
+      return await crmOp(s, body);
+    }
+
     /* ----- almacenamiento ----- */
     if (action === "kv") {
       const s = await readSession(body.token);
       if (!s) return json({ error: "unauthorized" }, 401);
+      if (s.role === "user") {
+        // Los permisos se leen de la base en cada petición: si la persona se desactiva o se le quita
+        // un permiso, deja de tener acceso en segundos aunque su sesión siga vigente.
+        const vivo = await liveUser(s.id);
+        if (!vivo) return json({ error: "unauthorized" }, 401);
+        s.perms = vivo.permisos;
+      }
       const op = body.op;
 
       if (op === "list") {

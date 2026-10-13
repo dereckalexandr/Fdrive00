@@ -128,6 +128,26 @@ const supabaseAuth = {
     lastProfileLogin = { role, code };
     return profile;
   },
+  // Personas del CRM: ingresan con RUT y clave. Devuelve sus datos y permisos.
+  // No se guarda la clave para reingresar en silencio: si la sesión vence, se avisa.
+  async userLogin(rut, password) {
+    const { token, me } = await call({ action: "userLogin", rut, password });
+    sessionToken = token;
+    lastProfileLogin = null;
+    return me;
+  },
+  async userChangePassword(actual, nueva) {
+    return (await call({ action: "userChangePassword", token: sessionToken, actual, nueva })).me;
+  },
+  // Operaciones del panel de administración del CRM (solo cuenta maestra).
+  async crm(op, params = {}) {
+    try {
+      return await call({ action: "crm", token: sessionToken, op, ...params });
+    } catch (e) {
+      if (e.status === 401) window.dispatchEvent(new Event("df-session-expired"));
+      throw e;
+    }
+  },
   logout() { sessionToken = null; lastProfileLogin = null; },
 };
 

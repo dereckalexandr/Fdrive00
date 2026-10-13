@@ -220,6 +220,30 @@ Decisiones y límites (verificados en chileautos.cl):
 - Si Chileautos cambia su página, hay que actualizar `src/chileautos-bookmarklet.js` (sus pruebas están en `tests/`).
 - Es una estimación a partir de precios de publicación, no de ventas concretadas.
 
+## CRM · Etapa 1: usuarios, permisos y panel del Administrador
+
+La plataforma está creciendo hacia un CRM con 8 perfiles (Administrador general, Jefe Local, Ejecutivo, Tasador, Inspector, Validador, Anunciante, Marketing y RRSS). La etapa 1 construye la base y el panel del Administrador; los dashboards de cada perfil se agregan después, uno por uno.
+
+**Instalar (una sola vez):**
+1. Supabase → *SQL Editor* → pegar el contenido de `supabase-crm-setup.sql` → *Run*. Crea `locales`, `usuarios`, `roles_permisos`, `bitacora` y `config_negocio` con RLS activado y sin políticas (el navegador no las toca; solo la Edge Function). Es seguro volver a ejecutarlo. Crea un local inicial, "Casa matriz".
+2. Redesplegar la función: `node scripts/deploy-api.mjs` (con la sesión de Supabase iniciada). No hay que cambiar secretos.
+
+**Qué incluye (pestañas del panel de administrador, a la derecha de "Datos"):**
+- **Usuarios**: alta con RUT (validado con dígito verificador), nombre, correo, teléfono, local, uno o varios roles y una clave provisoria generada (se muestra una sola vez; la persona debe cambiarla al primer ingreso). Editar, reiniciar clave, desactivar/activar. Los usuarios no se eliminan: se desactivan. El Ejecutivo se habilita aparte para **Ventas, Compras y Consignaciones**. Cada persona puede tener permisos extra o quitados uno por uno ("Según rol / Otorgar / Quitar").
+- **Permisos**: matriz de permisos por rol, editable y con "Restablecer". El rol Administrador general siempre tiene todo y no se asigna a personas (hoy es la cuenta maestra por correo y clave).
+- **Reportes**: usuarios por rol y por local, inspecciones y tasaciones de los últimos 6 meses y por persona. Los reportes comerciales llegarán con los perfiles de Ejecutivo y Jefe Local.
+- **Bitácora**: quién hizo qué y cuándo (usuarios, permisos, configuración, locales), con antes/después. Solo se agrega, nunca se edita.
+- **Configuración**: locales, fuentes de leads, etapas del embudo, motivos de pérdida, comisiones y meta mensual.
+
+**Cómo ingresan las personas:** en la pantalla de inicio, tarjeta **Personal** (RUT + clave). Llegan a su **estación de trabajo**, que hoy muestra los módulos existentes según sus permisos (Inspecciones y tasaciones, Tasación de compra) y lista lo que viene en camino. Los perfiles anteriores de Ejecutivo e Inspector por código siguen funcionando igual.
+
+**Seguridad (todo se valida en el servidor, no en la pantalla):**
+- Las claves se guardan como hash PBKDF2; nunca en claro. Bloqueo temporal tras 10 intentos fallidos, por IP y por RUT. Las respuestas de ingreso no distinguen "RUT inexistente" de "clave mala".
+- Los permisos de una persona se leen de la base **en cada petición** (caché de 15 s): al desactivarla o quitarle un permiso, pierde el acceso en segundos aunque su sesión siga abierta.
+- Un usuario con `inspecciones.usar` / `tasaciones.usar` solo toca sus propias inspecciones, tasaciones y fotos. Toda la administración del CRM (acción `crm`) la puede hacer **solo la cuenta maestra** en esta etapa.
+- `supabase/functions/api/crm-core.js` es la única fuente de la lista de roles y permisos (lo usan el servidor, la pantalla y las pruebas). Para agregar un permiso: súmalo a `PERMISOS` y a los roles que correspondan en `PERMISOS_POR_ROL`.
+- Pruebas: `tests/crm-core.test.mjs` (reglas) y `tests/crm-api.test.mjs`, que ejecuta la función real contra una base falsa en memoria (ingreso, permisos, desactivación, bitácora, bloqueo).
+
 ## Desplegar en un hosting público
 
 Las opciones más simples (tienen plan gratuito y se conectan directo a

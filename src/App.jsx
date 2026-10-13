@@ -16,6 +16,8 @@ import { computeTasacionTotals, computeValorFinal } from "./tasacion-totals.js";
 import { normalizePatente, isPatenteValida, splitModeloVersion, parseKm, calcularFiltros, buildChileautosUrl, parseAvisosPegados, estimarCompra, parseDatosPatente, modeloParaChileautos, detalleModeloChileautos, marcaParaChileautos, detalleMarcaChileautos, TRANSMISIONES, COMBUSTIBLES, MARGENES_BRUTOS, MARGEN_BRUTO_DEFECTO } from "./compra-calc.js";
 import { buildBookmarkletHref } from "./chileautos-bookmarklet.js";
 import { buildPatenteBookmarkletHref } from "./patente-bookmarklet.js";
+import { AdminCrmPanel, PESTANAS_CRM } from "./crm-admin.jsx";
+import { LoginPersonal, CambioClaveObligatorio, EstacionTrabajo } from "./crm-estacion.jsx";
 import { photoKey, photoPrefix, makePhotoId, compressImage, collectPhotoIds, diffIds, MAX_PHOTOS_PER_ITEM, MAX_PHOTOS_PER_TASACION } from "./photos.js";
 
 /* =========================================================
@@ -3635,6 +3637,10 @@ function AdminDashboard({ vendors, setVendors, inspectors, setInspectors, onExit
           <button onClick={() => setTab("inspectores")} className={`px-4 py-3 text-sm ${tab === "inspectores" ? "text-amber-400 border-b-2 border-amber-400" : "text-stone-400"}`}>Inspectores</button>
           <button onClick={() => setTab("compra")} className={`px-4 py-3 text-sm ${tab === "compra" ? "text-amber-400 border-b-2 border-amber-400" : "text-stone-400"}`}>Tasación de compra</button>
           <button onClick={() => setTab("datos")} className={`px-4 py-3 text-sm ${tab === "datos" ? "text-amber-400 border-b-2 border-amber-400" : "text-stone-400"}`}>Datos</button>
+          <span className="self-center h-5 border-l border-stone-700 mx-1" aria-hidden="true" />
+          {PESTANAS_CRM.map(([id, texto]) => (
+            <button key={id} onClick={() => setTab(id)} className={`px-4 py-3 text-sm ${tab === id ? "text-amber-400 border-b-2 border-amber-400" : "text-stone-400"}`}>{texto}</button>
+          ))}
         </div>
       </div>
 
@@ -4086,6 +4092,7 @@ function AdminDashboard({ vendors, setVendors, inspectors, setInspectors, onExit
         )}
 
         {tab === "compra" && <TasacionCompra />}
+        {tab.startsWith("crm-") && <AdminCrmPanel tab={tab} />}
 
         {tab === "datos" && (
           <div className="bg-white border border-stone-200 p-5">
@@ -4164,7 +4171,7 @@ function AdminDashboard({ vendors, setVendors, inspectors, setInspectors, onExit
 /* =========================================================
    LANDING / RUTEO
 ========================================================= */
-function Landing({ onEnterAdmin, onEnterVendor, onEnterInspector }) {
+function Landing({ onEnterAdmin, onEnterVendor, onEnterInspector, onEnterPersonal }) {
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
   const [inspCode, setInspCode] = useState("");
@@ -4226,6 +4233,9 @@ function Landing({ onEnterAdmin, onEnterVendor, onEnterInspector }) {
             <button onClick={handleInspectorEnter} className="bg-sky-600 text-white px-4 py-2 text-sm font-medium hover:bg-sky-500">Entrar a mi checklist</button>
           </div>
         </div>
+        <div className="mt-6">
+          <LoginPersonal onEntrar={onEnterPersonal} />
+        </div>
       </div>
     </div>
   );
@@ -4258,6 +4268,7 @@ function AppRoutes() {
   const [screen, setScreen] = useState("landing");
   const [activeVendor, setActiveVendor] = useState(null);
   const [activeInspector, setActiveInspector] = useState(null);
+  const [me, setMe] = useState(null); // persona del CRM (ingreso con RUT)
 
   // Enlaces de perfil (?vendor=CODIGO / ?inspector=CODIGO): el servidor valida el código.
   useEffect(() => {
@@ -4283,6 +4294,7 @@ function AppRoutes() {
     setScreen("landing");
     setActiveVendor(null);
     setActiveInspector(null);
+    setMe(null);
     setVendors([]);
     setInspectors([]);
     try { window.history.replaceState({}, "", window.location.pathname); } catch (e) {}
@@ -4307,6 +4319,35 @@ function AppRoutes() {
     return <AdminDashboard vendors={vendors} setVendors={setVendors} inspectors={inspectors} setInspectors={setInspectors} onExit={exitToLanding} />;
   }
 
+  if (me && screen === "cambioClave") {
+    return <CambioClaveObligatorio me={me} onListo={(actualizado) => { setMe(actualizado); setScreen("estacion"); }} onSalir={exitToLanding} />;
+  }
+
+  if (me && screen === "estacion") {
+    return <EstacionTrabajo me={me} onAbrir={(modulo) => setScreen(modulo === "compra" ? "compraPersonal" : "inspectorPersonal")} onSalir={exitToLanding} />;
+  }
+
+  if (me && screen === "inspectorPersonal") {
+    return <InspectorDashboard inspector={{ id: me.id, nombre: me.nombre }} onExit={() => setScreen("estacion")} />;
+  }
+
+  if (me && screen === "compraPersonal") {
+    return (
+      <div className="min-h-screen bg-stone-100 pb-16">
+        <div className="bg-stone-900 text-stone-100">
+          <div className="max-w-5xl mx-auto px-6 py-6 flex items-center justify-between gap-4">
+            <div>
+              <p className="text-xs uppercase tracking-widest text-stone-400 mb-1">{me.nombre}</p>
+              <h1 className="font-serif text-2xl md:text-3xl">Tasación de compra</h1>
+            </div>
+            <button onClick={() => setScreen("estacion")} className="border border-stone-700 px-3 py-1.5 text-sm text-stone-300 hover:bg-stone-800">Volver</button>
+          </div>
+        </div>
+        <div className="max-w-5xl mx-auto px-6 mt-8"><TasacionCompra /></div>
+      </div>
+    );
+  }
+
   if (screen === "vendor" && activeVendor) {
     return <VendorDashboard vendor={activeVendor} onExit={exitToLanding} />;
   }
@@ -4320,6 +4361,7 @@ function AppRoutes() {
       onEnterAdmin={() => setScreen("adminAuth")}
       onEnterVendor={(profile) => { setActiveVendor(profile); setScreen("vendor"); }}
       onEnterInspector={(profile) => { setActiveInspector(profile); setScreen("inspector"); }}
+      onEnterPersonal={(persona) => { setMe(persona); setScreen(persona.debeCambiarClave ? "cambioClave" : "estacion"); }}
     />
   );
 }

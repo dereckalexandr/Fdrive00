@@ -102,6 +102,10 @@ const authShim = {
     if (!profile) throw new Error("invalid_code");
     return profile;
   },
+  // El CRM (usuarios, permisos, bitácora) vive en el servidor: sin Supabase no está disponible.
+  async userLogin() { throw new Error("server_not_configured"); },
+  async userChangePassword() { throw new Error("server_not_configured"); },
+  async crm() { throw new Error("server_not_configured"); },
   logout() {},
 };
 
