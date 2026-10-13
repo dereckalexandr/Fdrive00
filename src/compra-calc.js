@@ -80,12 +80,30 @@ export const MARCAS_CHILEAUTOS = [
   { patron: /^mercede[sz][\s-]*benz$/, nombre: "Mercedes-Benz" },
 ];
 
-/** Nombre de la marca tal como se busca en Chileautos (sin espacios sobrantes; con los ajustes de MARCAS_CHILEAUTOS). */
-export function marcaParaChileautos(marca) {
+/**
+ * Palabras que se suprimen de la marca antes de buscar en Chileautos: los datos de patentechile traen la razón social
+ * ("KIA MOTORS", "HYUNDAI MOTOR") pero Chileautos solo conoce la marca ("Kia", "Hyundai"). Palabras completas, sin distinguir
+ * mayúsculas ni tildes. Se pueden agregar más.
+ */
+export const OMITIR_EN_MARCA = ["Motors", "Motor"];
+
+/**
+ * Nombre de la marca tal como se busca en Chileautos y lo que se omitió:
+ * sin espacios sobrantes, sin las palabras de OMITIR_EN_MARCA y con los ajustes de MARCAS_CHILEAUTOS.
+ */
+export function detalleMarcaChileautos(marca, omitir = OMITIR_EN_MARCA) {
   const limpia = String(marca || "").trim().replace(/\s+/g, " ");
-  const base = limpia.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  if (!limpia) return { busqueda: "", omitido: "" };
+  const { palabras, quitadas } = quitarPalabrasOmitidas(limpia.split(" "), omitir);
+  const sinRazonSocial = palabras.join(" ");
+  const base = sinRazonSocial.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
   const regla = MARCAS_CHILEAUTOS.find((r) => r.patron.test(base));
-  return regla ? regla.nombre : limpia;
+  return { busqueda: regla ? regla.nombre : sinRazonSocial, omitido: quitadas.join(" ") };
+}
+
+/** Nombre de la marca tal como se busca en Chileautos (ver detalleMarcaChileautos). */
+export function marcaParaChileautos(marca, omitir = OMITIR_EN_MARCA) {
+  return detalleMarcaChileautos(marca, omitir).busqueda;
 }
 
 /**

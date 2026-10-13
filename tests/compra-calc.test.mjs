@@ -633,3 +633,48 @@ test("KILOMETRAJE: un aviso con menos kilómetros que el ingresado ya no se desc
   assert.deepEqual(r.validos.map((v) => v.id), ["a", "b", "c", "d"]);
   assert.equal(m.e, "Kilometraje fuera del filtro");
 });
+
+/* ---------- "Motor" y "Motors" en la marca ---------- */
+import { detalleMarcaChileautos, OMITIR_EN_MARCA } from "../src/compra-calc.js";
+
+test("MARCA: 'Motors' y 'Motor' se suprimen de la marca ('KIA MOTORS' → 'KIA')", () => {
+  const casos = [["KIA MOTORS", "KIA"], ["kia motors", "kia"], ["Kia Motor", "Kia"], ["Hyundai Motor", "Hyundai"], ["Great Wall Motors", "Great Wall"], ["Tata Motors", "Tata"], ["  KIA   MOTORS  ", "KIA"]];
+  for (const [entrada, esperado] of casos) assert.equal(marcaParaChileautos(entrada), esperado, entrada);
+});
+
+test("MARCA: se combina con la regla de Mercedes-Benz", () => {
+  assert.equal(marcaParaChileautos("MERCEDES BENZ MOTORS"), "Mercedes-Benz");
+  assert.equal(marcaParaChileautos("Mercedez-Benz Motor"), "Mercedes-Benz");
+});
+
+test("MARCA: solo palabras completas y solo esas dos (Motorcraft, Chile y otras palabras se conservan)", () => {
+  assert.equal(marcaParaChileautos("Motorcraft"), "Motorcraft");
+  assert.equal(marcaParaChileautos("HYUNDAI MOTORS CHILE"), "HYUNDAI CHILE");
+  assert.equal(marcaParaChileautos("General Motors"), "General");
+  assert.equal(marcaParaChileautos("Toyota"), "Toyota");
+  assert.equal(marcaParaChileautos("Kia"), "Kia");
+});
+
+test("MARCA: si la marca fuera solo 'Motors' o 'Motor', no queda vacía", () => {
+  assert.equal(marcaParaChileautos("Motors"), "Motors");
+  assert.equal(marcaParaChileautos("MOTOR"), "MOTOR");
+  assert.notEqual(buildChileautosUrl({ marca: "Motors", modelo: "X", anio: 2020, km: 50000 }), null);
+});
+
+test("MARCA: el detalle informa lo que se omitió (para avisarlo en pantalla)", () => {
+  assert.deepEqual(detalleMarcaChileautos("KIA MOTORS"), { busqueda: "KIA", omitido: "MOTORS" });
+  assert.deepEqual(detalleMarcaChileautos("Kia"), { busqueda: "Kia", omitido: "" });
+  assert.deepEqual(detalleMarcaChileautos(""), { busqueda: "", omitido: "" });
+});
+
+test("MARCA: la dirección de búsqueda no lleva 'Motors'", () => {
+  const u = decodeURIComponent(buildChileautosUrl({ marca: "KIA MOTORS", modelo: "RIO 1.4", anio: 2020, km: 50000 }));
+  assert.ok(u.includes("Marca.KIA._.Modelo.RIO.)"), u);
+  assert.ok(!/motor/i.test(u), u);
+});
+
+test("MARCA: la lista de palabras es configurable", () => {
+  assert.deepEqual(OMITIR_EN_MARCA, ["Motors", "Motor"]);
+  assert.equal(marcaParaChileautos("KIA MOTORS", []), "KIA MOTORS");
+  assert.equal(marcaParaChileautos("Ford Company", ["Company"]), "Ford");
+});

@@ -13,7 +13,7 @@ import { extractPdfText, parseCavFields } from "./cav-parser.js";
 import { buildInspeccionPdf, buildTasacionPdf, pdfFileName } from "./pdf-report.js";
 import { saveDraft, loadDraft, clearDraft, isMeaningful } from "./drafts.js";
 import { computeTasacionTotals, computeValorFinal } from "./tasacion-totals.js";
-import { normalizePatente, isPatenteValida, splitModeloVersion, parseKm, calcularFiltros, buildChileautosUrl, parseAvisosPegados, estimarCompra, parseDatosPatente, modeloParaChileautos, detalleModeloChileautos, marcaParaChileautos, TRANSMISIONES, COMBUSTIBLES, MARGENES_BRUTOS, MARGEN_BRUTO_DEFECTO } from "./compra-calc.js";
+import { normalizePatente, isPatenteValida, splitModeloVersion, parseKm, calcularFiltros, buildChileautosUrl, parseAvisosPegados, estimarCompra, parseDatosPatente, modeloParaChileautos, detalleModeloChileautos, marcaParaChileautos, detalleMarcaChileautos, TRANSMISIONES, COMBUSTIBLES, MARGENES_BRUTOS, MARGEN_BRUTO_DEFECTO } from "./compra-calc.js";
 import { buildBookmarkletHref } from "./chileautos-bookmarklet.js";
 import { buildPatenteBookmarkletHref } from "./patente-bookmarklet.js";
 import { photoKey, photoPrefix, makePhotoId, compressImage, collectPhotoIds, diffIds, MAX_PHOTOS_PER_ITEM, MAX_PHOTOS_PER_TASACION } from "./photos.js";
@@ -3121,7 +3121,7 @@ function TasacionCompra() {
   const filtros = calcularFiltros({ anio, km: kmNum, margenAnio });
   const urlBusqueda = patenteOk ? buildChileautosUrl({ marca, modelo, anio, km: kmNum, margenAnio, transmision, combustible }) : null;
   const { busqueda: modeloBusqueda, omitido: modeloOmitido } = detalleModeloChileautos(modelo);
-  const marcaBusqueda = marcaParaChileautos(marca);
+  const { busqueda: marcaBusqueda, omitido: marcaOmitida } = detalleMarcaChileautos(marca);
   const transLabel = (TRANSMISIONES.find((t) => t.value === transmision) || {}).label;
   const combLabel = (COMBUSTIBLES.find((c) => c.value === combustible) || {}).label;
 
@@ -3311,6 +3311,11 @@ function TasacionCompra() {
               {" "}{filtros.kmMin > 0 ? `${filtros.kmMin.toLocaleString("es-CL")}–` : "hasta "}{filtros.kmMax.toLocaleString("es-CL")} km
               {transLabel ? ` · transmisión ${transLabel.toLowerCase()}` : ""}{combLabel ? ` · combustible ${combLabel.toLowerCase()}` : ""} · orden: precio más bajo.
             </p>
+            {marcaOmitida && (
+              <p className="text-xs text-amber-800 mt-1">
+                En Chileautos se busca la marca como «{marcaBusqueda}». Se omite «{marcaOmitida}» (razón social, no forma parte de la marca).
+              </p>
+            )}
             {(modeloOmitido || modeloBusqueda !== modelo.trim()) && (
               <p className="text-xs text-amber-800 mt-1">
                 En Chileautos se busca el modelo como «{modeloBusqueda}»
