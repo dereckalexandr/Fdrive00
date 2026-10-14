@@ -332,6 +332,35 @@ Hasta que se ejecute el SQL el resto sigue funcionando; cerrar ventas avisa que 
 
 Código: reglas en `ventas-core.js` y `comisiones-core.js`, servidor en `ventas.ts` (`cierres.*`, `comisiones.resumen`), pantallas en `src/crm-cierres.jsx` y `src/crm-tramos.jsx`. Pruebas: `tests/cierres-api.test.mjs` (la función real contra una base falsa), `tests/comisiones-core.test.mjs` y las de `ventas-core`.
 
+## CRM · Entrega 3: panel de gestión del Jefe Local
+
+**Instalar (una sola vez, después de `supabase-crm-cierres.sql`):**
+1. Supabase → *SQL Editor* → pegar `supabase-crm-gestion.sql` → *Run*. Agrega la columna `ultima_actividad` a `leads` y crea la tabla `avisos` (RLS activado, sin políticas). Se puede repetir sin riesgo.
+2. Redesplegar la función: `node scripts/deploy-api.mjs`.
+Hasta que se ejecute el SQL el resto sigue funcionando; los avisos avisan que faltan las tablas y la detección de leads detenidos usa las marcas de tiempo que ya existían.
+
+Para quien tiene `leads.asignar` (Jefe Local y la cuenta maestra): pestaña **Gestión** en el módulo de Ventas, y una franja roja en su inicio cuando hay algo que atender.
+
+**Alertas** (se calculan en el servidor, solo con los leads del local):
+- **Sin atender**: lead *nuevo* sin ningún contacto hace **4 horas** o más.
+- **Detenidos**: lead contactado, en seguimiento o cotizado sin actividad hace **7 días** o más. "Actividad" es cualquier cosa registrada en la ficha (contacto, nota, cotización, reserva, tarea, cambio de etapa…); se guarda en `leads.ultima_actividad`. Los leads *reservados* no se marcan: sus reservas se vigilan por su vencimiento.
+- **Sin asignar**: leads abiertos sin ejecutivo (por ejemplo, cuando nadie estaba habilitado para recibirlos).
+- **Tareas vencidas del equipo** (día anterior o antes, hora de Chile) y **reservas por vencer** (próximas 48 horas), cada una con su ejecutivo y cliente.
+- Los plazos de 4 horas y 7 días son los valores iniciales y se cambian en *Configuración → Alertas del panel de gestión*.
+- **Carga por ejecutivo**: leads abiertos, sin atender, detenidos, tareas vencidas y reservas por vencer de cada persona, con los leads sin dueño aparte.
+
+**Acciones sin entrar a cada ficha:**
+- **Reasignar en lote** (hasta 50 leads): se eligen en la lista, y se asignan a una persona o con reparto automático (rotativo, sin repetir al dueño actual). Las **tareas pendientes** de cada lead se van con él. Se omiten, y se informa cuáles, los leads cerrados, los que ya eran de esa persona, los de otro local y **los que tienen un cierre de venta en curso o aprobado** (la comisión es de quien cerró la venta). Cada lead queda con una nota en su historial y la operación en la bitácora.
+- **Avisos**: el supervisor deja un mensaje (3 a 300 caracteres) a un ejecutivo habilitado, opcionalmente sobre un lead (también queda en su historial). La persona lo ve arriba de su inicio hasta que pulsa *Entendido*. Nadie puede leer ni marcar los avisos de otra persona.
+
+**Embudo y fuentes** (por mes): de los leads que **llegaron** ese mes, cuántos fueron contactados, cotizados, reservados y vendidos (aunque la venta ocurra después), con el porcentaje sobre el total y sobre el paso anterior; **rendimiento por fuente** (leads, cotizados, reservados, vendidos, conversión, monto vendido y margen — el margen solo lo ve quien puede ver costos) y **motivos de pérdida** de los leads perdidos ese mes.
+
+**Actividad del equipo** (por mes): leads recibidos, contactos (llamadas, WhatsApp y visitas registradas), cotizaciones, reservas, ventas aprobadas y tareas cumplidas de cada ejecutivo.
+
+**Escala**: las consultas por lista de identificadores (clientes, vehículos, usuarios de los leads) ahora se hacen en lotes de 80 para no armar direcciones demasiado largas con muchos leads, y los cálculos del panel traen solo los leads abiertos o del mes. Supabase entrega como máximo 1.000 filas por consulta; si un local llegara a superar ese volumen en un mes, habría que agregar los datos en la base.
+
+Código: reglas puras (alertas, embudo, fuentes, avisos) en `ventas-core.js`; servidor en `ventas.ts` (`gestion.resumen`, `gestion.embudo`, `leads.reasignarLote`, `avisos.*`); pantallas en `src/crm-gestion.jsx`. Pruebas: `tests/gestion-api.test.mjs` (la función real contra una base falsa) y las de `ventas-core`.
+
 ## Desplegar en un hosting público
 
 Las opciones más simples (tienen plan gratuito y se conectan directo a

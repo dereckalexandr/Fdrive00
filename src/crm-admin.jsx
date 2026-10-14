@@ -614,6 +614,10 @@ function ConfigTab() {
         <NumeroEditor clave="dias_reserva" etiqueta="Duración de una reserva" valor={c.dias_reserva} sufijo="días" paso="1" onGuardado={ok} onError={mal} />
       </Tarjeta>
       <TextoEditor clave="condiciones_cotizacion" titulo="Condiciones en el PDF de la cotización" ayuda="Este texto aparece al final de cada cotización que se entrega al cliente. Redáctalo con tus condiciones comerciales." valor={c.condiciones_cotizacion} onGuardado={ok} onError={mal} />
+      <Tarjeta titulo="Alertas del panel de gestión" ayuda="Cuándo el panel del Jefe Local marca un lead como desatendido o detenido.">
+        <NumeroEditor clave="horas_sin_contacto" etiqueta="Lead nuevo sin ningún contacto desde hace" valor={c.horas_sin_contacto} sufijo="horas" paso="1" onGuardado={ok} onError={mal} />
+        <NumeroEditor clave="dias_detenido" etiqueta="Lead en seguimiento o cotizado sin actividad desde hace" valor={c.dias_detenido} sufijo="días" paso="1" onGuardado={ok} onError={mal} />
+      </Tarjeta>
       <Tarjeta titulo="Meta mensual" ayuda="Cuántas ventas aprobadas se espera de cada ejecutivo al mes. La comisión no se configura aquí: sale de los tramos de cada ejecutivo (pestaña Usuarios → Editar → Comisiones por tramos).">
         <NumeroEditor clave="meta_mensual_unidades" etiqueta="Meta mensual por ejecutivo" valor={c.meta_mensual_unidades} sufijo="ventas" paso="1" onGuardado={ok} onError={mal} />
       </Tarjeta>

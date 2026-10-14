@@ -224,6 +224,8 @@ export const CONFIG_DEFECTO = {
   motivos_perdida: ["Precio", "Compró en otro lugar", "Sin respuesta", "Cambió de idea", "Financiamiento rechazado"],
   meta_mensual_unidades: 0,
   dias_reserva: 3,
+  horas_sin_contacto: 4,
+  dias_detenido: 7,
   vigencia_cotizacion_dias: 7,
   condiciones_cotizacion: "Cotización sujeta a disponibilidad del vehículo y a la aprobación del financiamiento, si corresponde. El precio puede variar si cambian las condiciones. Válida hasta la fecha indicada.",
 };
@@ -237,6 +239,12 @@ export function validarConfig(clave, valor) {
     const limpio = unicos(valor.map((v) => String(v).trim().replace(/\s+/g, " ")).filter(Boolean));
     if (limpio.length === 0 || limpio.some((v) => v.length > 60)) return { ok: false };
     return { ok: true, value: limpio };
+  }
+  if (clave === "horas_sin_contacto" || clave === "dias_detenido") {
+    const n = Number(valor);
+    const max = clave === "horas_sin_contacto" ? 168 : 90;
+    if (!Number.isInteger(n) || n < 1 || n > max) return { ok: false };
+    return { ok: true, value: n };
   }
   if (clave === "dias_reserva" || clave === "vigencia_cotizacion_dias") {
     const n = Number(valor);

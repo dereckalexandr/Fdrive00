@@ -416,6 +416,96 @@ export function validarCierre(input, ahora = new Date()) {
 /** Margen de una venta: precio final − costo del vehículo (null si no se conoce el costo). */
 export const margenVenta = (precioFinal, costo) => (costo === null || costo === undefined ? null : Number(precioFinal) - Number(costo));
 
+/* ---------- Gestión del supervisor: alertas y embudo ---------- */
+export const ETAPAS_DETENIBLES = ["contactado", "seguimiento", "cotizado"];
+export const ETAPAS_ABIERTAS = ["nuevo", "contactado", "seguimiento", "cotizado", "reservado"];
+
+const marca = (t) => (t ? Date.parse(t) : NaN);
+export const horasDesde = (iso, ahora = new Date()) => (ahora.getTime() - Date.parse(iso)) / 3_600_000;
+
+/** Último momento en que pasó algo en el lead (el más reciente entre sus marcas de tiempo). */
+export function ultimaActividad(lead) {
+  const t = [lead.ultima_actividad, lead.ultimo_contacto, lead.actualizado_en, lead.creado_en].map(marca).filter(Number.isFinite);
+  return t.length ? new Date(Math.max(...t)).toISOString() : null;
+}
+
+/** Lead nuevo, sin ningún contacto, que lleva `horas` o más esperando. */
+export const esSinAtender = (lead, ahora, horas) => lead.etapa === "nuevo" && !lead.ultimo_contacto && horasDesde(lead.creado_en, ahora) >= horas;
+
+/** Lead en seguimiento / cotizado sin actividad hace `dias` o más. (Las reservas se vigilan por su vencimiento.) */
+export function esDetenido(lead, ahora, dias) {
+  const u = ultimaActividad(lead);
+  return ETAPAS_DETENIBLES.includes(lead.etapa) && u !== null && horasDesde(u, ahora) >= dias * 24;
+}
+
+/** "hace 5 h", "hace 3 d". */
+export function edadTexto(iso, ahora = new Date()) {
+  if (!iso) return "";
+  const h = horasDesde(iso, ahora);
+  if (h < 1) return "hace minutos";
+  if (h < 48) return `hace ${Math.floor(h)} h`;
+  return `hace ${Math.floor(h / 24)} d`;
+}
+
+const pct = (a, b) => (b > 0 ? Math.round((a / b) * 1000) / 10 : 0);
+
+/**
+ * Embudo de un grupo de leads (los que llegaron en un mes). `conjuntos` = ids de leads que llegaron a cada punto:
+ * { cotizados, reservados, vendidos } (Set). Un lead cuenta como contactado si tuvo un contacto o ya salió de "Nuevo".
+ */
+export function embudoCohorte(leads, { cotizados, reservados, vendidos }) {
+  const total = leads.length;
+  const contactados = leads.filter((l) => l.etapa !== "nuevo" || l.ultimo_contacto).length;
+  const nCot = leads.filter((l) => cotizados.has(l.id)).length;
+  const nRes = leads.filter((l) => reservados.has(l.id)).length;
+  const nVen = leads.filter((l) => vendidos.has(l.id)).length;
+  const perdidos = leads.filter((l) => l.etapa === "perdido").length;
+  const pasos = [
+    { id: "leads", nombre: "Leads recibidos", n: total, pctTotal: total ? 100 : 0, pctPaso: total ? 100 : 0 },
+    { id: "contactados", nombre: "Contactados", n: contactados, pctTotal: pct(contactados, total), pctPaso: pct(contactados, total) },
+    { id: "cotizados", nombre: "Cotizados", n: nCot, pctTotal: pct(nCot, total), pctPaso: pct(nCot, contactados) },
+    { id: "reservados", nombre: "Reservados", n: nRes, pctTotal: pct(nRes, total), pctPaso: pct(nRes, nCot) },
+    { id: "vendidos", nombre: "Vendidos", n: nVen, pctTotal: pct(nVen, total), pctPaso: pct(nVen, nRes) },
+  ];
+  return { total, perdidos, pasos };
+}
+
+/** Rendimiento por fuente de lead. `ventas` = Map(leadId -> { monto, margen }) de las ventas aprobadas. */
+export function rendimientoPorFuente(leads, { cotizados, reservados, vendidos }, ventas = new Map()) {
+  const grupos = new Map();
+  for (const l of leads) {
+    const f = l.fuente || "Sin fuente";
+    const g = grupos.get(f) || { fuente: f, leads: 0, cotizados: 0, reservados: 0, vendidos: 0, perdidos: 0, monto: 0, margen: 0, margenCompleto: true };
+    g.leads++;
+    if (cotizados.has(l.id)) g.cotizados++;
+    if (reservados.has(l.id)) g.reservados++;
+    if (l.etapa === "perdido") g.perdidos++;
+    if (vendidos.has(l.id)) {
+      g.vendidos++;
+      const v = ventas.get(l.id);
+      if (v) { g.monto += Number(v.monto) || 0; if (v.margen === null || v.margen === undefined) g.margenCompleto = false; else g.margen += Number(v.margen); }
+    }
+    grupos.set(f, g);
+  }
+  return Array.from(grupos.values())
+    .map((g) => ({ ...g, conversion: pct(g.vendidos, g.leads), margen: g.margenCompleto ? g.margen : null }))
+    .sort((a, b) => b.leads - a.leads || a.fuente.localeCompare(b.fuente));
+}
+
+/** Motivos de pérdida, del más frecuente al menos. */
+export function motivosDePerdida(leads) {
+  const cuenta = new Map();
+  for (const l of leads) if (l.etapa === "perdido") cuenta.set(l.motivo_perdida || "Sin motivo", (cuenta.get(l.motivo_perdida || "Sin motivo") || 0) + 1);
+  return Array.from(cuenta, ([motivo, n]) => ({ motivo, n })).sort((a, b) => b.n - a.n || a.motivo.localeCompare(b.motivo));
+}
+
+/** Valida un aviso del supervisor. */
+export function validarAviso(input) {
+  const texto = String((input && input.texto) ?? "").trim().replace(/\s+/g, " ");
+  if (texto.length < 3 || texto.length > 300) return { ok: false, error: "aviso_invalido" };
+  return { ok: true, value: { texto } };
+}
+
 /* ---------- Permisos del módulo ---------- */
 /** Quién puede modificar un lead: quien reasigna (supervisor) o su dueño con permiso de leads propios. Y debe estar habilitado para ventas, salvo el supervisor. */
 export function puedeEditarLead({ permisos, esAdmin, usuarioId, lead }) {

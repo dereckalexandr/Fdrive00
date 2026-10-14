@@ -318,3 +318,95 @@ test("Meses según el día en Chile y margen de la venta", () => {
   assert.equal(margenVenta(9200000, null), null);
   assert.equal(cierreNombre("pendiente"), "Esperando aprobación");
 });
+
+import { ultimaActividad, esSinAtender, esDetenido, edadTexto, horasDesde, embudoCohorte, rendimientoPorFuente, motivosDePerdida, validarAviso } from "../supabase/functions/api/ventas-core.js";
+
+const T0 = new Date("2026-10-14T18:00:00Z");
+const haceH = (h) => new Date(T0.getTime() - h * 3_600_000).toISOString();
+
+test("Alertas: lead nuevo sin contacto pasado el plazo", () => {
+  const nuevo = (h, extra = {}) => ({ etapa: "nuevo", creado_en: haceH(h), ultimo_contacto: null, ...extra });
+  assert.equal(esSinAtender(nuevo(5), T0, 4), true);
+  assert.equal(esSinAtender(nuevo(4), T0, 4), true, "justo en el plazo ya cuenta");
+  assert.equal(esSinAtender(nuevo(3), T0, 4), false);
+  assert.equal(esSinAtender(nuevo(10, { ultimo_contacto: haceH(1) }), T0, 4), false, "ya lo contactaron");
+  assert.equal(esSinAtender({ etapa: "contactado", creado_en: haceH(100), ultimo_contacto: null }, T0, 4), false, "solo los 'Nuevo'");
+});
+
+test("Alertas: lead detenido por falta de actividad", () => {
+  const lead = (etapa, h, extra = {}) => ({ etapa, creado_en: haceH(500), actualizado_en: haceH(h), ultimo_contacto: null, ...extra });
+  assert.equal(esDetenido(lead("seguimiento", 24 * 8), T0, 7), true);
+  assert.equal(esDetenido(lead("seguimiento", 24 * 6), T0, 7), false);
+  assert.equal(esDetenido(lead("cotizado", 24 * 7), T0, 7), true);
+  assert.equal(esDetenido(lead("contactado", 24 * 9), T0, 7), true);
+  assert.equal(esDetenido(lead("reservado", 24 * 30), T0, 7), false, "una reserva se vigila por su vencimiento");
+  assert.equal(esDetenido(lead("perdido", 24 * 30), T0, 7), false);
+  assert.equal(esDetenido(lead("seguimiento", 24 * 9, { ultima_actividad: haceH(2) }), T0, 7), false, "la actividad reciente lo salva");
+  assert.equal(esDetenido(lead("seguimiento", 24 * 9, { ultimo_contacto: haceH(30) }), T0, 7), false, "un contacto reciente también");
+});
+
+test("Última actividad: la más reciente entre las marcas de tiempo", () => {
+  assert.equal(ultimaActividad({ creado_en: haceH(10), actualizado_en: haceH(5), ultimo_contacto: haceH(8), ultima_actividad: haceH(2) }), haceH(2));
+  assert.equal(ultimaActividad({ creado_en: haceH(10) }), haceH(10));
+  assert.equal(ultimaActividad({}), null);
+  assert.equal(horasDesde(haceH(5), T0), 5);
+});
+
+test("Edad en texto", () => {
+  assert.equal(edadTexto(haceH(0.2), T0), "hace minutos");
+  assert.equal(edadTexto(haceH(5), T0), "hace 5 h");
+  assert.equal(edadTexto(haceH(24 * 3 + 2), T0), "hace 3 d");
+  assert.equal(edadTexto("", T0), "");
+});
+
+const LEADS = [
+  { id: "a", etapa: "nuevo", ultimo_contacto: null, fuente: "Sitio web" },
+  { id: "b", etapa: "contactado", ultimo_contacto: "x", fuente: "Sitio web" },
+  { id: "c", etapa: "cotizado", ultimo_contacto: "x", fuente: "Sitio web" },
+  { id: "d", etapa: "ganado", ultimo_contacto: "x", fuente: "Sitio web" },
+  { id: "e", etapa: "perdido", ultimo_contacto: "x", fuente: "Llamada", motivo_perdida: "Precio" },
+  { id: "f", etapa: "perdido", ultimo_contacto: null, fuente: null, motivo_perdida: "Precio" },
+  { id: "g", etapa: "seguimiento", ultimo_contacto: "x", fuente: "Llamada" },
+];
+const CONJ = { cotizados: new Set(["c", "d", "e"]), reservados: new Set(["d"]), vendidos: new Set(["d"]) };
+
+test("Embudo de un mes: cuántos llegan a cada paso y qué porcentaje", () => {
+  const e = embudoCohorte(LEADS, CONJ);
+  assert.equal(e.total, 7);
+  assert.equal(e.perdidos, 2);
+  const p = Object.fromEntries(e.pasos.map((x) => [x.id, x]));
+  assert.equal(p.leads.n, 7);
+  assert.equal(p.contactados.n, 6, "todos menos el nuevo sin contacto (el perdido sin contacto salió de 'Nuevo')");
+  assert.equal(p.cotizados.n, 3);
+  assert.equal(p.reservados.n, 1);
+  assert.equal(p.vendidos.n, 1);
+  assert.equal(p.vendidos.pctTotal, 14.3);
+  assert.equal(p.cotizados.pctPaso, 50, "3 de 6 contactados");
+  assert.equal(p.reservados.pctPaso, 33.3);
+  assert.deepEqual(embudoCohorte([], { cotizados: new Set(), reservados: new Set(), vendidos: new Set() }).pasos.map((x) => x.n), [0, 0, 0, 0, 0]);
+});
+
+test("Rendimiento por fuente: conversión, monto y margen de lo vendido", () => {
+  const ventas = new Map([["d", { monto: 9800000, margen: 1300000 }]]);
+  const r = rendimientoPorFuente(LEADS, CONJ, ventas);
+  const web = r.find((x) => x.fuente === "Sitio web");
+  assert.deepEqual([web.leads, web.cotizados, web.reservados, web.vendidos, web.conversion, web.monto, web.margen], [4, 2, 1, 1, 25, 9800000, 1300000]);
+  const llamada = r.find((x) => x.fuente === "Llamada");
+  assert.deepEqual([llamada.leads, llamada.vendidos, llamada.conversion, llamada.perdidos], [2, 0, 0, 1]);
+  assert.ok(r.find((x) => x.fuente === "Sin fuente"), "los leads sin fuente se agrupan aparte");
+  assert.equal(r[0].fuente, "Sitio web", "ordenadas por cantidad de leads");
+  // Si no se conoce el margen de alguna venta, no se inventa un total.
+  assert.equal(rendimientoPorFuente(LEADS, CONJ, new Map([["d", { monto: 1, margen: null }]])).find((x) => x.fuente === "Sitio web").margen, null);
+});
+
+test("Motivos de pérdida: del más frecuente al menos", () => {
+  assert.deepEqual(motivosDePerdida([...LEADS, { id: "h", etapa: "perdido", motivo_perdida: null }]), [{ motivo: "Precio", n: 2 }, { motivo: "Sin motivo", n: 1 }]);
+  assert.deepEqual(motivosDePerdida([]), []);
+});
+
+test("Aviso del supervisor: texto entre 3 y 300 caracteres", () => {
+  assert.equal(validarAviso({ texto: "  Llama hoy a este cliente  " }).value.texto, "Llama hoy a este cliente");
+  assert.equal(validarAviso({ texto: "ab" }).error, "aviso_invalido");
+  assert.equal(validarAviso({ texto: "x".repeat(301) }).error, "aviso_invalido");
+  assert.equal(validarAviso(null).error, "aviso_invalido");
+});

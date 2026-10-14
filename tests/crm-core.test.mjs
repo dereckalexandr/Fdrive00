@@ -170,3 +170,17 @@ test("Configuración de cotizaciones y reservas: días enteros dentro del rango 
   assert.equal(c.vigencia_cotizacion_dias, 7);
   assert.ok(c.condiciones_cotizacion.length > 20);
 });
+
+test("Configuración de alertas: horas sin contacto y días de un lead detenido", () => {
+  assert.equal(validarConfig("horas_sin_contacto", 4).value, 4);
+  assert.equal(validarConfig("horas_sin_contacto", 168).value, 168);
+  assert.ok(!validarConfig("horas_sin_contacto", 0).ok);
+  assert.ok(!validarConfig("horas_sin_contacto", 169).ok);
+  assert.ok(!validarConfig("horas_sin_contacto", 1.5).ok);
+  assert.equal(validarConfig("dias_detenido", 7).value, 7);
+  assert.ok(!validarConfig("dias_detenido", 91).ok);
+  assert.ok(!validarConfig("dias_detenido", "abc").ok);
+  const c = configCompleta({});
+  assert.equal(c.horas_sin_contacto, 4);
+  assert.equal(c.dias_detenido, 7);
+});

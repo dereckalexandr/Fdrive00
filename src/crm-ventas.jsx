@@ -15,6 +15,7 @@ import {
 import { Inventario, Clientes } from "./crm-inventario.jsx";
 import { SeccionCotizaciones } from "./crm-cotizaciones.jsx";
 import { SeccionCierres, AprobacionesTodo, Ventas, TarjetaComision } from "./crm-cierres.jsx";
+import { Gestion, AvisosDelSupervisor, FranjaAlertas } from "./crm-gestion.jsx";
 import {
   INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, useCarga, mensajeError,
 } from "./crm-ui.jsx";
@@ -526,18 +527,19 @@ function Agenda({ api, catalogos, abrirLead, version, onCambio }) {
 ========================================================= */
 function Inicio({ api, catalogos, abrirLead, irA, version, onCambio }) {
   const { cargando, error, datos } = useCarga(async () => {
-    const [l, t, r, p, c] = await Promise.all([
+    const [l, t, r, p, c, ge] = await Promise.all([
       api("leads.list", { todos: catalogos.puedeAsignar }),
       catalogos.puedeAgenda ? api("tareas.list", { todas: catalogos.puedeAsignar }) : Promise.resolve({ tareas: [], leads: {} }),
       api("reservas.list").catch(() => ({ reservas: [] })),
       catalogos.puedeAsignar ? api("cotizaciones.pendientes").catch(() => ({ pendientes: [] })) : Promise.resolve({ pendientes: [] }),
       catalogos.puedeComision ? api("comisiones.resumen").catch(() => null) : Promise.resolve(null),
+      catalogos.puedeAsignar ? api("gestion.resumen").catch(() => null) : Promise.resolve(null),
     ]);
-    return { l, t, r, p, c };
+    return { l, t, r, p, c, ge };
   }, [api, version]);
   if (cargando && !datos) return <Cargando />;
   if (error && !datos) return <Aviso>{error}</Aviso>;
-  const { l, t, r, p, c } = datos;
+  const { l, t, r, p, c, ge } = datos;
   const porAtender = leadsPorAtender(l.leads);
   const g = agruparTareas(t.tareas);
   const cliente = (id) => (l.clientes.find((c) => c.id === id) || {}).nombre || "Cliente";
@@ -550,6 +552,8 @@ function Inicio({ api, catalogos, abrirLead, irA, version, onCambio }) {
   const alcance = catalogos.puedeAsignar ? "del local" : "tuyos";
   return (
     <>
+      <AvisosDelSupervisor api={api} version={version} abrirLead={abrirLead} />
+      <FranjaAlertas resumen={ge} onVer={() => irA("gestion")} />
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
         {catalogos.puedeAsignar && kpi("Descuentos por aprobar", p.pendientes.length, p.pendientes.length > 0, () => irA("aprobaciones"))}
         {kpi(`Leads por atender`, porAtender.length, porAtender.length > 0, () => irA("leads"))}
@@ -648,7 +652,7 @@ export function ModuloVentas({ permisos = [], esAdmin = false }) {
   if (usaLeads) opciones.push(["inicio", "Inicio"], ["leads", "Leads"]);
   if (catalogos.puedeAgenda) opciones.push(["agenda", "Agenda"]);
   if (catalogos.puedeComision) opciones.push(["ventas", "Ventas"]);
-  if (puedeAprobar) opciones.push(["aprobaciones", "Aprobaciones", pend.datos || 0]);
+  if (puedeAprobar) opciones.push(["gestion", "Gestión"], ["aprobaciones", "Aprobaciones", pend.datos || 0]);
   opciones.push(["inventario", "Inventario"]);
   if (usaLeads) opciones.push(["clientes", "Clientes"]);
 
@@ -662,6 +666,7 @@ export function ModuloVentas({ permisos = [], esAdmin = false }) {
       <Pestanas valor={tab} onCambio={setTab} opciones={opciones} />
       {tab === "inicio" && <Inicio api={api} catalogos={catalogos} abrirLead={setLeadAbierto} irA={setTab} version={version} onCambio={subir} />}
       {tab === "leads" && <Leads api={api} catalogos={catalogos} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
+      {tab === "gestion" && <Gestion api={api} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
       {tab === "ventas" && <Ventas api={api} catalogos={catalogos} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
       {tab === "aprobaciones" && <AprobacionesTodo api={api} version={version} abrirLead={setLeadAbierto} onCambio={subir} />}
       {tab === "agenda" && <Agenda api={api} catalogos={catalogos} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}

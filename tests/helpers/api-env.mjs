@@ -20,6 +20,7 @@ const DEFAULTS = {
   leads: () => ({ id: randomUUID(), etapa: "nuevo", tipo: "venta", parte_pago: {}, financiamiento: {}, ultimo_contacto: null, motivo_perdida: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
   lead_eventos: () => ({ id: Math.floor(Math.random() * 1e9), creado_en: new Date().toISOString() }),
   cotizaciones: () => ({ id: randomUUID(), numero: ++contadorCotizaciones, estado: "vigente", descuento: 0, aprobado_por: null, aprobado_en: null, motivo_rechazo: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
+  avisos: () => ({ id: randomUUID(), leido_en: null, creado_en: new Date().toISOString() }),
   cierres: () => ({ id: randomUUID(), numero: ++contadorCierres, estado: "pendiente", mes: null, aprobado_por: null, aprobado_en: null, motivo_rechazo: null, anulado_por: null, anulado_en: null, motivo_anulacion: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
   reservas: () => ({ id: randomUUID(), estado: "activa", motivo: null, cerrado_en: null, creado_en: new Date().toISOString() }),
   tareas: () => ({ id: randomUUID(), hecha: false, hecha_en: null, creado_en: new Date().toISOString() }),
@@ -28,7 +29,7 @@ const DEFAULTS = {
 const UNICOS = { vehiculos: ["patente"], usuarios: ["rut"], locales: ["nombre"], roles_permisos: ["rol"], config_negocio: ["clave"], kv_store: ["key"] };
 
 export function crearBaseFalsa() {
-  const tablas = { usuarios: [], locales: [], roles_permisos: [], bitacora: [], config_negocio: [], kv_store: [], vehiculos: [], clientes: [], leads: [], lead_eventos: [], tareas: [], cotizaciones: [], reservas: [], cierres: [] };
+  const tablas = { usuarios: [], locales: [], roles_permisos: [], bitacora: [], config_negocio: [], kv_store: [], vehiculos: [], clientes: [], leads: [], lead_eventos: [], tareas: [], cotizaciones: [], reservas: [], cierres: [], avisos: [] };
   const consultas = [];
 
   function builder(nombre) {
@@ -42,6 +43,8 @@ export function crearBaseFalsa() {
       eq(c, v) { st.filtros.push([c, v]); return b; },
       in(c, arr) { st.filtros.push([c, (x) => arr.includes(x)]); return b; },
       limit(n) { st.limite = n; return b; },
+      gte(c, v) { st.filtros.push([c, (x) => x !== null && x !== undefined && x >= v]); return b; },
+      lt(c, v) { st.filtros.push([c, (x) => x !== null && x !== undefined && x < v]); return b; },
       like(c, p) { st.like = [c, p]; return b; },
       order(c, o) { st.orden = [c, o && o.ascending === false ? -1 : 1]; return b; },
       range(a, z) { st.rango = [a, z]; return b; },

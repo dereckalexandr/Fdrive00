@@ -14,6 +14,7 @@ import {
   validarVehiculo, ocultarCosto, validarCliente, validarLead, validarCambioEtapa, elegirAsignado, validarTarea,
   puedeEditarLead, etapaNombre,
   validarCierre, margenVenta, mesChile, esMes, nombreMes, FINANCIERAS,
+  ETAPAS_ABIERTAS, esSinAtender, esDetenido, ultimaActividad, embudoCohorte, rendimientoPorFuente, motivosDePerdida, validarAviso, claseTarea,
 } from "./ventas-core.js";
 import { tramosEfectivos, calcularProduccion } from "./comisiones-core.js";
 
@@ -60,13 +61,18 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     return activos.length === 1 ? activos[0].id : null;
   }
 
-  async function porIds(tabla: string, ids: string[]) {
+  /** Filas cuya `columna` está en `ids`, consultadas en lotes (una lista larga haría una dirección demasiado extensa). */
+  async function enLotes(tabla: string, columna: string, ids: string[]) {
     const unicos = Array.from(new Set(ids.filter(Boolean)));
-    if (unicos.length === 0) return [];
-    const { data, error } = await sb.from(tabla).select("*").in("id", unicos);
-    if (error) throw error;
-    return data ?? [];
+    const out: any[] = [];
+    for (let i = 0; i < unicos.length; i += 80) {
+      const { data, error } = await sb.from(tabla).select("*").in(columna, unicos.slice(i, i + 80));
+      if (error) throw error;
+      out.push(...(data ?? []));
+    }
+    return out;
   }
+  const porIds = (tabla: string, ids: string[]) => enLotes(tabla, "id", ids);
 
   async function elegibles(local: string) {
     const overrides = await ctx.rolePermOverrides();
@@ -93,6 +99,8 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
   async function evento(leadId: string, tipo: string, detalle: string) {
     const { error } = await sb.from("lead_eventos").insert({ lead_id: leadId, usuario_id: userId, usuario_nombre: userName, tipo, detalle });
     if (error) console.error("lead_eventos error:", error.message);
+    // Marca de la última actividad del lead (para detectar los detenidos). Si la columna aún no existe, se ignora.
+    await sb.from("leads").update({ ultima_actividad: new Date().toISOString() }).eq("id", leadId);
   }
 
   async function cargarLead(id: string) {
@@ -158,7 +166,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     if (!cp.error) for (const c of cp.data ?? []) if (c.reserva_id) enCierre.add(c.reserva_id);
     for (const r of (data ?? []).filter((x: any) => reservaVencida(x) && !enCierre.has(x.id))) await cerrarReserva(r, "vencida", "Venció el plazo", { volverACotizado: true, sistema: true });
   }
-  if (/^(inventario\.list|leads\.|cotizaciones\.|reservas\.)/.test(op)) await liberarVencidas();
+  if (/^(inventario\.list|leads\.|cotizaciones\.|reservas\.|gestion\.)/.test(op)) await liberarVencidas();
 
   /* ---------- catálogos para las pantallas ---------- */
   if (op === "catalogos") {
@@ -960,6 +968,204 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       totales: { unidades: delMes.length, produccion: ejecutivos.reduce((a: number, e: any) => a + e.produccion.total, 0), montoVendido: ejecutivos.reduce((a: number, e: any) => a + e.montoVendido, 0) },
       pendientesDeOtrosModulos: ["compras", "consignaciones", "inspecciones"],
     });
+  }
+
+  /* ---------- avisos del supervisor ---------- */
+  if (op === "avisos.mios") {
+    if (ctx.esAdmin) return json({ avisos: [] });
+    const { data, error } = await sb.from("avisos").select("*").eq("para", userId).order("creado_en", { ascending: false });
+    if (error) return fallo(error);
+    const sinLeer = (data ?? []).filter((a: any) => !a.leido_en).slice(0, 20);
+    const leads = await porIds("leads", sinLeer.map((a: any) => a.lead_id));
+    const clientes = await porIds("clientes", leads.map((l: any) => l.cliente_id));
+    return json({
+      avisos: sinLeer.map((a: any) => {
+        const l = leads.find((x: any) => x.id === a.lead_id);
+        return { ...a, cliente: l ? (clientes.find((c: any) => c.id === l.cliente_id) || {}).nombre ?? "" : "" };
+      }),
+    });
+  }
+
+  if (op === "avisos.leer") {
+    const { data, error } = await sb.from("avisos").update({ leido_en: new Date().toISOString() }).eq("id", String(body.id ?? "")).eq("para", userId).select().maybeSingle();
+    if (error) return fallo(error);
+    if (!data) return err("no_existe", 404);
+    return json({ ok: true });
+  }
+
+  if (op === "avisos.crear") {
+    if (!esSupervisor) return err("forbidden", 403);
+    const v = validarAviso(body);
+    if (!v.ok) return err(v.error!);
+    let lead: any = null;
+    if (body.leadId) {
+      lead = await cargarLead(String(body.leadId));
+      if (!lead) return err("no_existe", 404);
+    }
+    const para = String(body.para || lead?.asignado_a || "");
+    if (!para) return err("destinatario_requerido");
+    const local = lead ? lead.local_id : await localParaCrear();
+    if (!local) return err("sin_local");
+    const destino = (await elegibles(local)).find((e: any) => e.id === para);
+    if (!destino) return err("asignado_invalido");
+    const { data, error } = await sb.from("avisos").insert({ local_id: local, lead_id: lead ? lead.id : null, para, de_id: userId, de_nombre: userName, texto: v.value.texto }).select().single();
+    if (error) return fallo(error);
+    if (lead) await evento(lead.id, "aviso", `Aviso de ${userName} para ${destino.nombre}: ${v.value.texto}`);
+    await audit(ctx.actor, "aviso.crear", "aviso", data.id, { para: destino.nombre, lead_id: lead ? lead.id : null });
+    return json({ aviso: data });
+  }
+
+  /* ---------- panel de gestión del supervisor ---------- */
+  if (op === "gestion.resumen") {
+    if (!esSupervisor) return err("forbidden", 403);
+    let cfg;
+    try { cfg = await configNegocio(); } catch (e) { return fallo(e); }
+    const ahora = new Date();
+    const lr = await scoped(sb.from("leads").select("*").in("etapa", ETAPAS_ABIERTAS));
+    if (lr.error) return fallo(lr.error);
+    const abiertos: any[] = lr.data ?? [];
+    const tr = await scoped(sb.from("tareas").select("*").eq("hecha", false));
+    const rr = await scoped(sb.from("reservas").select("*").eq("estado", "activa"));
+    const tareasVencidas: any[] = (tr.data ?? []).filter((t: any) => claseTarea(t.vence_en, ahora) === "vencida");
+    const porVencer: any[] = (rr.data ?? []).filter((r: any) => Date.parse(r.vence_en) - ahora.getTime() <= 48 * 3_600_000);
+
+    const sinAtender = abiertos.filter((l) => esSinAtender(l, ahora, cfg.horas_sin_contacto));
+    const detenidos = abiertos.filter((l) => esDetenido(l, ahora, cfg.dias_detenido));
+    const sinAsignar = abiertos.filter((l) => !l.asignado_a);
+
+    const leadsDeTareas = await porIds("leads", [...tareasVencidas, ...porVencer].map((x) => x.lead_id));
+    const clientes = await porIds("clientes", [...abiertos, ...leadsDeTareas].map((l: any) => l.cliente_id));
+    const vehiculos = await porIds("vehiculos", porVencer.map((r) => r.vehiculo_id));
+    const equipoBase = localId ? await elegibles(localId) : [];
+    const usuarios = await porIds("usuarios", [...abiertos.map((l) => l.asignado_a), ...tareasVencidas.map((t) => t.asignado_a), ...equipoBase.map((e: any) => e.id)]);
+    const nombreDe = (id: string) => (usuarios.find((u: any) => u.id === id) || {}).nombre ?? "";
+    const clienteDe = (id: string) => (clientes.find((c: any) => c.id === id) || {}).nombre ?? "";
+    const fila = (l: any) => ({ id: l.id, cliente: clienteDe(l.cliente_id), ejecutivo: l.asignado_a ? nombreDe(l.asignado_a) : "", asignado_a: l.asignado_a, etapa: l.etapa, fuente: l.fuente, creado_en: l.creado_en, ultima_actividad: ultimaActividad(l) });
+    const tope = (arr: any[]) => arr.slice(0, 50);
+
+    const ids = new Set<string | null>([...equipoBase.map((e: any) => e.id), ...abiertos.map((l) => l.asignado_a), ...tareasVencidas.map((t) => t.asignado_a)]);
+    const equipo = Array.from(ids).map((id) => ({
+      id, nombre: id ? nombreDe(id as string) : "Sin asignar",
+      abiertos: abiertos.filter((l) => (l.asignado_a ?? null) === id).length,
+      sinAtender: sinAtender.filter((l) => (l.asignado_a ?? null) === id).length,
+      detenidos: detenidos.filter((l) => (l.asignado_a ?? null) === id).length,
+      tareasVencidas: tareasVencidas.filter((t) => (t.asignado_a ?? null) === id).length,
+      reservasPorVencer: porVencer.filter((r) => ((leadsDeTareas.find((l: any) => l.id === r.lead_id) || {}).asignado_a ?? null) === id).length,
+    })).filter((e) => e.id !== null || e.abiertos > 0).sort((a, b) => (a.id === null ? -1 : b.id === null ? 1 : a.nombre.localeCompare(b.nombre)));
+
+    return json({
+      config: { horas_sin_contacto: cfg.horas_sin_contacto, dias_detenido: cfg.dias_detenido },
+      conteos: { abiertos: abiertos.length, sinAtender: sinAtender.length, detenidos: detenidos.length, sinAsignar: sinAsignar.length, tareasVencidas: tareasVencidas.length, reservasPorVencer: porVencer.length },
+      sinAtender: tope(sinAtender).map(fila),
+      detenidos: tope(detenidos).map(fila),
+      sinAsignar: tope(sinAsignar).map(fila),
+      tareasVencidas: tope(tareasVencidas).map((t) => {
+        const l = leadsDeTareas.find((x: any) => x.id === t.lead_id);
+        return { id: t.id, titulo: t.titulo, tipo: t.tipo, vence_en: t.vence_en, lead_id: t.lead_id, cliente: l ? clienteDe(l.cliente_id) : "", ejecutivo: nombreDe(t.asignado_a), asignado_a: t.asignado_a };
+      }),
+      reservasPorVencer: tope(porVencer).map((r) => {
+        const l = leadsDeTareas.find((x: any) => x.id === r.lead_id);
+        const v = vehiculos.find((x: any) => x.id === r.vehiculo_id) || {};
+        return { id: r.id, lead_id: r.lead_id, monto: r.monto, vence_en: r.vence_en, vehiculo: v.marca ? `${v.marca} ${v.modelo} ${v.anio} · ${v.patente}` : "", cliente: l ? clienteDe(l.cliente_id) : "", ejecutivo: l && l.asignado_a ? nombreDe(l.asignado_a) : "" };
+      }),
+      equipo,
+    });
+  }
+
+  if (op === "gestion.embudo") {
+    if (!esSupervisor) return err("forbidden", 403);
+    const mes = body.mes === undefined ? mesChile() : String(body.mes);
+    if (!esMes(mes)) return err("mes_invalido");
+    // Ventana amplia (un día de margen a cada lado) para absorber la diferencia horaria; luego se filtra por el mes en Chile.
+    const [y, m] = mes.split("-").map(Number);
+    const desde = new Date(Date.UTC(y, m - 1, 1) - 86_400_000).toISOString();
+    const hasta = new Date(Date.UTC(y, m, 1) + 86_400_000).toISOString();
+
+    const lr = await scoped(sb.from("leads").select("*").gte("creado_en", desde).lt("creado_en", hasta));
+    if (lr.error) return fallo(lr.error);
+    const cohorte: any[] = (lr.data ?? []).filter((l: any) => mesChile(l.creado_en) === mes);
+    const idsCohorte = cohorte.map((l) => l.id);
+
+    const cotizaciones = (await enLotes("cotizaciones", "lead_id", idsCohorte)).filter((c: any) => c.estado !== "anulada");
+    const reservas = await enLotes("reservas", "lead_id", idsCohorte);
+    const cierres = (await enLotes("cierres", "lead_id", idsCohorte)).filter((c: any) => c.estado === "aprobada");
+    const puedeCosto = can("inventario.editar");
+    const conjuntos = { cotizados: new Set<string>(cotizaciones.map((c: any) => c.lead_id)), reservados: new Set<string>(reservas.map((r: any) => r.lead_id)), vendidos: new Set<string>(cierres.map((c: any) => c.lead_id)) };
+    const ventas = new Map<string, { monto: number; margen: number | null }>(cierres.map((c: any) => [c.lead_id, { monto: Number(c.precio_final), margen: puedeCosto && c.margen != null ? Number(c.margen) : null }]));
+    const fuentes = rendimientoPorFuente(cohorte, conjuntos, ventas);
+    const embudo = embudoCohorte(cohorte, conjuntos);
+
+    // Motivos: leads perdidos EN este mes (sin importar cuándo llegaron).
+    const pr = await scoped(sb.from("leads").select("*").eq("etapa", "perdido").gte("actualizado_en", desde).lt("actualizado_en", hasta));
+    const motivos = motivosDePerdida((pr.data ?? []).filter((l: any) => mesChile(l.actualizado_en) === mes));
+
+    // Actividad por ejecutivo en el mes.
+    const equipoBase = localId ? await elegibles(localId) : [];
+    const idsEjec = Array.from(new Set<string>([...equipoBase.map((e: any) => e.id), ...cohorte.map((l) => l.asignado_a).filter(Boolean)]));
+    const usuarios = await porIds("usuarios", idsEjec);
+    const ev = idsEjec.length
+      ? await sb.from("lead_eventos").select("usuario_id, tipo, creado_en").in("usuario_id", idsEjec).gte("creado_en", desde).lt("creado_en", hasta)
+      : { data: [], error: null };
+    if (ev.error) return fallo(ev.error);
+    const eventos = (ev.data ?? []).filter((e: any) => mesChile(e.creado_en) === mes);
+    const cr = await scoped(sb.from("cotizaciones").select("creado_por, creado_en").gte("creado_en", desde).lt("creado_en", hasta));
+    const rs = await scoped(sb.from("reservas").select("creado_por, creado_en").gte("creado_en", desde).lt("creado_en", hasta));
+    const tc = await scoped(sb.from("tareas").select("asignado_a, hecha_en").eq("hecha", true).gte("hecha_en", desde).lt("hecha_en", hasta));
+    const cv = await scoped(sb.from("cierres").select("ejecutivo_id, mes").eq("estado", "aprobada").eq("mes", mes));
+    const delMes = (arr: any[] | null, campo: string) => (arr ?? []).filter((x) => mesChile(x[campo]) === mes);
+
+    const equipo = idsEjec.map((id) => {
+      const u = usuarios.find((x: any) => x.id === id) || {};
+      return {
+        id, nombre: u.nombre ?? "", leadsRecibidos: cohorte.filter((l) => l.asignado_a === id).length,
+        contactos: eventos.filter((e: any) => e.usuario_id === id && ["llamada", "whatsapp", "visita"].includes(e.tipo)).length,
+        cotizaciones: delMes(cr.data, "creado_en").filter((c: any) => c.creado_por === id).length,
+        reservas: delMes(rs.data, "creado_en").filter((c: any) => c.creado_por === id).length,
+        ventas: (cv.data ?? []).filter((c: any) => c.ejecutivo_id === id).length,
+        tareasCumplidas: delMes(tc.data, "hecha_en").filter((t: any) => t.asignado_a === id).length,
+      };
+    }).sort((a, b) => b.ventas - a.ventas || b.contactos - a.contactos || a.nombre.localeCompare(b.nombre));
+
+    return json({ mes, nombreMes: nombreMes(mes), embudo, fuentes, motivos, equipo, margenVisible: puedeCosto });
+  }
+
+  if (op === "leads.reasignarLote") {
+    if (!esSupervisor) return err("forbidden", 403);
+    const ids = Array.from(new Set((Array.isArray(body.ids) ? body.ids : []).map(String)));
+    if (ids.length === 0 || ids.length > 50) return err("lote_invalido");
+    const local = await localParaCrear();
+    if (!local) return err("sin_local");
+    const candidatos = await elegibles(local);
+    const ultima = await ultimasAsignaciones();
+    let destino: { id: string; nombre: string } | null = null;
+    if (body.asignarA && body.asignarA !== "auto") {
+      destino = candidatos.find((c: any) => c.id === body.asignarA) ?? null;
+      if (!destino) return err("asignado_invalido");
+    } else if (candidatos.length === 0) return err("sin_candidatos");
+
+    const leads = (await enLotes("leads", "id", ids)).filter((l: any) => l.local_id === local);
+    const cierres = await enLotes("cierres", "lead_id", leads.map((l: any) => l.id));
+    const ocupados = new Set(cierres.filter((c: any) => c.estado === "pendiente" || c.estado === "aprobada").map((c: any) => c.lead_id));
+    const omitidos: { id: string; motivo: string }[] = ids.filter((id) => !leads.some((l: any) => l.id === id)).map((id) => ({ id, motivo: "no_existe" }));
+    let hechos = 0;
+    const ahora = new Date().toISOString();
+    for (const l of leads) {
+      if (ETAPAS_CERRADAS.includes(l.etapa)) { omitidos.push({ id: l.id, motivo: "lead_cerrado" }); continue; }
+      if (ocupados.has(l.id)) { omitidos.push({ id: l.id, motivo: "cierre_en_curso" }); continue; }
+      // Con "reparto automático" se va rotando entre el equipo (sin repetir a quien ya lo tiene).
+      const asignado = destino ?? elegirAsignado(candidatos.filter((c: any) => c.id !== l.asignado_a), ultima);
+      if (!asignado) { omitidos.push({ id: l.id, motivo: "sin_candidatos" }); continue; }
+      if (asignado.id === l.asignado_a) { omitidos.push({ id: l.id, motivo: "sin_cambio" }); continue; }
+      const up = await sb.from("leads").update({ asignado_a: asignado.id, actualizado_en: ahora }).eq("id", l.id);
+      if (up.error) throw up.error;
+      ultima[asignado.id] = new Date().toISOString();
+      // Sus tareas pendientes se van con él.
+      await sb.from("tareas").update({ asignado_a: asignado.id }).eq("lead_id", l.id).eq("hecha", false);
+      await evento(l.id, "asignacion", `Reasignado a ${asignado.nombre} (reasignación en lote)`);
+      hechos++;
+    }
+    await audit(ctx.actor, "lead.reasignar_lote", "lead", undefined, { reasignados: hechos, omitidos: omitidos.length, destino: destino ? destino.nombre : "reparto automático" });
+    return json({ reasignados: hechos, omitidos });
   }
 
   return err("unknown_op");

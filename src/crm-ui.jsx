@@ -86,6 +86,9 @@ const MENSAJES = {
   comision_invalida: "Revisa la comisión de la financiera.",
   fecha_entrega_invalida: "Elige una fecha de entrega válida.",
   mes_invalido: "El mes no es válido.",
+  aviso_invalido: "El aviso debe tener entre 3 y 300 caracteres.",
+  destinatario_requerido: "Elige a quién va dirigido el aviso.",
+  lote_invalido: "Selecciona entre 1 y 50 leads.",
   tramos_invalidos: "Los tramos no son válidos: no pueden superponerse y solo el último puede quedar sin tope.",
 };
 export const mensajeError = (e) => MENSAJES[e && e.message] || "No se pudo completar la operación. Inténtalo de nuevo.";
