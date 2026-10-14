@@ -12,6 +12,7 @@
  */
 
 import { computeTasacionTotals, computeValorFinal } from "./tasacion-totals.js";
+import { calcularCotizacion } from "../supabase/functions/api/ventas-core.js";
 
 const PAGE_W = 595;
 const PAGE_H = 842;
@@ -84,6 +85,8 @@ class PdfDoc {
   constructor(footerLabel) {
     this.footerLabel = footerLabel;
     this.pages = [];
+    this.pageImages = []; // por página: índices de las imágenes que usa
+    this.images = []; // imágenes JPEG ya leídas (ver leerJpeg)
     this.ops = null;
     this.y = 0;
     this.newPage();
@@ -91,6 +94,7 @@ class PdfDoc {
   newPage() {
     this.ops = [];
     this.pages.push(this.ops);
+    this.pageImages.push(new Set());
     this.y = PAGE_H - MARGIN;
   }
   ensure(h) {
@@ -104,6 +108,16 @@ class PdfDoc {
   line(x1, y1, x2, y2, gray = 0.8) { this.ops.push(`${gray} G 0.5 w ${x1} ${y1} m ${x2} ${y2} l S`); }
 
   gap(h) { this.y -= h; }
+
+  /** Dibuja una imagen (de leerJpeg) dentro de la caja x,y,w,h (y = borde de abajo), sin deformarla. */
+  image(img, x, y, w, h) {
+    const k = Math.min(w / img.width, h / img.height);
+    const dw = img.width * k, dh = img.height * k;
+    let idx = this.images.indexOf(img);
+    if (idx < 0) idx = this.images.push(img) - 1;
+    this.pageImages[this.pageImages.length - 1].add(idx);
+    this.ops.push(`q ${dw.toFixed(2)} 0 0 ${dh.toFixed(2)} ${(x + (w - dw) / 2).toFixed(2)} ${(y + (h - dh) / 2).toFixed(2)} cm /Im${idx + 1} Do Q`);
+  }
 
   title(main, sub) {
     this.text(MARGIN, this.y - 8, "DRIVE FUTURO", { size: 8, bold: true, gray: 0.45 });
@@ -221,10 +235,17 @@ class PdfDoc {
     objs[2] = `<< /Type /Pages /Kids [${pageObjNums.map((n) => `${n} 0 R`).join(" ")}] /Count ${total} >>`;
     objs[3] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>";
     objs[4] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>";
+    const imageBase = 5 + total * 2;
     pageContents.forEach((content, i) => {
       const pn = 5 + i * 2;
-      objs[pn] = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PAGE_W} ${PAGE_H}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${pn + 1} 0 R >>`;
+      const usadas = Array.from(this.pageImages[i]);
+      const xobj = usadas.length ? ` /XObject << ${usadas.map((n) => `/Im${n + 1} ${imageBase + n} 0 R`).join(" ")} >>` : "";
+      objs[pn] = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PAGE_W} ${PAGE_H}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >>${xobj} >> /Contents ${pn + 1} 0 R >>`;
       objs[pn + 1] = `<< /Length ${content.length} >>\nstream\n${content}\nendstream`;
+    });
+    this.images.forEach((img, n) => {
+      const cs = img.comps === 1 ? "/DeviceGray" : "/DeviceRGB";
+      objs[imageBase + n] = `<< /Type /XObject /Subtype /Image /Width ${img.width} /Height ${img.height} /ColorSpace ${cs} /BitsPerComponent 8 /Filter /DCTDecode /Length ${img.data.length} >>\nstream\n${img.data}\nendstream`;
     });
 
     let out = "%PDF-1.4\n";
@@ -340,6 +361,105 @@ export function buildTasacionPdf(record, { sections, getItems, fmt, inspectorNom
   pdf.totalLine("Valor comercial estimado", fmt(final.valorComercial));
   pdf.totalLine("Menos: Total valorizaciones", fmt(final.total));
   pdf.totalLine("Valor final", fmt(final.final), { big: true });
+  return pdf.build();
+}
+
+/**
+ * Lee un JPEG en formato data URL ("data:image/jpeg;base64,...") y devuelve sus bytes (como texto Latin-1,
+ * que es como este generador arma el PDF) y su tamaño. Devuelve null si no es un JPEG en gris o color.
+ */
+export function leerJpeg(dataUrl) {
+  const m = /^data:image\/jpe?g;base64,([A-Za-z0-9+/=]+)$/.exec(String(dataUrl || ""));
+  if (!m) return null;
+  let bin;
+  try { bin = atob(m[1]); } catch (e) { return null; }
+  if (bin.charCodeAt(0) !== 0xff || bin.charCodeAt(1) !== 0xd8) return null;
+  let i = 2;
+  while (i + 9 < bin.length) {
+    if (bin.charCodeAt(i) !== 0xff) { i++; continue; }
+    const marker = bin.charCodeAt(i + 1);
+    if (marker === 0xff) { i++; continue; }
+    if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+      const height = (bin.charCodeAt(i + 5) << 8) | bin.charCodeAt(i + 6);
+      const width = (bin.charCodeAt(i + 7) << 8) | bin.charCodeAt(i + 8);
+      const comps = bin.charCodeAt(i + 9);
+      if (!width || !height || (comps !== 1 && comps !== 3)) return null;
+      return { data: bin, width, height, comps };
+    }
+    if (marker === 0xd8 || (marker >= 0xd0 && marker <= 0xd7) || marker === 0x01) { i += 2; continue; }
+    i += 2 + ((bin.charCodeAt(i + 2) << 8) | bin.charCodeAt(i + 3));
+  }
+  return null;
+}
+
+/**
+ * Cotización para el cliente.
+ * @param c  { numero, fecha, vigenciaHasta, cliente, vehiculo, precio_lista, descuento, parte_pago, financiamiento,
+ *             notas, ejecutivo, local, condiciones, fotos: [dataUrl, ...] }
+ * @param fmt  (n) -> "$1.000"
+ */
+export function buildCotizacionPdf(c, { fmt }) {
+  const folio = `COT-${String(c.numero || 0).padStart(6, "0")}`;
+  const v = c.vehiculo || {};
+  const pdf = new PdfDoc(`Cotización ${folio} · ${[v.marca, v.modelo].filter(Boolean).join(" ")} · ${c.local || "Drive Futuro"}`);
+  pdf.title(`Cotización ${folio}`, `${fechaLarga(c.fecha)}${c.vigenciaHasta ? ` · Válida hasta el ${fechaLarga(c.vigenciaHasta)}` : ""}`);
+
+  const cli = c.cliente || {};
+  pdf.sectionBar("Cliente");
+  pdf.fields([["NOMBRE", cli.nombre], ["RUT", cli.rut], ["TELÉFONO", cli.telefono], ["CORREO", cli.email]]);
+
+  pdf.sectionBar("Vehículo");
+  pdf.fields([
+    ["MARCA", v.marca], ["MODELO", [v.modelo, v.version].filter(Boolean).join(" ")],
+    ["AÑO", v.anio], ["KILOMETRAJE", v.km != null ? `${Number(v.km).toLocaleString("es-CL")} km` : ""],
+    ["TRANSMISIÓN", v.transmision], ["COMBUSTIBLE", v.combustible],
+    ["COLOR", v.color], ["PATENTE", v.patente],
+  ]);
+
+  const fotos = (c.fotos || []).map(leerJpeg).filter(Boolean).slice(0, 2);
+  if (fotos.length > 0) {
+    const boxH = 165;
+    pdf.ensure(boxH + 12);
+    const boxW = fotos.length === 1 ? CONTENT_W : (CONTENT_W - 12) / 2;
+    fotos.forEach((img, k) => pdf.image(img, MARGIN + k * (boxW + 12), pdf.y - boxH, boxW, boxH));
+    pdf.y -= boxH + 12;
+  }
+
+  const calc = calcularCotizacion({ precioLista: c.precio_lista, descuento: c.descuento, parteDePago: c.parte_pago, financiamiento: c.financiamiento });
+  pdf.sectionBar("Precio");
+  pdf.totalLine("Precio de lista", fmt(c.precio_lista));
+  if (Number(c.descuento) > 0) pdf.totalLine(`Descuento (${calc.descuentoPct.toLocaleString("es-CL")}%)`, `− ${fmt(c.descuento)}`);
+  pdf.totalLine("Precio final", fmt(calc.precioFinal), { big: true });
+
+  const pp = c.parte_pago || {};
+  if (pp.tiene) {
+    pdf.sectionBar("Vehículo en parte de pago");
+    pdf.fields([
+      ["VEHÍCULO", [pp.marca, pp.modelo].filter(Boolean).join(" ")], ["AÑO", pp.anio],
+      ["KILOMETRAJE", pp.km != null ? `${Number(pp.km).toLocaleString("es-CL")} km` : ""], ["PATENTE", pp.patente],
+    ]);
+  }
+
+  const fin = c.financiamiento || {};
+  pdf.ensure(fin.quiere ? 260 : 150); // el resumen de pago va completo en una misma página
+  pdf.sectionBar("Resumen de pago");
+  pdf.totalLine("Precio final", fmt(calc.precioFinal));
+  if (pp.tiene) pdf.totalLine("Menos: vehículo en parte de pago", `− ${fmt(calc.parte)}`);
+  pdf.totalLine("Saldo a pagar", fmt(calc.saldo), { big: !fin.quiere });
+  if (fin.quiere) {
+    pdf.totalLine("Menos: pie", `− ${fmt(calc.pie)}`);
+    pdf.totalLine("Monto a financiar", fmt(calc.montoFinanciar), { big: true });
+    pdf.fields([
+      ["PLAZO", fin.plazo_meses ? `${fin.plazo_meses} meses` : ""], ["BANCO / FINANCIERA", fin.banco],
+      ["CUOTA MENSUAL ESTIMADA", calc.cuota ? fmt(calc.cuota) : ""], ["TASA MENSUAL REFERENCIAL", fin.tasa_mensual_pct ? `${fin.tasa_mensual_pct}%` : ""],
+    ]);
+    pdf.paragraph("AVISO", "La cuota es una estimación referencial. El monto, la tasa y las condiciones finales dependen de la evaluación de la entidad financiera.");
+  }
+
+  if (c.notas) pdf.paragraph("OBSERVACIONES", c.notas);
+  if (c.condiciones) pdf.paragraph("CONDICIONES", c.condiciones);
+  pdf.sectionBar("Su ejecutivo");
+  pdf.fields([["NOMBRE", c.ejecutivo], ["LOCAL", c.local]]);
   return pdf.build();
 }
 

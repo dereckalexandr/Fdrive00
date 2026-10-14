@@ -265,11 +265,40 @@ Primera parte del perfil Ejecutivo. Las cotizaciones y reservas (2B) y el cierre
 - Quien tiene `leads.local` (por ejemplo Marketing) ve los leads del local sin poder modificarlos. Quien tiene `leads.asignar` (Jefe Local) ve y modifica todo el local y reasigna.
 - **Asignación mixta**: el supervisor elige a quién o deja el **reparto rotativo** (le toca a quien lleva más tiempo sin recibir un lead; solo entre personas activas y habilitadas para ventas). Si no hay nadie habilitado, el lead queda sin asignar para que el supervisor lo reparta.
 - Cada persona trabaja solo con datos de **su local**. La cuenta maestra elige el local.
-- Solo se puede mover a las etapas ya disponibles (las de cotizado, reservado y ganado se activan en 2B y 2C). Para perder un lead se exige un **motivo** (lista editable en Configuración). Un lead cerrado solo lo reabre el supervisor.
+- Solo se puede mover a las etapas ya disponibles ("Cotizado" y "Reservado" cambian solas al cotizar y reservar; "Cerrado ganado" llega en 2C). Para perder un lead se exige un **motivo** (lista editable en Configuración). Un lead cerrado solo lo reabre el supervisor.
 - El día de una tarea (vencida / hoy / próxima) se calcula en hora de Chile.
 - Quedan en la bitácora: alta y cambios de vehículos (con precio, costo, estado y km antes/después), clientes, creación, movimiento y reasignación de leads.
 - Las fotos del inventario se guardan como `vfoto::<vehículo>::<id>` en `kv_store`; las ve quien trabaja con inventario o leads y solo las sube quien edita el inventario.
 - Código: reglas puras en `supabase/functions/api/ventas-core.js`, operaciones del servidor en `ventas.ts`, pantallas en `src/crm-ventas.jsx` y `src/crm-inventario.jsx`. Pruebas: `tests/ventas-core.test.mjs` y `tests/ventas-api.test.mjs` (la función real contra una base falsa).
+
+## CRM · Entrega 2B: cotizaciones, aprobación de descuentos y reservas
+
+**Instalar (una sola vez, después de `supabase-crm-ventas.sql`):**
+1. Supabase → *SQL Editor* → pegar `supabase-crm-cotizaciones.sql` → *Run*. Crea `cotizaciones` y `reservas` (RLS activado, sin políticas). Se puede repetir sin riesgo.
+2. Redesplegar la función: `node scripts/deploy-api.mjs`.
+Hasta que se ejecute el SQL, el resto del módulo sigue funcionando; cotizar y reservar avisan que faltan las tablas.
+
+**Cotizar** (ficha del lead → *Nueva cotización*): vehículo del inventario, descuento, vehículo en parte de pago, financiamiento (pie, plazo, banco y cuota mensual **estimada** con tasa referencial) y observaciones. El **precio de lista lo fija el servidor** desde el inventario; la pantalla no puede cambiarlo. La cotización lleva un folio (`COT-000123`), guarda una copia de los datos del vehículo y vence a los **7 días** (configurable). Al crear la primera, el lead pasa solo a **Cotizado**.
+
+**Aprobación de descuentos**: todo descuento lo aprueba el Jefe Local (quien tiene `leads.asignar`).
+- Sin descuento, o si cotiza un supervisor: queda **vigente**. Un supervisor que se aprueba a sí mismo queda registrado a su nombre.
+- Con descuento pedido por un ejecutivo: **esperando aprobación**; mientras tanto no se puede entregar el PDF ni reservar. El supervisor ve una pestaña **Aprobaciones** (con insignia), el aviso en el inicio y en la tarjeta del lead, el precio de lista, el descuento en $ y %, el precio final y el **margen** que quedaría (solo si puede ver costos). Aprueba, o rechaza con un motivo obligatorio.
+- Editar una cotización aprobada **vuelve a pedir aprobación solo si cambia el descuento o el precio de lista**; cambiar la parte de pago o el financiamiento no. Una rechazada se corrige y se reenvía.
+
+**PDF para el cliente** (*Descargar PDF*, solo si está vigente o con reserva): cliente, vehículo con **hasta 2 fotos**, precio de lista, descuento, precio final, vehículo en parte de pago, saldo a pagar, pie, monto a financiar y cuota estimada (con aviso de que es referencial), observaciones, **condiciones** (texto editable en Configuración), ejecutivo y local. El costo del vehículo **nunca** aparece en la cotización ni en el PDF.
+
+**Reservar** (cotización vigente → *Reservar*): monto, días (3 por defecto, configurable), medio de pago y notas.
+- El vehículo pasa a **Reservado**, la cotización a "con reserva" y el lead a **Reservado**, todo junto; si algo falla a medias se deshace. La base impide dos reservas activas del mismo vehículo aunque dos personas reserven a la vez.
+- El estado "Reservado" **lo pone solo el sistema**: no se asigna a mano y un vehículo reservado no se puede cambiar de estado ni archivar hasta cancelar la reserva.
+- **Vence sola**: cuando alguien abre el inventario, los leads o las reservas y el plazo ya pasó, la reserva se marca vencida y el vehículo vuelve a estar disponible, la cotización a vigente y el lead a Cotizado (queda en el historial y en la bitácora como acción del sistema). *No usa un proceso programado*: si nadie abre el sistema, la liberación ocurre en cuanto alguien lo abre.
+- **Extender** (+2 días) y **cancelar** (con la nota de que el sistema solo *registra* el monto recibido: no mueve dinero y cualquier devolución se gestiona fuera).
+- Con una reserva activa, el lead no se puede mover de etapa; sí se puede marcar como **perdido**, y eso cancela la reserva y libera el vehículo.
+
+**Configuración** (pestaña Configuración): vigencia de la cotización (días), duración de la reserva (días) y texto de condiciones del PDF.
+
+**Bitácora**: cotizaciones creadas y editadas (con descuento), aprobaciones y rechazos (con quién pidió y quién resolvió), anulaciones, reservas creadas, extendidas, canceladas y vencidas.
+
+Código: reglas puras en `supabase/functions/api/ventas-core.js`, operaciones del servidor en `ventas.ts`, pantallas en `src/crm-cotizaciones.jsx` y el PDF en `src/pdf-report.js` (`buildCotizacionPdf`, que ahora admite fotos JPEG). Pruebas: `tests/cotizaciones-api.test.mjs` (la función real contra una base falsa), `tests/cotizacion-pdf.test.mjs` y las de `ventas-core`.
 
 ## Desplegar en un hosting público
 

@@ -524,6 +524,26 @@ function NumeroEditor({ clave, etiqueta, valor, sufijo, paso, onGuardado, onErro
   );
 }
 
+function TextoEditor({ clave, titulo, ayuda, valor, onGuardado, onError }) {
+  const [v, setV] = useState(valor);
+  const [guardando, setGuardando] = useState(false);
+  useEffect(() => setV(valor), [valor]);
+  const guardar = async () => {
+    setGuardando(true);
+    try { await crm("config.set", { clave, valor: v }); onGuardado(); } catch (e) { onError(mensajeCrm(e)); }
+    setGuardando(false);
+  };
+  return (
+    <Tarjeta titulo={titulo} ayuda={ayuda}>
+      <textarea rows={4} maxLength={800} value={v} onChange={(e) => setV(e.target.value)} className={`${INPUT} w-full`} />
+      <div className="flex items-center gap-3 mt-2">
+        <button onClick={guardar} disabled={v === valor || guardando} className={BTN_PRIMARIO}>Guardar</button>
+        <span className="text-xs text-stone-500">{v.length}/800</span>
+      </div>
+    </Tarjeta>
+  );
+}
+
 function LocalesPanel() {
   const { cargando, error, datos, recargar } = useCarga(() => crm("locales.list"), []);
   const [nombre, setNombre] = useState("");
@@ -578,6 +598,11 @@ function ConfigTab() {
       <LocalesPanel />
       <ListaEditor clave="fuentes_lead" titulo="Fuentes de leads" ayuda="De dónde llegan los clientes interesados." valores={c.fuentes_lead} onGuardado={ok} onError={mal} />
       <ListaEditor clave="motivos_perdida" titulo="Motivos de pérdida" ayuda="Para registrar por qué no se concretó un negocio." valores={c.motivos_perdida} onGuardado={ok} onError={mal} />
+      <Tarjeta titulo="Cotizaciones y reservas" ayuda="Plazos que usa el módulo comercial al cotizar y reservar.">
+        <NumeroEditor clave="vigencia_cotizacion_dias" etiqueta="Vigencia de una cotización" valor={c.vigencia_cotizacion_dias} sufijo="días" paso="1" onGuardado={ok} onError={mal} />
+        <NumeroEditor clave="dias_reserva" etiqueta="Duración de una reserva" valor={c.dias_reserva} sufijo="días" paso="1" onGuardado={ok} onError={mal} />
+      </Tarjeta>
+      <TextoEditor clave="condiciones_cotizacion" titulo="Condiciones en el PDF de la cotización" ayuda="Este texto aparece al final de cada cotización que se entrega al cliente. Redáctalo con tus condiciones comerciales." valor={c.condiciones_cotizacion} onGuardado={ok} onError={mal} />
       <Tarjeta titulo="Comisiones y metas" ayuda="Valores generales. Más adelante se podrán ajustar por persona o por local.">
         <NumeroEditor clave="comision_ventas_pct" etiqueta="Comisión por ventas" valor={c.comision_ventas_pct} sufijo="%" paso="0.1" onGuardado={ok} onError={mal} />
         <NumeroEditor clave="comision_compras_pct" etiqueta="Comisión por compras" valor={c.comision_compras_pct} sufijo="%" paso="0.1" onGuardado={ok} onError={mal} />

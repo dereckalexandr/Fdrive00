@@ -7,7 +7,7 @@
  * ----------------------------------------------------------------
  */
 import React, { useState, useEffect, useMemo } from "react";
-import { ESTADOS_VEHICULO, TRANSMISIONES, COMBUSTIBLES, validarVehiculo, validarCliente } from "../supabase/functions/api/ventas-core.js";
+import { ESTADOS_VEHICULO, TRANSMISIONES, COMBUSTIBLES, validarVehiculo, validarCliente, textoVencimiento } from "../supabase/functions/api/ventas-core.js";
 import { compressImage, makePhotoId } from "./photos.js";
 import { INPUT, BTN, BTN_PRIMARIO, clp, Aviso, Cargando, Campo, Modal, Tarjeta, useCarga, mensajeError, fechaCorta } from "./crm-ui.jsx";
 
@@ -102,7 +102,7 @@ function FormVehiculo({ api, vehiculo, puedeCosto, onCerrar, onGuardado }) {
         <Campo etiqueta="Kilometraje"><input type="number" min="0" value={f.km} onChange={(e) => set("km", e.target.value)} className={INPUT} /></Campo>
         <Campo etiqueta="Color"><input value={f.color} onChange={(e) => set("color", e.target.value)} className={INPUT} /></Campo>
         <Campo etiqueta="Estado">
-          <select value={f.estado} onChange={(e) => set("estado", e.target.value)} className={INPUT}>{ESTADOS_VEHICULO.map((e) => <option key={e.id} value={e.id}>{e.nombre}</option>)}</select>
+          <select value={f.estado} disabled={f.estado === "reservado"} onChange={(e) => set("estado", e.target.value)} className={INPUT}>{ESTADOS_VEHICULO.filter((e) => e.id !== "reservado" || f.estado === "reservado").map((e) => <option key={e.id} value={e.id}>{e.nombre}</option>)}</select>
         </Campo>
         <Campo etiqueta="Transmisión">
           <select value={f.transmision} onChange={(e) => set("transmision", e.target.value)} className={INPUT}><option value="">—</option>{TRANSMISIONES.map((t) => <option key={t}>{t}</option>)}</select>
@@ -214,10 +214,13 @@ export function Inventario({ api, onCambio }) {
                 {puedeEditar && <td className="py-3 px-4 text-right font-mono whitespace-nowrap">{v.costo != null && v.precio_lista != null ? clp(v.precio_lista - v.costo) : "—"}</td>}
                 <td className="py-3 px-4">
                   {puedeEditar ? (
-                    <select value={v.estado} onChange={(e) => cambiarEstado(v, e.target.value)} className="border border-stone-300 bg-white px-2 py-1 text-xs">
-                      {ESTADOS_VEHICULO.map((e) => <option key={e.id} value={e.id}>{e.nombre}</option>)}
-                    </select>
-                  ) : <span className={`text-xs px-2 py-1 ${COLOR_ESTADO[v.estado] || ""}`}>{estadoNombre(v.estado)}</span>}
+                    <div>
+                      <select value={v.estado} disabled={v.estado === "reservado"} title={v.estado === "reservado" ? "Para liberarlo, cancela la reserva desde el lead" : ""} onChange={(e) => cambiarEstado(v, e.target.value)} className="border border-stone-300 bg-white px-2 py-1 text-xs disabled:bg-stone-100">
+                        {ESTADOS_VEHICULO.filter((e) => e.id !== "reservado" || v.estado === "reservado").map((e) => <option key={e.id} value={e.id}>{e.nombre}</option>)}
+                      </select>
+                      {v.estado === "reservado" && v.reserva_vence_en && <p className="text-[11px] text-sky-700 mt-1">Reserva {textoVencimiento(v.reserva_vence_en)}</p>}
+                    </div>
+                  ) : <span className={`text-xs px-2 py-1 ${COLOR_ESTADO[v.estado] || ""}`}>{estadoNombre(v.estado)}{v.estado === "reservado" && v.reserva_vence_en ? ` · ${textoVencimiento(v.reserva_vence_en)}` : ""}</span>}
                 </td>
                 {puedeEditar && (
                   <td className="py-3 px-4"><div className="flex gap-2">

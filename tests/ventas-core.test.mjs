@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   ETAPAS, ETAPAS_ACTIVAS, normalizarPatente, patenteValida, soloDigitos,
   validarVehiculo, ocultarCosto, validarCliente, validarLead, validarCambioEtapa, elegirAsignado,
+  calcularCotizacion, cuotaEstimada, validarCotizacion, estadoCotizacionInicial, requiereNuevaAprobacion, validarReserva, reservaVencida, textoVencimiento,
   validarTarea, claseTarea, agruparTareas, contarPorEtapa, leadsPorAtender, puedeEditarLead,
 } from "../supabase/functions/api/ventas-core.js";
 
@@ -89,10 +90,11 @@ test("Lead: parte de pago y financiamiento solo se guardan si se marcan", () => 
 });
 
 test("Etapas: solo se puede mover a las disponibles; perder exige motivo", () => {
-  assert.deepEqual(ETAPAS_ACTIVAS, ["nuevo", "contactado", "seguimiento", "perdido"]);
+  assert.deepEqual(ETAPAS_ACTIVAS, ["nuevo", "contactado", "seguimiento", "cotizado", "reservado", "perdido"]);
   assert.equal(ETAPAS.length, 7);
   assert.equal(validarCambioEtapa({ desde: "nuevo", hacia: "ganado" }).error, "etapa_no_disponible");
-  assert.equal(validarCambioEtapa({ desde: "nuevo", hacia: "cotizado" }).error, "etapa_no_disponible");
+  assert.equal(validarCambioEtapa({ desde: "nuevo", hacia: "cotizado" }).error, "etapa_automatica", "cotizado y reservado cambian solos");
+  assert.equal(validarCambioEtapa({ desde: "nuevo", hacia: "reservado" }).error, "etapa_automatica");
   assert.equal(validarCambioEtapa({ desde: "nuevo", hacia: "nuevo" }).error, "sin_cambio");
   assert.equal(validarCambioEtapa({ desde: "nuevo", hacia: "perdido" }).error, "motivo_requerido");
   const perder = validarCambioEtapa({ desde: "seguimiento", hacia: "perdido", motivo: "Precio" });
@@ -176,4 +178,92 @@ test("Permiso para editar un lead: dueño habilitado para ventas, o supervisor",
   assert.ok(!puedeEditarLead({ ...base, usuarioId: "u2", permisos: ["leads.local"] }), "ver el local no es modificar");
   assert.ok(puedeEditarLead({ ...base, usuarioId: "u2", permisos: ["leads.asignar"] }));
   assert.ok(puedeEditarLead({ ...base, esAdmin: true, usuarioId: "master", permisos: [] }));
+});
+
+const LISTA = 9500000;
+const FIN = { quiere: true, pie: 2000000, banco: "Banco X", estado: "por_evaluar", plazoMeses: 36, tasaMensualPct: 1 };
+const PP = { tiene: true, patente: "AB1234", marca: "Kia", modelo: "Rio", anio: 2015, km: 90000, valor: 3000000 };
+
+test("Cuota estimada: con y sin interés", () => {
+  assert.equal(cuotaEstimada(1200000, 12, 0), 100000);
+  // La cuota es correcta si, pagándola cada mes con su interés, el crédito queda saldado.
+  const cuota = cuotaEstimada(10000000, 48, 1.2);
+  let saldo = 10000000;
+  for (let i = 0; i < 48; i++) saldo = saldo * 1.012 - cuota;
+  assert.ok(Math.abs(saldo) < 100, `saldo final ${saldo}`);
+  assert.equal(cuota, 275276);
+  assert.equal(cuotaEstimada(0, 12, 1), 0);
+  assert.equal(cuotaEstimada(1000000, 0, 1), 0);
+});
+
+test("Cotización: precio final, parte de pago, pie, saldo y cuota", () => {
+  const c = calcularCotizacion({ precioLista: LISTA, descuento: 300000, parteDePago: PP, financiamiento: FIN });
+  assert.equal(c.precioFinal, 9200000);
+  assert.equal(c.descuentoPct, 3.2);
+  assert.equal(c.parte, 3000000);
+  assert.equal(c.saldo, 6200000);
+  assert.equal(c.montoFinanciar, 4200000);
+  assert.equal(c.cuota, cuotaEstimada(4200000, 36, 1));
+  assert.equal(c.excede, false);
+  // Sin financiamiento ni parte de pago: todo es saldo y no hay cuota.
+  const simple = calcularCotizacion({ precioLista: LISTA, descuento: 0, parteDePago: {}, financiamiento: {} });
+  assert.deepEqual([simple.precioFinal, simple.saldo, simple.montoFinanciar, simple.cuota], [LISTA, LISTA, 0, 0]);
+  // La parte de pago más el pie no pueden superar el precio.
+  assert.equal(calcularCotizacion({ precioLista: 5000000, descuento: 0, parteDePago: { tiene: true, valor: 4000000 }, financiamiento: { quiere: true, pie: 2000000 } }).excede, true);
+});
+
+test("Cotización: validación de lo que ingresa la persona", () => {
+  const ok = validarCotizacion({ descuento: 300000, parteDePago: PP, financiamiento: FIN, notas: " hola " }, LISTA);
+  assert.ok(ok.ok);
+  assert.equal(ok.value.precio_lista, LISTA, "el precio de lista lo fija el servidor");
+  assert.equal(ok.value.precio_final, 9200000);
+  assert.equal(ok.value.financiamiento.plazo_meses, 36);
+  assert.equal(ok.value.parte_pago.patente, "AB1234");
+  assert.equal(validarCotizacion({}, LISTA).value.descuento, 0);
+
+  assert.equal(validarCotizacion({ descuento: -1 }, LISTA).error, "descuento_invalido");
+  assert.equal(validarCotizacion({ descuento: LISTA + 1 }, LISTA).error, "descuento_invalido");
+  assert.equal(validarCotizacion({ descuento: "abc" }, LISTA).error, "descuento_invalido");
+  assert.equal(validarCotizacion({}, null).error, "vehiculo_sin_precio");
+  assert.equal(validarCotizacion({}, 0).error, "vehiculo_sin_precio");
+  assert.equal(validarCotizacion({ financiamiento: { ...FIN, plazoMeses: 0 } }, LISTA).error, "financiamiento_invalido");
+  assert.equal(validarCotizacion({ financiamiento: { ...FIN, tasaMensualPct: 50 } }, LISTA).error, "financiamiento_invalido");
+  assert.equal(validarCotizacion({ parteDePago: { ...PP, valor: 9000000 }, financiamiento: FIN }, LISTA).error, "pago_excede_precio");
+});
+
+test("Descuentos: sin descuento o aprobado por quien puede, vigente; si no, espera aprobación", () => {
+  assert.equal(estadoCotizacionInicial({ descuento: 0, puedeAprobar: false }), "vigente");
+  assert.equal(estadoCotizacionInicial({ descuento: 1, puedeAprobar: false }), "pendiente");
+  assert.equal(estadoCotizacionInicial({ descuento: 1, puedeAprobar: true }), "vigente");
+});
+
+test("Editar una cotización: vuelve a aprobación solo si cambia el descuento o el precio", () => {
+  const aprobada = { descuento: 300000, precio_lista: LISTA, estado: "vigente" };
+  assert.equal(requiereNuevaAprobacion(aprobada, { descuento: 300000, precio_lista: LISTA }), false, "cambiar la parte de pago no la reabre");
+  assert.equal(requiereNuevaAprobacion(aprobada, { descuento: 400000, precio_lista: LISTA }), true);
+  assert.equal(requiereNuevaAprobacion(aprobada, { descuento: 300000, precio_lista: LISTA + 1 }), true, "cambió el precio de lista");
+  assert.equal(requiereNuevaAprobacion(aprobada, { descuento: 0, precio_lista: LISTA }), false, "sin descuento no hay qué aprobar");
+  assert.equal(requiereNuevaAprobacion({ ...aprobada, estado: "rechazada" }, { descuento: 300000, precio_lista: LISTA }), true, "una rechazada no se aprueba sola");
+  assert.equal(requiereNuevaAprobacion({ ...aprobada, estado: "pendiente" }, { descuento: 300000, precio_lista: LISTA }), true);
+});
+
+test("Reserva: monto, días y medio de pago", () => {
+  const ok = validarReserva({ monto: 500000, dias: 5, medioPago: "Transferencia", notas: " ok " }, { precioFinal: 9200000 });
+  assert.deepEqual(ok.value, { monto: 500000, dias: 5, medio_pago: "Transferencia", notas: "ok" });
+  assert.equal(validarReserva({ monto: 500000 }, { diasDefecto: 3 }).value.dias, 3, "usa los días de la configuración");
+  assert.equal(validarReserva({ monto: 0 }, {}).error, "monto_invalido");
+  assert.equal(validarReserva({ monto: "x" }, {}).error, "monto_invalido");
+  assert.equal(validarReserva({ monto: 9300000 }, { precioFinal: 9200000 }).error, "monto_invalido", "no puede superar el precio");
+  assert.equal(validarReserva({ monto: 1, dias: 99 }, {}).error, "dias_invalidos");
+  assert.equal(validarReserva({ monto: 1, medioPago: "Trueque" }, {}).error, "medio_invalido");
+});
+
+test("Reserva: vencimiento y su texto", () => {
+  const ahora = new Date("2026-10-14T12:00:00Z");
+  assert.equal(reservaVencida({ estado: "activa", vence_en: "2026-10-14T11:00:00Z" }, ahora), true);
+  assert.equal(reservaVencida({ estado: "activa", vence_en: "2026-10-14T13:00:00Z" }, ahora), false);
+  assert.equal(reservaVencida({ estado: "cancelada", vence_en: "2026-10-01T00:00:00Z" }, ahora), false, "una cerrada no se vuelve a vencer");
+  assert.equal(textoVencimiento("2026-10-14T11:00:00Z", ahora), "vencida");
+  assert.equal(textoVencimiento("2026-10-14T17:00:00Z", ahora), "vence en 5 h");
+  assert.equal(textoVencimiento("2026-10-17T12:00:00Z", ahora), "vence en 3 d");
 });

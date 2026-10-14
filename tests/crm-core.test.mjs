@@ -155,3 +155,20 @@ test("Configuración completa: usa lo guardado y rellena con valores iniciales",
   assert.deepEqual(Object.keys(c).sort(), Object.keys(CONFIG_DEFECTO).sort());
   assert.deepEqual(configCompleta(null), CONFIG_DEFECTO);
 });
+
+test("Configuración de cotizaciones y reservas: días enteros dentro del rango y texto acotado", () => {
+  assert.equal(validarConfig("dias_reserva", 5).value, 5);
+  assert.ok(!validarConfig("dias_reserva", 0).ok);
+  assert.ok(!validarConfig("dias_reserva", 31).ok);
+  assert.ok(!validarConfig("dias_reserva", 2.5).ok);
+  assert.equal(validarConfig("vigencia_cotizacion_dias", 60).value, 60);
+  assert.ok(!validarConfig("vigencia_cotizacion_dias", 61).ok);
+  assert.equal(validarConfig("condiciones_cotizacion", "  Texto  ").value, "Texto");
+  assert.equal(validarConfig("condiciones_cotizacion", "").value, "", "se permite dejarlas vacías");
+  assert.ok(!validarConfig("condiciones_cotizacion", "x".repeat(801)).ok);
+  assert.ok(!validarConfig("condiciones_cotizacion", 42).ok);
+  const c = configCompleta({});
+  assert.equal(c.dias_reserva, 3);
+  assert.equal(c.vigencia_cotizacion_dias, 7);
+  assert.ok(c.condiciones_cotizacion.length > 20);
+});

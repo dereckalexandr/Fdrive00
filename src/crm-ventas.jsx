@@ -10,9 +10,10 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import {
   ETAPAS, ETAPAS_ACTIVAS, TIPOS_CONTACTO, TIPOS_TAREA, ESTADOS_FINANCIAMIENTO,
-  agruparTareas, claseTarea, contarPorEtapa, leadsPorAtender, etapaNombre, soloDigitos, validarCliente, validarLead, validarTarea,
+  agruparTareas, claseTarea, textoVencimiento, contarPorEtapa, leadsPorAtender, etapaNombre, soloDigitos, validarCliente, validarLead, validarTarea,
 } from "../supabase/functions/api/ventas-core.js";
 import { Inventario, Clientes } from "./crm-inventario.jsx";
+import { SeccionCotizaciones, Aprobaciones, useReservasActivas } from "./crm-cotizaciones.jsx";
 import {
   INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, useCarga, mensajeError,
 } from "./crm-ui.jsx";
@@ -132,12 +133,14 @@ function LeadFicha({ api, leadId, catalogos, onCerrar, onCambio, onEditar }) {
         {lead.notas && <p className="text-sm text-stone-600 border-t border-stone-100 pt-2">{lead.notas}</p>}
       </div>
 
+      <SeccionCotizaciones api={api} lead={lead} datos={datos} catalogos={catalogos} avisar={setMsg} onCambio={async () => { await recargar(); onCambio(); }} />
+
       {puedeEditar && (
         <div className="bg-white border border-stone-200 p-4 flex flex-col gap-3">
           <div className="flex flex-wrap items-end gap-3">
-            <Campo etiqueta="Mover a la etapa" className="md:w-56">
+            <Campo etiqueta="Mover a la etapa" className="md:w-56" ayuda={lead.etapa === "cotizado" || lead.etapa === "reservado" ? "Cotizado y Reservado cambian solos al cotizar o reservar." : ""}>
               <select value={lead.etapa} onChange={(e) => mover(e.target.value)} className={INPUT} disabled={cerrado && !catalogos.puedeAsignar}>
-                {ETAPAS.filter((e) => e.disponible || e.id === lead.etapa).map((e) => <option key={e.id} value={e.id}>{e.nombre}</option>)}
+                {ETAPAS.filter((e) => (e.disponible && !e.automatica) || e.id === lead.etapa).map((e) => <option key={e.id} value={e.id}>{e.nombre}</option>)}
               </select>
             </Campo>
             {puedeAsignar && (
@@ -200,7 +203,7 @@ function LeadFicha({ api, leadId, catalogos, onCerrar, onCambio, onEditar }) {
           {eventos.length === 0 && <li className="text-sm text-stone-500">Sin movimientos todavía.</li>}
           {eventos.map((e) => (
             <li key={e.id} className="text-sm border-l-2 border-stone-200 pl-3">
-              <p className="text-stone-800"><span className="text-[10px] uppercase tracking-wide text-stone-400 mr-2">{(TIPOS_CONTACTO.find((t) => t.id === e.tipo) || { nombre: e.tipo === "etapa" ? "Etapa" : e.tipo === "asignacion" ? "Asignación" : "Creado" }).nombre}</span>{e.detalle}</p>
+              <p className="text-stone-800"><span className="text-[10px] uppercase tracking-wide text-stone-400 mr-2">{(TIPOS_CONTACTO.find((t) => t.id === e.tipo) || { nombre: { etapa: "Etapa", asignacion: "Asignación", cotizacion: "Cotización", reserva: "Reserva" }[e.tipo] || "Creado" }).nombre}</span>{e.detalle}</p>
               <p className="text-xs text-stone-400">{e.usuario_nombre || "Sistema"} · {fechaHora(e.creado_en)}</p>
             </li>
           ))}
@@ -361,7 +364,7 @@ function FormLead({ api, catalogos, lead, onCerrar, onGuardado }) {
 /* =========================================================
    EMBUDO EN COLUMNAS (KANBAN)
 ========================================================= */
-function TarjetaLead({ lead, cliente, vehiculo, asignado, mostrarAsignado, onAbrir, onMover, puedeMover }) {
+function TarjetaLead({ lead, cliente, vehiculo, asignado, marca = {}, mostrarAsignado, onAbrir, onMover, puedeMover }) {
   const sinContacto = lead.etapa === "nuevo" && !lead.ultimo_contacto;
   return (
     <div draggable={puedeMover} onDragStart={(e) => { e.dataTransfer.setData("text/plain", lead.id); e.dataTransfer.effectAllowed = "move"; }}
@@ -369,6 +372,8 @@ function TarjetaLead({ lead, cliente, vehiculo, asignado, mostrarAsignado, onAbr
       <p className="font-medium text-stone-900">{cliente ? cliente.nombre : "Cliente"}</p>
       <p className="text-stone-600 text-xs mt-0.5">{vehiculo ? `${vehiculo.marca} ${vehiculo.modelo} ${vehiculo.anio}` : lead.vehiculo_interes || "Sin vehículo definido"}</p>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-2 text-[11px] text-stone-500">
+        {marca.pendiente && <span className="bg-amber-100 text-amber-800 px-1.5 py-0.5">Descuento por aprobar</span>}
+        {marca.reserva_vence_en && <span className="bg-sky-100 text-sky-800 px-1.5 py-0.5">Reserva {textoVencimiento(marca.reserva_vence_en)}</span>}
         {sinContacto && <span className="bg-sky-100 text-sky-800 px-1.5 py-0.5">Por atender</span>}
         {lead.fuente && <span>{lead.fuente}</span>}
         <span>{hace(lead.creado_en)}</span>
@@ -376,7 +381,7 @@ function TarjetaLead({ lead, cliente, vehiculo, asignado, mostrarAsignado, onAbr
       </div>
       {puedeMover && (
         <select value={lead.etapa} onClick={(e) => e.stopPropagation()} onChange={(e) => onMover(e.target.value)} className="md:hidden mt-2 w-full border border-stone-300 bg-white px-2 py-1 text-xs">
-          {ETAPAS.filter((e) => e.disponible).map((e) => <option key={e.id} value={e.id}>{e.nombre}</option>)}
+          {ETAPAS.filter((e) => (e.disponible && !e.automatica) || e.id === lead.etapa).map((e) => <option key={e.id} value={e.id}>{e.nombre}</option>)}
         </select>
       )}
     </div>
@@ -400,6 +405,7 @@ function Leads({ api, catalogos, abrirLead, version, onCambio }) {
   const mover = async (lead, etapa, motivoPerdida) => {
     setMsg("");
     if (etapa === lead.etapa) return;
+    if (ETAPAS.find((e) => e.id === etapa && e.automatica)) { setMsg(mensajeError({ message: "etapa_automatica" })); return; }
     if (etapa === "perdido" && !motivoPerdida) { setPerdiendo(lead); return; }
     try { await api("leads.mover", { id: lead.id, etapa, motivo: motivoPerdida }); await recargar(); onCambio(); }
     catch (e) { setMsg(mensajeError(e)); }
@@ -424,7 +430,7 @@ function Leads({ api, catalogos, abrirLead, version, onCambio }) {
         </div>
       </Tarjeta>
       {msg && <Aviso>{msg}</Aviso>}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 items-start">
+      <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-3 items-start">
         {ETAPAS_ACTIVAS.map((id) => {
           const leads = datos.leads.filter((l) => l.etapa === id);
           return (
@@ -438,7 +444,7 @@ function Leads({ api, catalogos, abrirLead, version, onCambio }) {
               <div className="px-2 pb-2 flex flex-col gap-2 min-h-[60px]">
                 {leads.length === 0 && <p className="text-xs text-stone-400 px-1 py-3 text-center">Sin leads</p>}
                 {leads.map((l) => (
-                  <TarjetaLead key={l.id} lead={l} cliente={mapas.c.get(l.cliente_id)} vehiculo={mapas.v.get(l.vehiculo_id)} asignado={mapas.u.get(l.asignado_a)}
+                  <TarjetaLead key={l.id} lead={l} cliente={mapas.c.get(l.cliente_id)} vehiculo={mapas.v.get(l.vehiculo_id)} asignado={mapas.u.get(l.asignado_a)} marca={(datos.marcas || {})[l.id]}
                     mostrarAsignado={todos} onAbrir={() => abrirLead(l.id)} onMover={(e) => mover(l, e)} puedeMover />
                 ))}
               </div>
@@ -446,7 +452,7 @@ function Leads({ api, catalogos, abrirLead, version, onCambio }) {
           );
         })}
       </div>
-      <p className="text-xs text-stone-500">Las etapas «Cotizado», «Reservado» y «Cerrado ganado» se activan con las próximas entregas (cotizaciones, reservas y cierre de venta).</p>
+      <p className="text-xs text-stone-500">«Cotizado» y «Reservado» cambian solas: al crear una cotización y al reservar el vehículo desde la ficha del lead. «Cerrado ganado» llega con el cierre de venta (próxima entrega).</p>
 
       {perdiendo && (
         <Modal titulo="Marcar como perdido" onCerrar={() => { setPerdiendo(null); setMotivo(""); }} ancho="max-w-md">
@@ -517,12 +523,17 @@ function Agenda({ api, catalogos, abrirLead, version, onCambio }) {
 ========================================================= */
 function Inicio({ api, catalogos, abrirLead, irA, version, onCambio }) {
   const { cargando, error, datos } = useCarga(async () => {
-    const [l, t] = await Promise.all([api("leads.list", { todos: catalogos.puedeAsignar }), catalogos.puedeAgenda ? api("tareas.list", { todas: catalogos.puedeAsignar }) : Promise.resolve({ tareas: [], leads: {} })]);
-    return { l, t };
+    const [l, t, r, p] = await Promise.all([
+      api("leads.list", { todos: catalogos.puedeAsignar }),
+      catalogos.puedeAgenda ? api("tareas.list", { todas: catalogos.puedeAsignar }) : Promise.resolve({ tareas: [], leads: {} }),
+      api("reservas.list").catch(() => ({ reservas: [] })),
+      catalogos.puedeAsignar ? api("cotizaciones.pendientes").catch(() => ({ pendientes: [] })) : Promise.resolve({ pendientes: [] }),
+    ]);
+    return { l, t, r, p };
   }, [api, version]);
   if (cargando && !datos) return <Cargando />;
   if (error && !datos) return <Aviso>{error}</Aviso>;
-  const { l, t } = datos;
+  const { l, t, r, p } = datos;
   const porAtender = leadsPorAtender(l.leads);
   const g = agruparTareas(t.tareas);
   const cliente = (id) => (l.clientes.find((c) => c.id === id) || {}).nombre || "Cliente";
@@ -536,12 +547,27 @@ function Inicio({ api, catalogos, abrirLead, irA, version, onCambio }) {
   const alcance = catalogos.puedeAsignar ? "del local" : "tuyos";
   return (
     <>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
+        {catalogos.puedeAsignar && kpi("Descuentos por aprobar", p.pendientes.length, p.pendientes.length > 0, () => irA("aprobaciones"))}
         {kpi(`Leads por atender`, porAtender.length, porAtender.length > 0, () => irA("leads"))}
         {kpi("Tareas de hoy", g.hoy.length, g.hoy.length > 0, () => irA("agenda"))}
         {kpi("Tareas vencidas", g.vencidas.length, false, () => irA("agenda"))}
         {kpi("En seguimiento", l.leads.filter((x) => x.etapa === "seguimiento").length, false, () => irA("leads"))}
+        {kpi("Reservas activas", r.reservas.length, false, () => irA("leads"))}
       </div>
+
+      {r.reservas.length > 0 && (
+        <Tarjeta titulo="Reservas activas" ayuda="Cuando una reserva vence, el vehículo vuelve solo a estar disponible.">
+          <ul className="flex flex-col divide-y divide-stone-100">
+            {r.reservas.map((x) => (
+              <li key={x.id}><button onClick={() => abrirLead(x.lead_id)} className="w-full text-left py-2 text-sm hover:bg-amber-50 px-1 flex flex-wrap gap-x-3">
+                <span className="text-stone-900">{x.cliente}</span><span className="text-stone-600">{x.vehiculo}</span>
+                <span className="font-mono text-stone-700">{clp(x.monto)}</span><span className={Date.parse(x.vence_en) - Date.now() < 86400000 ? "text-rose-700" : "text-stone-500"}>{textoVencimiento(x.vence_en)}</span>
+              </button></li>
+            ))}
+          </ul>
+        </Tarjeta>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <Tarjeta titulo="Por atender ahora" ayuda={`Leads nuevos ${alcance} que aún no tienen ningún contacto.`}>
@@ -569,7 +595,7 @@ function Inicio({ api, catalogos, abrirLead, irA, version, onCambio }) {
         </Tarjeta>
       </div>
 
-      <Tarjeta titulo="Meta del mes" ayuda="El avance se calcula con las ventas cerradas, que se registran desde la próxima entrega (cotizaciones, reservas y cierre).">
+      <Tarjeta titulo="Meta del mes" ayuda="El avance se calcula con las ventas cerradas, que se registran desde la próxima entrega (cierre de venta).">
         <div className="flex items-center gap-4">
           <div className="flex-1 h-3 bg-stone-200"><div className="h-3 bg-amber-500" style={{ width: "0%" }} /></div>
           <p className="font-mono text-sm text-stone-700 whitespace-nowrap">0 / {meta || "sin meta"} unidades</p>
@@ -599,6 +625,10 @@ export function ModuloVentas({ permisos = [], esAdmin = false }) {
   const locales = (cat.datos && cat.datos.locales) || [];
   useEffect(() => { if (esAdmin && !localSel && locales.filter((l) => l.activo).length > 0) setLocalSel(locales.filter((l) => l.activo)[0].id); }, [esAdmin, localSel, locales]);
 
+  // Cuántos descuentos esperan aprobación (solo para quien los aprueba): se muestra como insignia en la pestaña.
+  const puedeAprobar = can("leads.asignar");
+  const pend = useCarga(() => (puedeAprobar ? api("cotizaciones.pendientes").then((r) => r.pendientes.length).catch(() => 0) : Promise.resolve(0)), [api, version, puedeAprobar]);
+
   if (cat.cargando && !cat.datos) return <Cargando />;
   if (cat.error && !cat.datos) return <Aviso>{cat.error}</Aviso>;
 
@@ -608,6 +638,7 @@ export function ModuloVentas({ permisos = [], esAdmin = false }) {
   const opciones = [];
   if (usaLeads) opciones.push(["inicio", "Inicio"], ["leads", "Leads"]);
   if (catalogos.puedeAgenda) opciones.push(["agenda", "Agenda"]);
+  if (puedeAprobar) opciones.push(["aprobaciones", "Aprobaciones", pend.datos || 0]);
   opciones.push(["inventario", "Inventario"]);
   if (usaLeads) opciones.push(["clientes", "Clientes"]);
 
@@ -621,6 +652,7 @@ export function ModuloVentas({ permisos = [], esAdmin = false }) {
       <Pestanas valor={tab} onCambio={setTab} opciones={opciones} />
       {tab === "inicio" && <Inicio api={api} catalogos={catalogos} abrirLead={setLeadAbierto} irA={setTab} version={version} onCambio={subir} />}
       {tab === "leads" && <Leads api={api} catalogos={catalogos} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
+      {tab === "aprobaciones" && <Aprobaciones api={api} version={version} abrirLead={setLeadAbierto} onCambio={subir} />}
       {tab === "agenda" && <Agenda api={api} catalogos={catalogos} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
       {tab === "inventario" && <Inventario api={api} onCambio={subir} />}
       {tab === "clientes" && <Clientes api={api} />}

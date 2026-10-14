@@ -217,6 +217,9 @@ export const CONFIG_DEFECTO = {
   comision_compras_pct: 0,
   comision_consignaciones_pct: 0,
   meta_mensual_unidades: 0,
+  dias_reserva: 3,
+  vigencia_cotizacion_dias: 7,
+  condiciones_cotizacion: "Cotización sujeta a disponibilidad del vehículo y a la aprobación del financiamiento, si corresponde. El precio puede variar si cambian las condiciones. Válida hasta la fecha indicada.",
 };
 
 const CLAVES_LISTA_TEXTO = ["fuentes_lead", "motivos_perdida"];
@@ -234,6 +237,16 @@ export function validarConfig(clave, valor) {
     const n = Number(valor);
     if (!Number.isFinite(n) || n < 0 || n > 100) return { ok: false };
     return { ok: true, value: Math.round(n * 100) / 100 };
+  }
+  if (clave === "dias_reserva" || clave === "vigencia_cotizacion_dias") {
+    const n = Number(valor);
+    const max = clave === "dias_reserva" ? 30 : 60;
+    if (!Number.isInteger(n) || n < 1 || n > max) return { ok: false };
+    return { ok: true, value: n };
+  }
+  if (clave === "condiciones_cotizacion") {
+    if (typeof valor !== "string" || valor.length > 800) return { ok: false };
+    return { ok: true, value: valor.trim() };
   }
   if (clave === "meta_mensual_unidades") {
     const n = Number(valor);

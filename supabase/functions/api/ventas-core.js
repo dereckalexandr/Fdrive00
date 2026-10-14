@@ -10,16 +10,20 @@ export const ESTADOS_VEHICULO = [
   { id: "vendido", nombre: "Vendido" },
 ];
 
-/** Etapas del embudo. `disponible:false` = se activa en una entrega posterior (cotizaciones, reservas, cierre). */
+/**
+ * Etapas del embudo. `disponible:false` = se activa en una entrega posterior (cierre de venta).
+ * `automatica:true` = el lead llega ahí solo (al cotizar o reservar); no se mueve a mano.
+ */
 export const ETAPAS = [
   { id: "nuevo", nombre: "Nuevo", disponible: true },
   { id: "contactado", nombre: "Contactado", disponible: true },
   { id: "seguimiento", nombre: "En seguimiento", disponible: true },
-  { id: "cotizado", nombre: "Cotizado", disponible: false },
-  { id: "reservado", nombre: "Reservado", disponible: false },
-  { id: "ganado", nombre: "Cerrado ganado", disponible: false },
+  { id: "cotizado", nombre: "Cotizado", disponible: true, automatica: true },
+  { id: "reservado", nombre: "Reservado", disponible: true, automatica: true },
+  { id: "ganado", nombre: "Cerrado ganado", disponible: false, automatica: true },
   { id: "perdido", nombre: "Cerrado perdido", disponible: true },
 ];
+export const ETAPAS_MANUALES = ETAPAS.filter((e) => e.disponible && !e.automatica).map((e) => e.id);
 export const ETAPAS_ACTIVAS = ETAPAS.filter((e) => e.disponible).map((e) => e.id);
 export const ETAPAS_CERRADAS = ["ganado", "perdido"];
 export const etapaNombre = (id) => (ETAPAS.find((e) => e.id === id) || {}).nombre || id;
@@ -169,6 +173,7 @@ export function validarLead(input) {
  */
 export function validarCambioEtapa({ desde, hacia, motivo, puedeReabrir = false }) {
   if (!ETAPAS_ACTIVAS.includes(hacia)) return { ok: false, error: "etapa_no_disponible" };
+  if (!ETAPAS_MANUALES.includes(hacia)) return { ok: false, error: "etapa_automatica" };
   if (desde === hacia) return { ok: false, error: "sin_cambio" };
   if (ETAPAS_CERRADAS.includes(desde) && !puedeReabrir) return { ok: false, error: "lead_cerrado" };
   const m = texto(motivo, 80);
@@ -237,6 +242,113 @@ export function contarPorEtapa(leads) {
 
 /** Leads "nuevos por atender": etapa nueva y todavía sin ningún contacto. */
 export const leadsPorAtender = (leads) => leads.filter((l) => l.etapa === "nuevo" && !l.ultimo_contacto);
+
+/* ---------- Cotizaciones ---------- */
+export const ESTADOS_COTIZACION = [
+  { id: "vigente", nombre: "Vigente" },
+  { id: "pendiente", nombre: "Esperando aprobación" },
+  { id: "rechazada", nombre: "Descuento rechazado" },
+  { id: "reservada", nombre: "Con reserva" },
+  { id: "anulada", nombre: "Anulada" },
+];
+export const cotizacionNombre = (id) => (ESTADOS_COTIZACION.find((e) => e.id === id) || {}).nombre || id;
+/** Estados en que la cotización se puede entregar al cliente (PDF). Solo "vigente" se puede reservar. */
+export const COTIZACION_ENTREGABLE = ["vigente", "reservada"];
+
+/** Cuota mensual estimada (sistema francés). Con tasa 0 es una división simple. */
+export function cuotaEstimada(monto, plazoMeses, tasaMensualPct) {
+  const P = Number(monto), n = Number(plazoMeses), r = Number(tasaMensualPct || 0) / 100;
+  if (!(P > 0) || !(n > 0)) return 0;
+  if (r === 0) return Math.round(P / n);
+  return Math.round((P * r) / (1 - Math.pow(1 + r, -n)));
+}
+
+/**
+ * Números de una cotización: precio final, parte de pago, pie, saldo y cuota.
+ * `saldo` = lo que el cliente debe pagar además del vehículo en parte de pago.
+ * Si necesita financiamiento, `montoFinanciar` = saldo − pie.
+ */
+export function calcularCotizacion({ precioLista, descuento, parteDePago, financiamiento }) {
+  const lista = Number(precioLista) || 0;
+  const desc = Number(descuento) || 0;
+  const precioFinal = lista - desc;
+  const parte = parteDePago && parteDePago.tiene ? Number(parteDePago.valor) || 0 : 0;
+  const quiere = !!(financiamiento && financiamiento.quiere);
+  const pie = quiere ? Number(financiamiento.pie) || 0 : 0;
+  const saldo = precioFinal - parte;
+  const montoFinanciar = quiere ? Math.max(0, saldo - pie) : 0;
+  const cuota = quiere ? cuotaEstimada(montoFinanciar, financiamiento.plazo_meses ?? financiamiento.plazoMeses, financiamiento.tasa_mensual_pct ?? financiamiento.tasaMensualPct) : 0;
+  return {
+    precioFinal, descuentoPct: lista > 0 ? Math.round((desc / lista) * 1000) / 10 : 0, parte, pie, saldo, montoFinanciar, cuota,
+    excede: parte + pie > precioFinal,
+  };
+}
+
+/**
+ * Valida los datos que la persona ingresa en una cotización. El precio de lista NO viene de la pantalla:
+ * lo fija el servidor desde el inventario (`precioLista` del vehículo).
+ */
+export function validarCotizacion(input, precioLista) {
+  const i = input || {};
+  const lista = Number(precioLista);
+  if (!Number.isFinite(lista) || lista <= 0) return { ok: false, error: "vehiculo_sin_precio" };
+  const descuento = entero(i.descuento ?? 0, 0, 2_000_000_000);
+  if (descuento === null || Number.isNaN(descuento) || descuento > lista) return { ok: false, error: "descuento_invalido" };
+  const pp = validarParteDePago(i.parteDePago);
+  if (!pp.ok) return pp;
+  let fin = { quiere: false };
+  if (i.financiamiento && i.financiamiento.quiere) {
+    const f = validarFinanciamiento(i.financiamiento);
+    if (!f.ok) return f;
+    const plazo = entero(i.financiamiento.plazoMeses ?? i.financiamiento.plazo_meses, 1, 120);
+    const tasa = i.financiamiento.tasaMensualPct ?? i.financiamiento.tasa_mensual_pct;
+    const tasaN = tasa === "" || tasa === undefined || tasa === null ? 0 : Number(tasa);
+    if (Number.isNaN(plazo) || !Number.isFinite(tasaN) || tasaN < 0 || tasaN > 10) return { ok: false, error: "financiamiento_invalido" };
+    fin = { ...f.value, plazo_meses: plazo, tasa_mensual_pct: tasaN };
+  }
+  const calc = calcularCotizacion({ precioLista: lista, descuento, parteDePago: pp.value, financiamiento: fin });
+  if (calc.excede) return { ok: false, error: "pago_excede_precio" };
+  return {
+    ok: true,
+    value: { precio_lista: lista, descuento, precio_final: calc.precioFinal, parte_pago: pp.value, financiamiento: fin, notas: texto(i.notas, 500) || null },
+  };
+}
+
+/** Sin descuento, o con descuento y quien cotiza puede aprobarlo: vigente. Si no, espera al supervisor. */
+export function estadoCotizacionInicial({ descuento, puedeAprobar }) {
+  return Number(descuento) > 0 && !puedeAprobar ? "pendiente" : "vigente";
+}
+
+/** ¿Hay que volver a pedir aprobación al editar? Si hay descuento y cambió el monto, el precio de lista, o no estaba aprobada. */
+export function requiereNuevaAprobacion(antes, despues) {
+  return Number(despues.descuento) > 0 && (Number(antes.descuento) !== Number(despues.descuento) || Number(antes.precio_lista) !== Number(despues.precio_lista) || antes.estado !== "vigente");
+}
+
+/* ---------- Reservas ---------- */
+export const MEDIOS_PAGO = ["Efectivo", "Transferencia", "Tarjeta", "Cheque", "Otro"];
+
+export function validarReserva(input, { precioFinal, diasDefecto = 3 } = {}) {
+  const i = input || {};
+  const monto = entero(i.monto, 1, 2_000_000_000);
+  if (monto === null || Number.isNaN(monto)) return { ok: false, error: "monto_invalido" };
+  if (precioFinal && monto > precioFinal) return { ok: false, error: "monto_invalido" };
+  const dias = entero(i.dias ?? diasDefecto, 1, 30);
+  if (dias === null || Number.isNaN(dias)) return { ok: false, error: "dias_invalidos" };
+  const medio = texto(i.medioPago, 20);
+  if (medio && !MEDIOS_PAGO.includes(medio)) return { ok: false, error: "medio_invalido" };
+  return { ok: true, value: { monto, dias, medio_pago: medio || null, notas: texto(i.notas, 300) || null } };
+}
+
+export const reservaVencida = (reserva, ahora = new Date()) => reserva.estado === "activa" && Date.parse(reserva.vence_en) < ahora.getTime();
+
+/** "vence en 5 h", "vence en 3 d", "vencida". */
+export function textoVencimiento(venceEn, ahora = new Date()) {
+  const ms = Date.parse(venceEn) - ahora.getTime();
+  if (ms <= 0) return "vencida";
+  const horas = ms / 3_600_000;
+  if (horas < 24) return `vence en ${Math.max(1, Math.round(horas))} h`;
+  return `vence en ${Math.round(horas / 24)} d`;
+}
 
 /* ---------- Permisos del módulo ---------- */
 /** Quién puede modificar un lead: quien reasigna (supervisor) o su dueño con permiso de leads propios. Y debe estar habilitado para ventas, salvo el supervisor. */
