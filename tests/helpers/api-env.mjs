@@ -10,8 +10,9 @@ void test; void assert;
 
 /* ---------- base falsa ---------- */
 let contadorCotizaciones = 0;
+let contadorCierres = 0;
 const DEFAULTS = {
-  usuarios: () => ({ id: randomUUID(), activo: true, debe_cambiar_clave: true, roles: [], permisos_extra: { otorgar: [], quitar: [] },
+  usuarios: () => ({ id: randomUUID(), comision: {}, activo: true, debe_cambiar_clave: true, roles: [], permisos_extra: { otorgar: [], quitar: [] },
     email: null, telefono: null, local_id: null, ultimo_acceso: null, creado_en: new Date().toISOString() }),
   locales: () => ({ id: randomUUID(), activo: true, direccion: null, creado_en: new Date().toISOString() }),
   vehiculos: () => ({ id: randomUUID(), activo: true, estado: "disponible", fotos: [], creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
@@ -19,6 +20,7 @@ const DEFAULTS = {
   leads: () => ({ id: randomUUID(), etapa: "nuevo", tipo: "venta", parte_pago: {}, financiamiento: {}, ultimo_contacto: null, motivo_perdida: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
   lead_eventos: () => ({ id: Math.floor(Math.random() * 1e9), creado_en: new Date().toISOString() }),
   cotizaciones: () => ({ id: randomUUID(), numero: ++contadorCotizaciones, estado: "vigente", descuento: 0, aprobado_por: null, aprobado_en: null, motivo_rechazo: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
+  cierres: () => ({ id: randomUUID(), numero: ++contadorCierres, estado: "pendiente", mes: null, aprobado_por: null, aprobado_en: null, motivo_rechazo: null, anulado_por: null, anulado_en: null, motivo_anulacion: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
   reservas: () => ({ id: randomUUID(), estado: "activa", motivo: null, cerrado_en: null, creado_en: new Date().toISOString() }),
   tareas: () => ({ id: randomUUID(), hecha: false, hecha_en: null, creado_en: new Date().toISOString() }),
   bitacora: () => ({ id: Math.floor(Math.random() * 1e9), creado_en: new Date().toISOString() }),
@@ -26,7 +28,7 @@ const DEFAULTS = {
 const UNICOS = { vehiculos: ["patente"], usuarios: ["rut"], locales: ["nombre"], roles_permisos: ["rol"], config_negocio: ["clave"], kv_store: ["key"] };
 
 export function crearBaseFalsa() {
-  const tablas = { usuarios: [], locales: [], roles_permisos: [], bitacora: [], config_negocio: [], kv_store: [], vehiculos: [], clientes: [], leads: [], lead_eventos: [], tareas: [], cotizaciones: [], reservas: [] };
+  const tablas = { usuarios: [], locales: [], roles_permisos: [], bitacora: [], config_negocio: [], kv_store: [], vehiculos: [], clientes: [], leads: [], lead_eventos: [], tareas: [], cotizaciones: [], reservas: [], cierres: [] };
   const consultas = [];
 
   function builder(nombre) {

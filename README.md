@@ -246,7 +246,7 @@ La plataforma está creciendo hacia un CRM con 8 perfiles (Administrador general
 
 ## CRM · Entrega 2A: módulo comercial del Ejecutivo (ventas)
 
-Primera parte del perfil Ejecutivo. Las cotizaciones y reservas (2B) y el cierre, comisiones y metas (2C) vienen después.
+Primera parte del perfil Ejecutivo. Las cotizaciones y reservas están en la entrega 2B y el cierre, las comisiones y las metas en la 2C (más abajo).
 
 **Instalar (una sola vez, después de `supabase-crm-setup.sql`):**
 1. Supabase → *SQL Editor* → pegar `supabase-crm-ventas.sql` → *Run*. Crea `vehiculos`, `clientes`, `leads`, `lead_eventos` y `tareas` (RLS activado, sin políticas). Se puede repetir sin riesgo.
@@ -265,7 +265,7 @@ Primera parte del perfil Ejecutivo. Las cotizaciones y reservas (2B) y el cierre
 - Quien tiene `leads.local` (por ejemplo Marketing) ve los leads del local sin poder modificarlos. Quien tiene `leads.asignar` (Jefe Local) ve y modifica todo el local y reasigna.
 - **Asignación mixta**: el supervisor elige a quién o deja el **reparto rotativo** (le toca a quien lleva más tiempo sin recibir un lead; solo entre personas activas y habilitadas para ventas). Si no hay nadie habilitado, el lead queda sin asignar para que el supervisor lo reparta.
 - Cada persona trabaja solo con datos de **su local**. La cuenta maestra elige el local.
-- Solo se puede mover a las etapas ya disponibles ("Cotizado" y "Reservado" cambian solas al cotizar y reservar; "Cerrado ganado" llega en 2C). Para perder un lead se exige un **motivo** (lista editable en Configuración). Un lead cerrado solo lo reabre el supervisor.
+- Solo se puede mover a las etapas ya disponibles ("Cotizado" y "Reservado" cambian solas al cotizar y reservar; "Cerrado ganado" la pone el cierre de venta, ver 2C). Para perder un lead se exige un **motivo** (lista editable en Configuración). Un lead cerrado solo lo reabre el supervisor.
 - El día de una tarea (vencida / hoy / próxima) se calcula en hora de Chile.
 - Quedan en la bitácora: alta y cambios de vehículos (con precio, costo, estado y km antes/después), clientes, creación, movimiento y reasignación de leads.
 - Las fotos del inventario se guardan como `vfoto::<vehículo>::<id>` en `kv_store`; las ve quien trabaja con inventario o leads y solo las sube quien edita el inventario.
@@ -299,6 +299,38 @@ Hasta que se ejecute el SQL, el resto del módulo sigue funcionando; cotizar y r
 **Bitácora**: cotizaciones creadas y editadas (con descuento), aprobaciones y rechazos (con quién pidió y quién resolvió), anulaciones, reservas creadas, extendidas, canceladas y vencidas.
 
 Código: reglas puras en `supabase/functions/api/ventas-core.js`, operaciones del servidor en `ventas.ts`, pantallas en `src/crm-cotizaciones.jsx` y el PDF en `src/pdf-report.js` (`buildCotizacionPdf`, que ahora admite fotos JPEG). Pruebas: `tests/cotizaciones-api.test.mjs` (la función real contra una base falsa), `tests/cotizacion-pdf.test.mjs` y las de `ventas-core`.
+
+## CRM · Entrega 2C: cierre de venta, comisiones por tramos y metas
+
+**Instalar (una sola vez, después de `supabase-crm-cotizaciones.sql`):**
+1. Supabase → *SQL Editor* → pegar `supabase-crm-cierres.sql` → *Run*. Agrega la columna `comision` a `usuarios` (tramos propios de cada persona) y crea la tabla `cierres`. Se puede repetir sin riesgo.
+2. Redesplegar la función: `node scripts/deploy-api.mjs`.
+Hasta que se ejecute el SQL el resto sigue funcionando; cerrar ventas avisa que faltan las tablas.
+
+**Cierre de venta** (ficha del lead reservado → *Cerrar la venta*): precio final de venta, vehículo recibido en parte de pago, monto financiado con su **financiera** (Autofin, BK, Global, Dily u Otros) y la **comisión que paga la financiera**, si se vendió un **seguro**, fecha de entrega y observaciones. Reglas:
+- Exige una **reserva activa** del vehículo (el flujo es cotizar → reservar → cerrar) y que el lead tenga ejecutivo asignado.
+- **Todo cierre lo aprueba el Jefe Local** (pestaña *Aprobaciones*, que ahora junta descuentos y ventas). Un supervisor que cierra aprueba su propia venta, a su nombre. El supervisor ve el precio cotizado, el precio de venta, cuánto menos que la cotización, la forma de pago y el **margen**; puede aprobar o rechazar (con motivo). El ejecutivo puede **retirar** un cierre pendiente o pedirlo de nuevo si lo rechazaron.
+- Al **aprobar**, todo cambia junto: el vehículo queda **Vendido**, la reserva **convertida**, la cotización **vendida** y el lead **Cerrado ganado**. Esa etapa es automática y una venta cerrada no se mueve a mano ni se puede cambiar el estado del vehículo: solo se revierte **anulando el cierre**.
+- **Anular una venta** (solo supervisor, con motivo): el vehículo vuelve a Disponible, la cotización a Vigente, el lead a Cotizado, y la venta **sale de la comisión del mes** en que se aprobó. Queda en la bitácora.
+- Un vehículo no se puede vender dos veces (la base impide dos cierres en curso o aprobados). Si la reserva se cancela con un cierre pendiente, el cierre se anula; una reserva con cierre pendiente no vence sola.
+- Queda en la bitácora: venta solicitada, aprobada, rechazada, retirada y anulada.
+
+**Comisiones — mismos tramos del perfil de Ejecutivo actual** (`supabase/functions/api/comisiones-core.js`; una prueba compara los tramos estándar con los de `src/App.jsx` para que no se desfasen):
+- Ventas, seguros, compras e inspecciones: *unidades del mes × monto del tramo en que cae esa cantidad*. **El nuevo monto se aplica a TODAS las unidades del mes** (con 4 ventas pagan $90.000 las 4, no solo la cuarta). Estándar de ventas: 1 a 3 → $75.000; 4 a 10 → $90.000; 11 o más → $110.000.
+- Créditos: suma de las comisiones que pagan las financieras × el porcentaje del tramo según cuántos créditos hubo (1–3: 15 %; 4–6: 25 %; 7 o más: 28 %).
+- Una venta con **monto financiado** cuenta como crédito; una con **seguro** cuenta como seguro.
+- Consignaciones: igual que en el perfil actual, la producción es la suma de márgenes netos (25 % del margen bruto); los tramos de consignaciones existen pero hoy no se aplican a ese cálculo.
+- El mes de una venta es el de su **aprobación**, en hora de Chile. Solo cuentan las aprobadas.
+- **Tramos propios por persona**: en *Usuarios → Editar → Comisiones por tramos* (solo la cuenta maestra), con los mismos módulos y la misma lógica de "crear perfil de ejecutivo": por módulo, estándar o personalizado. Los porcentajes se escriben como 25 y se guardan como 0,25. Se valida que no se superpongan y que solo el último quede sin tope. Editar a la persona sin tocar los tramos no los borra; enviarlos vacíos la devuelve a los estándar.
+- Compras, consignaciones e inspecciones se suman cuando existan sus flujos en el CRM; mientras tanto la pantalla lo indica.
+
+**Dónde se ve:**
+- **Ejecutivo** → Inicio: *Mi comisión del mes* con barra de **meta**, desglose por concepto, tramo actual y **cuántas ventas faltan para el siguiente** (y que el nuevo valor se aplica a todas). Pestaña *Ventas*: sus ventas del mes.
+- **Jefe Local** → pestaña *Ventas*: por mes, el equipo con ventas / meta, monto vendido, **margen**, comisión de cada ejecutivo (se despliega con el detalle) y la lista de ventas con *Anular*. El ejecutivo **no ve costos ni márgenes**.
+- **Meta mensual** por ejecutivo (unidades) en Configuración. Los porcentajes de comisión sueltos de la entrega 2A se eliminaron: la comisión sale solo de los tramos.
+- Permisos: `comisiones.propias` (ver la propia) y `comisiones.local` (ver las del equipo) ya están activos.
+
+Código: reglas en `ventas-core.js` y `comisiones-core.js`, servidor en `ventas.ts` (`cierres.*`, `comisiones.resumen`), pantallas en `src/crm-cierres.jsx` y `src/crm-tramos.jsx`. Pruebas: `tests/cierres-api.test.mjs` (la función real contra una base falsa), `tests/comisiones-core.test.mjs` y las de `ventas-core`.
 
 ## Desplegar en un hosting público
 

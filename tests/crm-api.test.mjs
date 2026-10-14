@@ -203,13 +203,13 @@ test("Configuración del negocio: valores iniciales, validación y bitácora con
   const admin = await loginAdmin();
   const g = await crm(admin, "config.get");
   assert.ok(g.config.fuentes_lead.includes("Sitio web"));
-  assert.equal((await crm(admin, "config.set", { clave: "comision_ventas_pct", valor: 500 })).status, 400);
+  assert.equal((await crm(admin, "config.set", { clave: "meta_mensual_unidades", valor: 10001 })).status, 400);
   assert.equal((await crm(admin, "config.set", { clave: "inventada", valor: 1 })).status, 400);
-  const ok = await crm(admin, "config.set", { clave: "comision_ventas_pct", valor: 2.5 });
-  assert.equal(ok.valor, 2.5);
-  assert.equal((await crm(admin, "config.get")).config.comision_ventas_pct, 2.5);
-  const fila = db.tablas.bitacora.find((b) => b.accion === "config.editar" && b.entidad_id === "comision_ventas_pct");
-  assert.deepEqual(fila.detalle, { antes: null, despues: 2.5 });
+  const ok = await crm(admin, "config.set", { clave: "meta_mensual_unidades", valor: 12 });
+  assert.equal(ok.valor, 12);
+  assert.equal((await crm(admin, "config.get")).config.meta_mensual_unidades, 12);
+  const fila = db.tablas.bitacora.find((b) => b.accion === "config.editar" && b.entidad_id === "meta_mensual_unidades");
+  assert.deepEqual(fila.detalle, { antes: null, despues: 12 });
 });
 
 test("Bitácora: más recientes primero, con total y filtro por tipo de acción", async () => {

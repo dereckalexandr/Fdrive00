@@ -14,7 +14,7 @@ import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, hace, Aviso, Carga
 
 const COLOR_COT = {
   vigente: "bg-emerald-100 text-emerald-800", pendiente: "bg-amber-100 text-amber-800", rechazada: "bg-rose-100 text-rose-800",
-  reservada: "bg-sky-100 text-sky-800", anulada: "bg-stone-200 text-stone-600",
+  reservada: "bg-sky-100 text-sky-800", vendida: "bg-emerald-100 text-emerald-800", anulada: "bg-stone-200 text-stone-600",
 };
 export const folio = (n) => `COT-${String(n || 0).padStart(6, "0")}`;
 const diaChile = (iso) => new Date(iso).toLocaleDateString("en-CA", { timeZone: "America/Santiago" });

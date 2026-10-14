@@ -211,7 +211,7 @@ test("El lead con reserva activa no se mueve de etapa a mano; las etapas automá
   assert.equal((await ve(U.e1.token, "leads.mover", { id: U.lead1.id, etapa: "seguimiento" })).error, "reserva_activa");
   assert.equal((await ve(U.e2.token, "leads.mover", { id: U.lead2.id, etapa: "cotizado" })).error, "etapa_automatica");
   assert.equal((await ve(U.e2.token, "leads.mover", { id: U.lead2.id, etapa: "reservado" })).error, "etapa_automatica");
-  assert.equal((await ve(U.e2.token, "leads.mover", { id: U.lead2.id, etapa: "ganado" })).error, "etapa_no_disponible");
+  assert.equal((await ve(U.e2.token, "leads.mover", { id: U.lead2.id, etapa: "ganado" })).error, "etapa_automatica");
 });
 
 test("Extender: suma días a la reserva, con tope; las cerradas no se extienden", async () => {

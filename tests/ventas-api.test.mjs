@@ -194,7 +194,7 @@ test("El supervisor asigna a mano o con reparto rotativo (solo a quien está hab
 });
 
 test("Etapas: el dueño mueve su lead; no a etapas futuras; perder exige motivo; solo el supervisor reabre", async () => {
-  assert.equal((await ve(U.e1.token, "leads.mover", { id: U.lead1.id, etapa: "ganado" })).error, "etapa_no_disponible");
+  assert.equal((await ve(U.e1.token, "leads.mover", { id: U.lead1.id, etapa: "ganado" })).error, "etapa_automatica");
   assert.equal((await ve(U.e1.token, "leads.mover", { id: U.lead1.id, etapa: "perdido" })).error, "motivo_requerido");
   const m = await ve(U.e1.token, "leads.mover", { id: U.lead1.id, etapa: "seguimiento" });
   assert.equal(m.lead.etapa, "seguimiento");

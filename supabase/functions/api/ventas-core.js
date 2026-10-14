@@ -1,6 +1,7 @@
 // Núcleo del módulo comercial (entrega 2A): inventario, clientes, leads de venta y tareas.
 // JavaScript puro, sin APIs de Deno ni del navegador: lo usan el servidor, la pantalla y las pruebas.
 import { validarRut, normalizarRut } from "./crm-core.js";
+import { FINANCIERAS } from "./comisiones-core.js";
 
 /* ---------- Catálogos fijos ---------- */
 export const ESTADOS_VEHICULO = [
@@ -11,7 +12,7 @@ export const ESTADOS_VEHICULO = [
 ];
 
 /**
- * Etapas del embudo. `disponible:false` = se activa en una entrega posterior (cierre de venta).
+ * Etapas del embudo. `disponible:false` = todavía no se usa.
  * `automatica:true` = el lead llega ahí solo (al cotizar o reservar); no se mueve a mano.
  */
 export const ETAPAS = [
@@ -20,7 +21,7 @@ export const ETAPAS = [
   { id: "seguimiento", nombre: "En seguimiento", disponible: true },
   { id: "cotizado", nombre: "Cotizado", disponible: true, automatica: true },
   { id: "reservado", nombre: "Reservado", disponible: true, automatica: true },
-  { id: "ganado", nombre: "Cerrado ganado", disponible: false, automatica: true },
+  { id: "ganado", nombre: "Cerrado ganado", disponible: true, automatica: true },
   { id: "perdido", nombre: "Cerrado perdido", disponible: true },
 ];
 export const ETAPAS_MANUALES = ETAPAS.filter((e) => e.disponible && !e.automatica).map((e) => e.id);
@@ -174,6 +175,7 @@ export function validarLead(input) {
 export function validarCambioEtapa({ desde, hacia, motivo, puedeReabrir = false }) {
   if (!ETAPAS_ACTIVAS.includes(hacia)) return { ok: false, error: "etapa_no_disponible" };
   if (!ETAPAS_MANUALES.includes(hacia)) return { ok: false, error: "etapa_automatica" };
+  if (desde === "ganado") return { ok: false, error: "venta_cerrada" }; // una venta cerrada solo se revierte anulando el cierre
   if (desde === hacia) return { ok: false, error: "sin_cambio" };
   if (ETAPAS_CERRADAS.includes(desde) && !puedeReabrir) return { ok: false, error: "lead_cerrado" };
   const m = texto(motivo, 80);
@@ -249,6 +251,7 @@ export const ESTADOS_COTIZACION = [
   { id: "pendiente", nombre: "Esperando aprobación" },
   { id: "rechazada", nombre: "Descuento rechazado" },
   { id: "reservada", nombre: "Con reserva" },
+  { id: "vendida", nombre: "Vendida" },
   { id: "anulada", nombre: "Anulada" },
 ];
 export const cotizacionNombre = (id) => (ESTADOS_COTIZACION.find((e) => e.id === id) || {}).nombre || id;
@@ -349,6 +352,69 @@ export function textoVencimiento(venceEn, ahora = new Date()) {
   if (horas < 24) return `vence en ${Math.max(1, Math.round(horas))} h`;
   return `vence en ${Math.round(horas / 24)} d`;
 }
+
+/* ---------- Cierre de venta ---------- */
+export { FINANCIERAS };
+export const ESTADOS_CIERRE = [
+  { id: "pendiente", nombre: "Esperando aprobación" },
+  { id: "aprobada", nombre: "Venta aprobada" },
+  { id: "rechazada", nombre: "Rechazada" },
+  { id: "anulada", nombre: "Anulada" },
+];
+export const cierreNombre = (id) => (ESTADOS_CIERRE.find((e) => e.id === id) || {}).nombre || id;
+
+/** "2026-10" según el día en Chile. */
+export const mesChile = (fecha = new Date()) => new Date(fecha).toLocaleDateString("en-CA", { timeZone: ZONA_HORARIA }).slice(0, 7);
+export const esMes = (m) => /^\d{4}-(0[1-9]|1[0-2])$/.test(String(m || ""));
+const MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+export const nombreMes = (m) => (esMes(m) ? `${MESES[Number(m.slice(5)) - 1]} ${m.slice(0, 4)}` : "");
+
+function fechaIso(t) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(t || ""))) return null;
+  const d = new Date(`${t}T12:00:00Z`);
+  return Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== t ? null : d;
+}
+
+/**
+ * Datos que registra el cierre de una venta. Reglas:
+ *  - precio final > 0; los pagos informados (parte de pago + financiado) no pueden superarlo;
+ *  - si hay monto financiado, se exige la financiera (y su comisión, que alimenta la comisión por créditos);
+ *  - la fecha de entrega es obligatoria y razonable (hasta 60 días atrás y 1 año adelante).
+ */
+export function validarCierre(input, ahora = new Date()) {
+  const i = input || {};
+  const precio = entero(i.precioFinal, 1, 2_000_000_000);
+  if (precio === null || Number.isNaN(precio)) return { ok: false, error: "precio_cierre_invalido" };
+  const parte = entero(i.montoParteDePago ?? 0, 0, 2_000_000_000);
+  const financiado = entero(i.montoFinanciado ?? 0, 0, 2_000_000_000);
+  if (parte === null || financiado === null || Number.isNaN(parte) || Number.isNaN(financiado)) return { ok: false, error: "pagos_invalidos" };
+  if (parte + financiado > precio) return { ok: false, error: "pagos_exceden_precio" };
+
+  let financiera = null;
+  let comision = 0;
+  if (financiado > 0) {
+    financiera = texto(i.financiera, 30);
+    if (!FINANCIERAS.includes(financiera)) return { ok: false, error: "financiera_requerida" };
+    comision = entero(i.comisionFinanciera ?? 0, 0, 2_000_000_000);
+    if (comision === null || Number.isNaN(comision)) return { ok: false, error: "comision_invalida" };
+  }
+
+  const entrega = fechaIso(i.fechaEntrega);
+  if (!entrega) return { ok: false, error: "fecha_entrega_invalida" };
+  const dias = (entrega.getTime() - ahora.getTime()) / 86_400_000;
+  if (dias < -61 || dias > 366) return { ok: false, error: "fecha_entrega_invalida" };
+
+  return {
+    ok: true,
+    value: {
+      precio_final: precio, monto_parte_pago: parte, monto_financiado: financiado, financiera, comision_financiera: comision,
+      seguro: i.seguro === true, fecha_entrega: i.fechaEntrega, notas: texto(i.notas, 500) || null,
+    },
+  };
+}
+
+/** Margen de una venta: precio final − costo del vehículo (null si no se conoce el costo). */
+export const margenVenta = (precioFinal, costo) => (costo === null || costo === undefined ? null : Number(precioFinal) - Number(costo));
 
 /* ---------- Permisos del módulo ---------- */
 /** Quién puede modificar un lead: quien reasigna (supervisor) o su dueño con permiso de leads propios. Y debe estar habilitado para ventas, salvo el supervisor. */

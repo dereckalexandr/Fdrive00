@@ -9,6 +9,8 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { ModuloVentas } from "./crm-ventas.jsx";
+import { TramosEditor } from "./crm-tramos.jsx";
+import { tramosAUi, uiAComision, errorDeTramos } from "../supabase/functions/api/comisiones-core.js";
 import {
   ROLES, ROLES_ASIGNABLES, PERMISOS, HABILITACIONES_EJECUTIVO,
   permisosEfectivos, limpiarExtra, validarRut, formatearRut, claveValida,
@@ -72,7 +74,7 @@ function useCarga(fn, deps) {
 /* =========================================================
    USUARIOS
 ========================================================= */
-const FORM_VACIO = { id: null, nombre: "", rut: "", email: "", telefono: "", localId: "", roles: [], extra: { otorgar: [], quitar: [] }, claveManual: "" };
+const FORM_VACIO = { id: null, nombre: "", rut: "", email: "", telefono: "", localId: "", roles: [], extra: { otorgar: [], quitar: [] }, tramos: {}, claveManual: "" };
 
 function UsuariosTab() {
   const { cargando, error, datos, recargar } = useCarga(async () => {
@@ -100,7 +102,7 @@ function UsuariosTab() {
 
   const abrirNuevo = () => { setForm({ ...FORM_VACIO, localId: locales.find((l) => l.activo)?.id || "" }); setFormError(""); setEntrega(null); };
   const abrirEditar = (u) => {
-    setForm({ id: u.id, nombre: u.nombre, rut: u.rut, email: u.email || "", telefono: u.telefono || "", localId: u.localId || "", roles: [...u.roles], extra: limpiarExtra(u.extra), claveManual: "" });
+    setForm({ id: u.id, nombre: u.nombre, rut: u.rut, email: u.email || "", telefono: u.telefono || "", localId: u.localId || "", roles: [...u.roles], extra: limpiarExtra(u.extra), tramos: tramosAUi(u.comision), claveManual: "" });
     setFormError(""); setEntrega(null);
   };
   const set = (campo, valor) => setForm((f) => ({ ...f, [campo]: valor }));
@@ -124,7 +126,9 @@ function UsuariosTab() {
     if (!form.id && !validarRut(form.rut)) { setFormError(MENSAJES.rut_invalido); return; }
     if (form.roles.length === 0) { setFormError(MENSAJES.roles_requeridos); return; }
     if (form.claveManual && !claveValida(form.claveManual)) { setFormError(MENSAJES.clave_invalida); return; }
-    const datosUsuario = { nombre: form.nombre, rut: form.rut, email: form.email, telefono: form.telefono, localId: form.localId || null, roles: form.roles, extra: limpiarExtra(form.extra) };
+    const esEjecutivo = form.roles.includes("ejecutivo");
+    if (esEjecutivo) { const e = errorDeTramos(form.tramos); if (e) { setFormError(e); return; } }
+    const datosUsuario = { nombre: form.nombre, rut: form.rut, email: form.email, telefono: form.telefono, localId: form.localId || null, roles: form.roles, extra: limpiarExtra(form.extra), ...(esEjecutivo ? { comision: uiAComision(form.tramos) } : {}) };
     setGuardando(true);
     try {
       if (form.id) {
@@ -231,6 +235,13 @@ function UsuariosTab() {
                 ))}
               </div>
             </div>
+          )}
+
+          {form.roles.includes("ejecutivo") && (
+            <details className="mt-4 border border-stone-200">
+              <summary className="px-3 py-2 text-sm text-stone-700 cursor-pointer">Comisiones por tramos{Object.keys(form.tramos).length > 0 ? ` (${Object.keys(form.tramos).length} módulo(s) personalizado(s))` : " (estándar)"}</summary>
+              <TramosEditor valor={form.tramos} onChange={(t) => set("tramos", t)} />
+            </details>
           )}
 
           <details className="mt-4 border border-stone-200">
@@ -603,11 +614,8 @@ function ConfigTab() {
         <NumeroEditor clave="dias_reserva" etiqueta="Duración de una reserva" valor={c.dias_reserva} sufijo="días" paso="1" onGuardado={ok} onError={mal} />
       </Tarjeta>
       <TextoEditor clave="condiciones_cotizacion" titulo="Condiciones en el PDF de la cotización" ayuda="Este texto aparece al final de cada cotización que se entrega al cliente. Redáctalo con tus condiciones comerciales." valor={c.condiciones_cotizacion} onGuardado={ok} onError={mal} />
-      <Tarjeta titulo="Comisiones y metas" ayuda="Valores generales. Más adelante se podrán ajustar por persona o por local.">
-        <NumeroEditor clave="comision_ventas_pct" etiqueta="Comisión por ventas" valor={c.comision_ventas_pct} sufijo="%" paso="0.1" onGuardado={ok} onError={mal} />
-        <NumeroEditor clave="comision_compras_pct" etiqueta="Comisión por compras" valor={c.comision_compras_pct} sufijo="%" paso="0.1" onGuardado={ok} onError={mal} />
-        <NumeroEditor clave="comision_consignaciones_pct" etiqueta="Comisión por consignaciones" valor={c.comision_consignaciones_pct} sufijo="%" paso="0.1" onGuardado={ok} onError={mal} />
-        <NumeroEditor clave="meta_mensual_unidades" etiqueta="Meta mensual por ejecutivo" valor={c.meta_mensual_unidades} sufijo="unid." paso="1" onGuardado={ok} onError={mal} />
+      <Tarjeta titulo="Meta mensual" ayuda="Cuántas ventas aprobadas se espera de cada ejecutivo al mes. La comisión no se configura aquí: sale de los tramos de cada ejecutivo (pestaña Usuarios → Editar → Comisiones por tramos).">
+        <NumeroEditor clave="meta_mensual_unidades" etiqueta="Meta mensual por ejecutivo" valor={c.meta_mensual_unidades} sufijo="ventas" paso="1" onGuardado={ok} onError={mal} />
       </Tarjeta>
     </>
   );

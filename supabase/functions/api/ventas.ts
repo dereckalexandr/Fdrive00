@@ -13,7 +13,9 @@ import {
   validarCotizacion, estadoCotizacionInicial, requiereNuevaAprobacion, validarReserva, reservaVencida,
   validarVehiculo, ocultarCosto, validarCliente, validarLead, validarCambioEtapa, elegirAsignado, validarTarea,
   puedeEditarLead, etapaNombre,
+  validarCierre, margenVenta, mesChile, esMes, nombreMes, FINANCIERAS,
 } from "./ventas-core.js";
+import { tramosEfectivos, calcularProduccion } from "./comisiones-core.js";
 
 export type Ctx = {
   sb: any;
@@ -112,11 +114,19 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
   }
 
   const dinero = (n: number) => `$${Math.round(Number(n)).toLocaleString("es-CL")}`;
+  const sinCosto = (c: any, ver: boolean) => (ver ? c : { ...c, costo: null, margen: null });
   const fechaCL = (iso: string) => new Date(iso).toLocaleDateString("es-CL", { day: "2-digit", month: "2-digit", timeZone: "America/Santiago" });
 
   /** Reserva activa de un lead (o null; tolera que las tablas de la entrega 2B aún no existan). */
   async function reservaActivaDeLead(leadId: string) {
     const { data, error } = await sb.from("reservas").select("*").eq("lead_id", leadId).eq("estado", "activa").maybeSingle();
+    if (error) { if (ctx.isMissingTable(error)) return null; throw error; }
+    return data ?? null;
+  }
+
+  /** ¿Este vehículo tiene una venta aprobada? Entonces solo se libera anulando el cierre. */
+  async function cierreAprobadoDeVehiculo(vehiculoId: string) {
+    const { data, error } = await sb.from("cierres").select("id").eq("vehiculo_id", vehiculoId).eq("estado", "aprobada").maybeSingle();
     if (error) { if (ctx.isMissingTable(error)) return null; throw error; }
     return data ?? null;
   }
@@ -128,6 +138,8 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
   async function cerrarReserva(r: any, nuevoEstado: "vencida" | "cancelada", motivo: string, opciones: { volverACotizado: boolean; sistema?: boolean }) {
     const ahora = new Date().toISOString();
     await sb.from("reservas").update({ estado: nuevoEstado, motivo, cerrado_en: ahora }).eq("id", r.id).eq("estado", "activa");
+    // Si había un cierre de venta esperando aprobación, ya no tiene reserva que lo respalde.
+    await sb.from("cierres").update({ estado: "anulada", motivo_anulacion: "La reserva dejó de estar activa", anulado_en: ahora, actualizado_en: ahora }).eq("reserva_id", r.id).eq("estado", "pendiente");
     await sb.from("vehiculos").update({ estado: "disponible", actualizado_en: ahora }).eq("id", r.vehiculo_id).eq("estado", "reservado");
     if (r.cotizacion_id) await sb.from("cotizaciones").update({ estado: "vigente", actualizado_en: ahora }).eq("id", r.cotizacion_id).eq("estado", "reservada");
     if (opciones.volverACotizado) await sb.from("leads").update({ etapa: "cotizado", actualizado_en: ahora }).eq("id", r.lead_id).eq("etapa", "reservado");
@@ -140,7 +152,11 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
   async function liberarVencidas() {
     const { data, error } = await scoped(sb.from("reservas").select("*").eq("estado", "activa"));
     if (error) { if (ctx.isMissingTable(error)) return; throw error; }
-    for (const r of (data ?? []).filter((x: any) => reservaVencida(x))) await cerrarReserva(r, "vencida", "Venció el plazo", { volverACotizado: true, sistema: true });
+    // Una reserva con un cierre de venta esperando aprobación no se libera sola: decide el supervisor.
+    const enCierre = new Set<string>();
+    const cp = await scoped(sb.from("cierres").select("reserva_id").eq("estado", "pendiente"));
+    if (!cp.error) for (const c of cp.data ?? []) if (c.reserva_id) enCierre.add(c.reserva_id);
+    for (const r of (data ?? []).filter((x: any) => reservaVencida(x) && !enCierre.has(x.id))) await cerrarReserva(r, "vencida", "Venció el plazo", { volverACotizado: true, sistema: true });
   }
   if (/^(inventario\.list|leads\.|cotizaciones\.|reservas\.)/.test(op)) await liberarVencidas();
 
@@ -155,7 +171,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     }
     return json({
       fuentes_lead: c.fuentes_lead, motivos_perdida: c.motivos_perdida, meta_mensual_unidades: c.meta_mensual_unidades,
-      comision_ventas_pct: c.comision_ventas_pct, locales, etapas: ETAPAS,
+      financieras: FINANCIERAS, locales, etapas: ETAPAS,
       dias_reserva: c.dias_reserva, vigencia_cotizacion_dias: c.vigencia_cotizacion_dias, condiciones_cotizacion: c.condiciones_cotizacion,
     });
   }
@@ -196,6 +212,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       // Un vehículo con reserva activa conserva su estado; y nadie lo pone "reservado" a mano.
       if (antes.estado === "reservado") v.value.estado = "reservado";
       else if (v.value.estado === "reservado") return err("estado_automatico");
+      if (antes.estado === "vendido" && (await cierreAprobadoDeVehiculo(antes.id))) v.value.estado = "vendido";
       const { data, error } = await sb.from("vehiculos").update({ ...v.value, actualizado_en: new Date().toISOString() }).eq("id", id).select().single();
       if (error) return error.code === "23505" ? err("patente_duplicada", 409) : fallo(error);
       const cambios: Record<string, unknown> = {};
@@ -211,6 +228,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       if (!antes) return err("no_existe", 404);
       if (estado === "reservado") return err("estado_automatico");
       if (antes.estado === "reservado") return err("vehiculo_reservado");
+      if (antes.estado === "vendido" && (await cierreAprobadoDeVehiculo(antes.id))) return err("vehiculo_vendido");
       const { data, error } = await sb.from("vehiculos").update({ estado, actualizado_en: new Date().toISOString() }).eq("id", antes.id).select().single();
       if (error) return fallo(error);
       await audit(ctx.actor, "vehiculo.estado", "vehiculo", antes.id, { patente: antes.patente, antes: antes.estado, despues: estado });
@@ -221,6 +239,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       const { data: antes } = await scoped(sb.from("vehiculos").select("*").eq("id", String(body.id ?? ""))).maybeSingle();
       if (!antes) return err("no_existe", 404);
       if (antes.estado === "reservado") return err("vehiculo_reservado");
+      if (antes.estado === "vendido" && (await cierreAprobadoDeVehiculo(antes.id))) return err("vehiculo_vendido");
       const { error } = await sb.from("vehiculos").update({ activo: false, actualizado_en: new Date().toISOString() }).eq("id", antes.id);
       if (error) return fallo(error);
       await audit(ctx.actor, "vehiculo.archivar", "vehiculo", antes.id, { patente: antes.patente });
@@ -277,7 +296,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     const { data, error } = await scoped(sb.from("leads").select("*").order("creado_en", { ascending: false }));
     if (error) return fallo(error);
     const hace30 = Date.now() - 30 * 86_400_000;
-    let leads: any[] = (data ?? []).filter((l: any) => !(l.etapa === "perdido" && Date.parse(l.actualizado_en) < hace30));
+    let leads: any[] = (data ?? []).filter((l: any) => !((l.etapa === "perdido" || l.etapa === "ganado") && Date.parse(l.actualizado_en) < hace30));
     if (!todos) leads = leads.filter((l) => l.asignado_a === userId);
     leads = leads.slice(0, MAX_LISTA);
     const clientes = await porIds("clientes", leads.map((l) => l.cliente_id));
@@ -285,9 +304,11 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     const usuarios = await porIds("usuarios", leads.map((l) => l.asignado_a));
     const puedeCosto = can("inventario.editar");
     // Marcas para las tarjetas del embudo: descuento esperando aprobación y reserva en curso.
-    const marcas: Record<string, { pendiente?: boolean; reserva_vence_en?: string }> = {};
+    const marcas: Record<string, { pendiente?: boolean; reserva_vence_en?: string; cierre_pendiente?: boolean }> = {};
     const cp = await scoped(sb.from("cotizaciones").select("lead_id, estado").eq("estado", "pendiente"));
     if (!cp.error) for (const c of cp.data ?? []) marcas[c.lead_id] = { ...marcas[c.lead_id], pendiente: true };
+    const ci = await scoped(sb.from("cierres").select("lead_id").eq("estado", "pendiente"));
+    if (!ci.error) for (const c of ci.data ?? []) marcas[c.lead_id] = { ...marcas[c.lead_id], cierre_pendiente: true };
     const rs = await scoped(sb.from("reservas").select("lead_id, vence_en").eq("estado", "activa"));
     if (!rs.error) for (const r of rs.data ?? []) marcas[r.lead_id] = { ...marcas[r.lead_id], reserva_vence_en: r.vence_en };
     return json({
@@ -318,11 +339,14 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     // Cotizaciones y reservas del lead (si las tablas de la entrega 2B aún no existen, se omiten).
     const cot = await sb.from("cotizaciones").select("*").eq("lead_id", lead.id).order("creado_en", { ascending: false });
     const res = await sb.from("reservas").select("*").eq("lead_id", lead.id).order("creado_en", { ascending: false });
+    const cie = await sb.from("cierres").select("*").eq("lead_id", lead.id).order("creado_en", { ascending: false });
+    const puedeCosto = can("inventario.editar");
     const loc = lead.local_id ? await sb.from("locales").select("nombre").eq("id", lead.local_id).maybeSingle() : { data: null };
     return json({
       lead, cliente: cliente ?? null, vehiculo: vehiculo ? ocultarCosto(vehiculo, can("inventario.editar")) : null,
       asignado: asignado ? { id: asignado.id, nombre: asignado.nombre } : null, eventos: ev.data ?? [], tareas: ta.data ?? [], puedeEditar: puedeTocar(lead),
       cotizaciones: cot.error ? [] : cot.data ?? [], reservas: res.error ? [] : res.data ?? [], localNombre: loc.data ? loc.data.nombre : "",
+      cierres: cie.error ? [] : (cie.data ?? []).map((c: any) => sinCosto(c, puedeCosto)),
     });
   }
 
@@ -531,7 +555,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     if (id) {
       const { data } = await sb.from("cotizaciones").select("*").eq("id", id).eq("lead_id", lead.id).maybeSingle();
       if (!data) return err("no_existe", 404);
-      if (data.estado === "reservada" || data.estado === "anulada") return err("cotizacion_cerrada");
+      if (["reservada", "vendida", "anulada"].includes(data.estado)) return err("cotizacion_cerrada");
       previa = data;
     }
     const { data: veh } = await sb.from("vehiculos").select("*").eq("id", String(body.vehiculoId || previa?.vehiculo_id || "")).maybeSingle();
@@ -591,7 +615,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     if (!lead || !puedeVer(lead)) return err("no_existe", 404);
     if (!puedeTocar(lead)) return err("forbidden", 403);
     if (cot.estado === "reservada") return err("tiene_reserva");
-    if (cot.estado === "anulada") return err("cotizacion_cerrada");
+    if (cot.estado === "anulada" || cot.estado === "vendida") return err("cotizacion_cerrada");
     const { data, error } = await sb.from("cotizaciones").update({ estado: "anulada", actualizado_en: new Date().toISOString() }).eq("id", cot.id).select().single();
     if (error) return fallo(error);
     await evento(lead.id, "cotizacion", `Cotización N° ${cot.numero} anulada`);
@@ -742,6 +766,200 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     await evento(lead.id, "reserva", `Reserva extendida ${dias} día(s): vence el ${fechaCL(vence)}`);
     await audit(ctx.actor, "reserva.extender", "reserva", r.id, { dias, vence_en: vence });
     return json({ reserva: data });
+  }
+
+  /* ---------- cierre de venta ---------- */
+  async function cargarCierre(id: string) {
+    const { data, error } = await scoped(sb.from("cierres").select("*").eq("id", id)).maybeSingle();
+    if (error) throw error;
+    return data;
+  }
+  const folioVenta = (n: number) => `VTA-${String(n || 0).padStart(6, "0")}`;
+
+  /** Efectos de aprobar una venta: el vehículo queda vendido, la reserva convertida, la cotización vendida y el lead ganado. */
+  async function aprobarCierre(c: any) {
+    const ahora = new Date().toISOString();
+    const mes = mesChile(ahora);
+    const { data, error } = await sb.from("cierres").update({
+      estado: "aprobada", mes, aprobado_por: userName, aprobado_en: ahora, motivo_rechazo: null, actualizado_en: ahora,
+    }).eq("id", c.id).select().single();
+    if (error) throw error;
+    await sb.from("vehiculos").update({ estado: "vendido", actualizado_en: ahora }).eq("id", c.vehiculo_id);
+    if (c.reserva_id) await sb.from("reservas").update({ estado: "convertida", motivo: "Venta cerrada", cerrado_en: ahora }).eq("id", c.reserva_id).eq("estado", "activa");
+    if (c.cotizacion_id) await sb.from("cotizaciones").update({ estado: "vendida", actualizado_en: ahora }).eq("id", c.cotizacion_id);
+    await sb.from("leads").update({ etapa: "ganado", actualizado_en: ahora }).eq("id", c.lead_id);
+    await evento(c.lead_id, "cierre", `Venta ${folioVenta(c.numero)} aprobada por ${userName} · ${dinero(c.precio_final)}. Cuenta para la comisión de ${nombreMes(mes)}.`);
+    await evento(c.lead_id, "etapa", "Reservado → Cerrado ganado");
+    await audit(ctx.actor, "venta.aprobar", "cierre", c.id, { numero: c.numero, precio_final: c.precio_final, mes, ejecutivo_id: c.ejecutivo_id, solicitado_por: c.solicitado_por });
+    return data;
+  }
+
+  if (op === "cierres.crear") {
+    const lead = await cargarLead(String(body.leadId ?? ""));
+    if (!lead || !puedeVer(lead)) return err("no_existe", 404);
+    if (!puedeTocar(lead)) return err("forbidden", 403);
+    if (lead.etapa !== "reservado") return err("lead_no_reservado");
+    if (!lead.asignado_a) return err("lead_sin_asignar");
+    const reserva = await reservaActivaDeLead(lead.id);
+    if (!reserva) return err("sin_reserva");
+    const { data: veh } = await sb.from("vehiculos").select("*").eq("id", reserva.vehiculo_id).maybeSingle();
+    if (!veh || veh.estado !== "reservado") return err("vehiculo_no_disponible", 409);
+    const { data: cot } = reserva.cotizacion_id ? await sb.from("cotizaciones").select("*").eq("id", reserva.cotizacion_id).maybeSingle() : { data: null };
+    if (!cot || cot.estado !== "reservada") return err("cotizacion_no_vigente");
+    const vigente = await sb.from("cierres").select("id, estado").eq("vehiculo_id", veh.id);
+    if (vigente.error) return fallo(vigente.error);
+    if ((vigente.data ?? []).some((x: any) => x.estado === "pendiente" || x.estado === "aprobada")) return err("cierre_en_curso", 409);
+
+    const v = validarCierre(body.datos);
+    if (!v.ok) return err(v.error!);
+    const costo = veh.costo != null ? Number(veh.costo) : null;
+    const ins = await sb.from("cierres").insert({
+      ...v.value, local_id: lead.local_id, lead_id: lead.id, cotizacion_id: cot.id, reserva_id: reserva.id, vehiculo_id: veh.id,
+      cliente_id: lead.cliente_id, ejecutivo_id: lead.asignado_a,
+      vehiculo_snapshot: { patente: veh.patente, marca: veh.marca, modelo: veh.modelo, version: veh.version, anio: veh.anio, km: veh.km },
+      precio_lista: Number(cot.precio_lista), precio_cotizado: Number(cot.precio_final), costo, margen: margenVenta(v.value.precio_final, costo),
+      reserva_monto: Number(reserva.monto), estado: "pendiente", solicitado_por: userName, creado_por: userId,
+    }).select().single();
+    if (ins.error) return ins.error.code === "23505" ? err("cierre_en_curso", 409) : fallo(ins.error);
+    let cierre = ins.data;
+    await evento(lead.id, "cierre", `Cierre de venta ${folioVenta(cierre.numero)} pedido por ${userName} · ${dinero(cierre.precio_final)}${cierre.precio_final < cierre.precio_cotizado ? ` (${dinero(cierre.precio_cotizado - cierre.precio_final)} menos que la cotización)` : ""}`);
+    await audit(ctx.actor, "venta.solicitar", "cierre", cierre.id, { numero: cierre.numero, precio_final: cierre.precio_final, precio_cotizado: cierre.precio_cotizado });
+    // El supervisor que cierra aprueba su propia venta (queda a su nombre en la bitácora).
+    if (esSupervisor) cierre = await aprobarCierre(cierre);
+    return json({ cierre: sinCosto(cierre, can("inventario.editar")) });
+  }
+
+  if (op === "cierres.aprobar" || op === "cierres.rechazar") {
+    if (!esSupervisor) return err("forbidden", 403);
+    const c = await cargarCierre(String(body.id ?? ""));
+    if (!c) return err("no_existe", 404);
+    if (c.estado !== "pendiente") return err("sin_cambio");
+    if (op === "cierres.rechazar") {
+      const motivo = String(body.motivo ?? "").trim().slice(0, 200);
+      if (motivo.length < 3) return err("motivo_requerido");
+      const { data, error } = await sb.from("cierres").update({ estado: "rechazada", motivo_rechazo: motivo, actualizado_en: new Date().toISOString() }).eq("id", c.id).select().single();
+      if (error) return fallo(error);
+      await evento(c.lead_id, "cierre", `Cierre ${folioVenta(c.numero)} rechazado por ${userName}: ${motivo}`);
+      await audit(ctx.actor, "venta.rechazar", "cierre", c.id, { numero: c.numero, motivo, solicitado_por: c.solicitado_por });
+      return json({ cierre: sinCosto(data, can("inventario.editar")) });
+    }
+    // Al aprobar, la reserva debe seguir vigente y el vehículo reservado: si no, el cierre ya no se sostiene.
+    const reserva = c.reserva_id ? (await sb.from("reservas").select("*").eq("id", c.reserva_id).maybeSingle()).data : null;
+    const { data: veh } = await sb.from("vehiculos").select("estado").eq("id", c.vehiculo_id).maybeSingle();
+    if (!reserva || reserva.estado !== "activa" || !veh || veh.estado !== "reservado") return err("reserva_no_vigente", 409);
+    return json({ cierre: sinCosto(await aprobarCierre(c), can("inventario.editar")) });
+  }
+
+  // El ejecutivo (o el supervisor) retira un cierre que aún no se aprueba.
+  if (op === "cierres.retirar") {
+    const c = await cargarCierre(String(body.id ?? ""));
+    if (!c) return err("no_existe", 404);
+    const lead = await cargarLead(c.lead_id);
+    if (!lead || !puedeVer(lead)) return err("no_existe", 404);
+    if (!puedeTocar(lead)) return err("forbidden", 403);
+    if (c.estado !== "pendiente") return err("sin_cambio");
+    const ahora = new Date().toISOString();
+    const { data, error } = await sb.from("cierres").update({ estado: "anulada", motivo_anulacion: "Retirado antes de aprobarse", anulado_por: userName, anulado_en: ahora, actualizado_en: ahora }).eq("id", c.id).select().single();
+    if (error) return fallo(error);
+    await evento(c.lead_id, "cierre", `Cierre ${folioVenta(c.numero)} retirado por ${userName}`);
+    await audit(ctx.actor, "venta.retirar", "cierre", c.id, { numero: c.numero });
+    return json({ cierre: sinCosto(data, can("inventario.editar")) });
+  }
+
+  // Revertir una venta aprobada: solo el supervisor y con un motivo. La comisión de ese mes se recalcula sin ella.
+  if (op === "cierres.anular") {
+    if (!esSupervisor) return err("forbidden", 403);
+    const c = await cargarCierre(String(body.id ?? ""));
+    if (!c) return err("no_existe", 404);
+    if (c.estado !== "aprobada") return err("sin_cambio");
+    const motivo = String(body.motivo ?? "").trim().slice(0, 200);
+    if (motivo.length < 3) return err("motivo_requerido");
+    const ahora = new Date().toISOString();
+    const { data, error } = await sb.from("cierres").update({ estado: "anulada", motivo_anulacion: motivo, anulado_por: userName, anulado_en: ahora, actualizado_en: ahora }).eq("id", c.id).select().single();
+    if (error) return fallo(error);
+    await sb.from("vehiculos").update({ estado: "disponible", actualizado_en: ahora }).eq("id", c.vehiculo_id).eq("estado", "vendido");
+    if (c.cotizacion_id) await sb.from("cotizaciones").update({ estado: "vigente", actualizado_en: ahora }).eq("id", c.cotizacion_id).eq("estado", "vendida");
+    await sb.from("leads").update({ etapa: "cotizado", actualizado_en: ahora }).eq("id", c.lead_id).eq("etapa", "ganado");
+    await evento(c.lead_id, "cierre", `Venta ${folioVenta(c.numero)} anulada por ${userName}: ${motivo}. Sale de la comisión de ${nombreMes(c.mes)}.`);
+    await evento(c.lead_id, "etapa", "Cerrado ganado → Cotizado");
+    await audit(ctx.actor, "venta.anular", "cierre", c.id, { numero: c.numero, mes: c.mes, precio_final: c.precio_final, ejecutivo_id: c.ejecutivo_id, motivo });
+    return json({ cierre: sinCosto(data, can("inventario.editar")) });
+  }
+
+  if (op === "cierres.list") {
+    const mes = body.mes === undefined ? mesChile() : String(body.mes);
+    if (!esMes(mes)) return err("mes_invalido");
+    const soloPendientes = body.estado === "pendiente";
+    const { data, error } = await scoped(sb.from("cierres").select("*").order("creado_en", { ascending: false }));
+    if (error) return fallo(error);
+    let lista: any[] = (data ?? []).filter((c: any) => veTodoElLocal || c.ejecutivo_id === userId);
+    lista = soloPendientes
+      ? lista.filter((c) => c.estado === "pendiente")
+      : lista.filter((c) => c.estado === "pendiente" || c.mes === mes || ((c.estado === "rechazada" || c.estado === "anulada") && mesChile(c.actualizado_en) === mes));
+    lista = lista.slice(0, MAX_LISTA);
+    const clientes = await porIds("clientes", lista.map((c) => c.cliente_id));
+    const usuarios = await porIds("usuarios", lista.map((c) => c.ejecutivo_id));
+    const puedeCosto = can("inventario.editar");
+    return json({
+      mes, nombreMes: nombreMes(mes), puedeAprobar: esSupervisor,
+      cierres: lista.map((c) => ({
+        ...sinCosto(c, puedeCosto),
+        folio: folioVenta(c.numero),
+        cliente: (clientes.find((x: any) => x.id === c.cliente_id) || {}).nombre ?? "",
+        ejecutivo: (usuarios.find((x: any) => x.id === c.ejecutivo_id) || {}).nombre ?? "",
+      })),
+    });
+  }
+
+  /* ---------- comisiones ---------- */
+  if (op === "comisiones.resumen") {
+    const verTodos = can("comisiones.local") || esSupervisor;
+    if (!verTodos && !can("comisiones.propias")) return err("forbidden", 403);
+    const mes = body.mes === undefined ? mesChile() : String(body.mes);
+    if (!esMes(mes)) return err("mes_invalido");
+
+    const { data, error } = await scoped(sb.from("cierres").select("*").eq("estado", "aprobada"));
+    if (error) return fallo(error);
+    const delMes = (data ?? []).filter((c: any) => c.mes === mes);
+    const pend = await scoped(sb.from("cierres").select("ejecutivo_id").eq("estado", "pendiente"));
+    const pendientesPor: Record<string, number> = {};
+    for (const c of pend.data ?? []) pendientesPor[c.ejecutivo_id] = (pendientesPor[c.ejecutivo_id] ?? 0) + 1;
+
+    // A quién se muestra: solo a sí misma, o a todo el equipo habilitado del local más quien tenga ventas ese mes.
+    const ids = new Set<string>();
+    if (verTodos) {
+      const local = localId;
+      if (local) for (const e of await elegibles(local)) ids.add(e.id);
+      for (const c of delMes) if (c.ejecutivo_id) ids.add(c.ejecutivo_id);
+    } else if (!ctx.esAdmin) ids.add(userId);
+    const usuarios = await porIds("usuarios", Array.from(ids));
+    const puedeCosto = can("inventario.editar");
+
+    const ejecutivos = usuarios.map((u: any) => {
+      const suyas = delMes.filter((c: any) => c.ejecutivo_id === u.id);
+      const conCredito = suyas.filter((c: any) => Number(c.monto_financiado) > 0);
+      const datos = {
+        ventasN: suyas.length, segurosN: suyas.filter((c: any) => c.seguro).length,
+        creditosN: conCredito.length, creditosComision: conCredito.reduce((a: number, c: any) => a + Number(c.comision_financiera || 0), 0),
+      };
+      const tramos = tramosEfectivos(u.comision);
+      const produccion = calcularProduccion(datos, tramos);
+      return {
+        id: u.id, nombre: u.nombre, activo: u.activo, datos, produccion, tramos,
+        personalizado: Object.keys((u.comision && u.comision.tramos) || {}).length > 0,
+        montoVendido: suyas.reduce((a: number, c: any) => a + Number(c.precio_final), 0),
+        margen: puedeCosto && suyas.every((c: any) => c.margen != null) ? suyas.reduce((a: number, c: any) => a + Number(c.margen), 0) : null,
+        pendientes: pendientesPor[u.id] ?? 0,
+      };
+    }).sort((a: any, b: any) => b.datos.ventasN - a.datos.ventasN || a.nombre.localeCompare(b.nombre));
+
+    let meta = 0;
+    try { meta = (await configNegocio()).meta_mensual_unidades; } catch (e) { /* sin meta */ }
+    return json({
+      mes, nombreMes: nombreMes(mes), meta, ejecutivos, verTodos,
+      totales: { unidades: delMes.length, produccion: ejecutivos.reduce((a: number, e: any) => a + e.produccion.total, 0), montoVendido: ejecutivos.reduce((a: number, e: any) => a + e.montoVendido, 0) },
+      pendientesDeOtrosModulos: ["compras", "consignaciones", "inspecciones"],
+    });
   }
 
   return err("unknown_op");

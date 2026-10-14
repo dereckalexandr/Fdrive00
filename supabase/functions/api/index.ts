@@ -220,7 +220,7 @@ async function liveUser(id: string) {
 
 const pubUser = (u: any) => ({
   id: u.id, rut: u.rut, nombre: u.nombre, email: u.email, telefono: u.telefono, roles: u.roles ?? [],
-  extra: limpiarExtra(u.permisos_extra), localId: u.local_id, activo: u.activo,
+  extra: limpiarExtra(u.permisos_extra), comision: u.comision ?? {}, localId: u.local_id, activo: u.activo,
   debeCambiarClave: u.debe_cambiar_clave, ultimoAcceso: u.ultimo_acceso, creadoEn: u.creado_en,
 });
 
@@ -308,7 +308,7 @@ async function crmOp(s: Session, body: any): Promise<Response> {
     else if (!claveValida(clave)) return json({ error: "clave_invalida" }, 400);
     const { data, error } = await sb.from("usuarios").insert({
       rut: v.value.rut, nombre: v.value.nombre, email: v.value.email, telefono: v.value.telefono,
-      roles: v.value.roles, permisos_extra: v.value.extra, local_id: v.value.localId,
+      roles: v.value.roles, permisos_extra: v.value.extra, local_id: v.value.localId, ...(v.value.comision !== undefined ? { comision: v.value.comision } : {}),
       clave_hash: await hashSecret(clave), debe_cambiar_clave: true,
     }).select().single();
     if (error) return dbFail(error);
@@ -325,14 +325,18 @@ async function crmOp(s: Session, body: any): Promise<Response> {
     }
     const { data: antes } = await sb.from("usuarios").select("*").eq("id", id).maybeSingle();
     if (!antes) return json({ error: "no_existe" }, 404);
-    const { data, error } = await sb.from("usuarios").update({
+    // Los tramos de comisión solo se tocan si vienen en la petición.
+    const cambios: Record<string, unknown> = {
       nombre: v.value.nombre, email: v.value.email, telefono: v.value.telefono, roles: v.value.roles,
       permisos_extra: v.value.extra, local_id: v.value.localId, actualizado_en: new Date().toISOString(),
-    }).eq("id", id).select().single();
+    };
+    if (v.value.comision !== undefined) cambios.comision = v.value.comision;
+    const { data, error } = await sb.from("usuarios").update(cambios).eq("id", id).select().single();
     if (error) return dbFail(error);
     dropLiveCache();
     await audit(actor, "usuario.editar", "usuario", id, {
       nombre: data.nombre,
+      ...(v.value.comision !== undefined ? { comision: { antes: antes.comision ?? {}, despues: data.comision ?? {} } } : {}),
       roles: { antes: antes.roles, despues: data.roles },
       permisos_extra: { antes: antes.permisos_extra, despues: data.permisos_extra },
       local: { antes: antes.local_id, despues: data.local_id },

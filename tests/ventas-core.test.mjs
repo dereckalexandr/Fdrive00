@@ -4,6 +4,7 @@ import {
   ETAPAS, ETAPAS_ACTIVAS, normalizarPatente, patenteValida, soloDigitos,
   validarVehiculo, ocultarCosto, validarCliente, validarLead, validarCambioEtapa, elegirAsignado,
   calcularCotizacion, cuotaEstimada, validarCotizacion, estadoCotizacionInicial, requiereNuevaAprobacion, validarReserva, reservaVencida, textoVencimiento,
+  validarCierre, margenVenta, mesChile, esMes, nombreMes, cierreNombre,
   validarTarea, claseTarea, agruparTareas, contarPorEtapa, leadsPorAtender, puedeEditarLead,
 } from "../supabase/functions/api/ventas-core.js";
 
@@ -90,9 +91,10 @@ test("Lead: parte de pago y financiamiento solo se guardan si se marcan", () => 
 });
 
 test("Etapas: solo se puede mover a las disponibles; perder exige motivo", () => {
-  assert.deepEqual(ETAPAS_ACTIVAS, ["nuevo", "contactado", "seguimiento", "cotizado", "reservado", "perdido"]);
+  assert.deepEqual(ETAPAS_ACTIVAS, ["nuevo", "contactado", "seguimiento", "cotizado", "reservado", "ganado", "perdido"]);
   assert.equal(ETAPAS.length, 7);
-  assert.equal(validarCambioEtapa({ desde: "nuevo", hacia: "ganado" }).error, "etapa_no_disponible");
+  assert.equal(validarCambioEtapa({ desde: "nuevo", hacia: "ganado" }).error, "etapa_automatica", "'Cerrado ganado' solo lo pone el cierre de venta");
+  assert.equal(validarCambioEtapa({ desde: "ganado", hacia: "seguimiento", puedeReabrir: true }).error, "venta_cerrada", "una venta cerrada solo se revierte anulando el cierre");
   assert.equal(validarCambioEtapa({ desde: "nuevo", hacia: "cotizado" }).error, "etapa_automatica", "cotizado y reservado cambian solos");
   assert.equal(validarCambioEtapa({ desde: "nuevo", hacia: "reservado" }).error, "etapa_automatica");
   assert.equal(validarCambioEtapa({ desde: "nuevo", hacia: "nuevo" }).error, "sin_cambio");
@@ -266,4 +268,53 @@ test("Reserva: vencimiento y su texto", () => {
   assert.equal(textoVencimiento("2026-10-14T11:00:00Z", ahora), "vencida");
   assert.equal(textoVencimiento("2026-10-14T17:00:00Z", ahora), "vence en 5 h");
   assert.equal(textoVencimiento("2026-10-17T12:00:00Z", ahora), "vence en 3 d");
+});
+
+const AHORA = new Date("2026-10-14T15:00:00Z");
+const CIERRE = { precioFinal: 9200000, montoParteDePago: 3000000, montoFinanciado: 4000000, financiera: "Autofin", comisionFinanciera: 600000, seguro: true, fechaEntrega: "2026-10-20", notas: " listo " };
+
+test("Cierre de venta: datos correctos", () => {
+  const r = validarCierre(CIERRE, AHORA);
+  assert.ok(r.ok, JSON.stringify(r));
+  assert.deepEqual(r.value, {
+    precio_final: 9200000, monto_parte_pago: 3000000, monto_financiado: 4000000, financiera: "Autofin", comision_financiera: 600000,
+    seguro: true, fecha_entrega: "2026-10-20", notas: "listo",
+  });
+  // Venta al contado: sin financiera ni comisión, y el seguro es opcional.
+  const contado = validarCierre({ precioFinal: 9200000, fechaEntrega: "2026-10-14" }, AHORA);
+  assert.deepEqual([contado.value.financiera, contado.value.comision_financiera, contado.value.seguro, contado.value.monto_financiado], [null, 0, false, 0]);
+});
+
+test("Cierre de venta: rechaza datos incoherentes", () => {
+  const mal = (cambio) => validarCierre({ ...CIERRE, ...cambio }, AHORA).error;
+  assert.equal(mal({ precioFinal: 0 }), "precio_cierre_invalido");
+  assert.equal(mal({ precioFinal: "abc" }), "precio_cierre_invalido");
+  assert.equal(mal({ montoParteDePago: -1 }), "pagos_invalidos");
+  assert.equal(mal({ montoParteDePago: 6000000 }), "pagos_exceden_precio", "parte de pago + financiado no pueden superar el precio");
+  assert.equal(mal({ financiera: "" }), "financiera_requerida");
+  assert.equal(mal({ financiera: "Banco inventado" }), "financiera_requerida");
+  assert.equal(mal({ comisionFinanciera: -5 }), "comision_invalida");
+  assert.equal(mal({ fechaEntrega: "" }), "fecha_entrega_invalida");
+  assert.equal(mal({ fechaEntrega: "20-10-2026" }), "fecha_entrega_invalida");
+  assert.equal(mal({ fechaEntrega: "2026-02-30" }), "fecha_entrega_invalida", "fecha que no existe");
+  assert.equal(mal({ fechaEntrega: "2025-01-01" }), "fecha_entrega_invalida", "demasiado antigua");
+  assert.equal(mal({ fechaEntrega: "2028-01-01" }), "fecha_entrega_invalida", "demasiado lejana");
+  assert.equal(validarCierre(null, AHORA).error, "precio_cierre_invalido");
+});
+
+test("Cierre de venta: sin financiamiento no se exige financiera aunque venga una", () => {
+  const r = validarCierre({ ...CIERRE, montoFinanciado: 0, financiera: "", comisionFinanciera: 999 }, AHORA);
+  assert.ok(r.ok);
+  assert.equal(r.value.comision_financiera, 0, "sin crédito no hay comisión de financiera");
+});
+
+test("Meses según el día en Chile y margen de la venta", () => {
+  assert.equal(mesChile(new Date("2026-10-14T15:00:00Z")), "2026-10");
+  assert.equal(mesChile(new Date("2026-11-01T01:30:00Z")), "2026-10", "01:30 UTC del 1 de noviembre aún es 31 de octubre en Chile");
+  assert.ok(esMes("2026-10") && !esMes("2026-13") && !esMes("26-10") && !esMes(null));
+  assert.equal(nombreMes("2026-10"), "octubre 2026");
+  assert.equal(nombreMes("x"), "");
+  assert.equal(margenVenta(9200000, 8000000), 1200000);
+  assert.equal(margenVenta(9200000, null), null);
+  assert.equal(cierreNombre("pendiente"), "Esperando aprobación");
 });

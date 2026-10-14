@@ -139,18 +139,16 @@ test("Configuración: listas de texto", () => {
   assert.ok(!validarConfig("fuentes_lead", ["x".repeat(61)]).ok);
 });
 
-test("Configuración: porcentajes y meta", () => {
-  assert.equal(validarConfig("comision_ventas_pct", "2.5").value, 2.5);
-  assert.ok(!validarConfig("comision_ventas_pct", 120).ok);
-  assert.ok(!validarConfig("comision_ventas_pct", -1).ok);
+test("Configuración: meta mensual", () => {
+  assert.ok(!validarConfig("comision_ventas_pct", 2.5).ok, "los porcentajes sueltos ya no existen: la comisión sale de los tramos");
   assert.equal(validarConfig("meta_mensual_unidades", 12).value, 12);
   assert.ok(!validarConfig("meta_mensual_unidades", 1.5).ok);
   assert.ok(!validarConfig("clave_inventada", 1).ok);
 });
 
 test("Configuración completa: usa lo guardado y rellena con valores iniciales", () => {
-  const c = configCompleta({ comision_ventas_pct: 3, fuentes_lead: [] /* inválida */ });
-  assert.equal(c.comision_ventas_pct, 3);
+  const c = configCompleta({ meta_mensual_unidades: 3, fuentes_lead: [] /* inválida */ });
+  assert.equal(c.meta_mensual_unidades, 3);
   assert.deepEqual(c.fuentes_lead, CONFIG_DEFECTO.fuentes_lead);
   assert.deepEqual(Object.keys(c).sort(), Object.keys(CONFIG_DEFECTO).sort());
   assert.deepEqual(configCompleta(null), CONFIG_DEFECTO);

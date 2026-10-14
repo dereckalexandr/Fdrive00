@@ -72,6 +72,21 @@ const MENSAJES = {
   monto_invalido: "Revisa el monto: debe ser mayor a 0 y no superar el precio final.",
   dias_invalidos: "Los días no son válidos.",
   medio_invalido: "Elige un medio de pago de la lista.",
+  lead_no_reservado: "Para cerrar la venta, el lead debe estar en «Reservado».",
+  lead_sin_asignar: "Este lead no tiene ejecutivo asignado: asígnalo antes de cerrar la venta.",
+  sin_reserva: "Para cerrar la venta, el vehículo debe tener una reserva activa.",
+  cierre_en_curso: "Ese vehículo ya tiene un cierre de venta en curso o aprobado.",
+  reserva_no_vigente: "La reserva ya no está vigente, por lo que no se puede aprobar este cierre.",
+  venta_cerrada: "Esta venta está cerrada. Para revertirla, el supervisor debe anular el cierre.",
+  vehiculo_vendido: "El vehículo tiene una venta aprobada. El supervisor debe anular el cierre para liberarlo.",
+  precio_cierre_invalido: "Revisa el precio final de venta: debe ser un monto mayor a 0.",
+  pagos_invalidos: "Revisa los montos de parte de pago y financiamiento.",
+  pagos_exceden_precio: "La parte de pago más el monto financiado superan el precio final.",
+  financiera_requerida: "Elige la financiera del crédito.",
+  comision_invalida: "Revisa la comisión de la financiera.",
+  fecha_entrega_invalida: "Elige una fecha de entrega válida.",
+  mes_invalido: "El mes no es válido.",
+  tramos_invalidos: "Los tramos no son válidos: no pueden superponerse y solo el último puede quedar sin tope.",
 };
 export const mensajeError = (e) => MENSAJES[e && e.message] || "No se pudo completar la operación. Inténtalo de nuevo.";
 

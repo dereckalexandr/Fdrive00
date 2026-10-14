@@ -13,7 +13,8 @@ import {
   agruparTareas, claseTarea, textoVencimiento, contarPorEtapa, leadsPorAtender, etapaNombre, soloDigitos, validarCliente, validarLead, validarTarea,
 } from "../supabase/functions/api/ventas-core.js";
 import { Inventario, Clientes } from "./crm-inventario.jsx";
-import { SeccionCotizaciones, Aprobaciones, useReservasActivas } from "./crm-cotizaciones.jsx";
+import { SeccionCotizaciones } from "./crm-cotizaciones.jsx";
+import { SeccionCierres, AprobacionesTodo, Ventas, TarjetaComision } from "./crm-cierres.jsx";
 import {
   INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, useCarga, mensajeError,
 } from "./crm-ui.jsx";
@@ -134,6 +135,7 @@ function LeadFicha({ api, leadId, catalogos, onCerrar, onCambio, onEditar }) {
       </div>
 
       <SeccionCotizaciones api={api} lead={lead} datos={datos} catalogos={catalogos} avisar={setMsg} onCambio={async () => { await recargar(); onCambio(); }} />
+      <SeccionCierres api={api} lead={lead} datos={datos} catalogos={catalogos} avisar={setMsg} onCambio={async () => { await recargar(); onCambio(); }} />
 
       {puedeEditar && (
         <div className="bg-white border border-stone-200 p-4 flex flex-col gap-3">
@@ -373,6 +375,7 @@ function TarjetaLead({ lead, cliente, vehiculo, asignado, marca = {}, mostrarAsi
       <p className="text-stone-600 text-xs mt-0.5">{vehiculo ? `${vehiculo.marca} ${vehiculo.modelo} ${vehiculo.anio}` : lead.vehiculo_interes || "Sin vehículo definido"}</p>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-2 text-[11px] text-stone-500">
         {marca.pendiente && <span className="bg-amber-100 text-amber-800 px-1.5 py-0.5">Descuento por aprobar</span>}
+        {marca.cierre_pendiente && <span className="bg-emerald-100 text-emerald-800 px-1.5 py-0.5">Venta por aprobar</span>}
         {marca.reserva_vence_en && <span className="bg-sky-100 text-sky-800 px-1.5 py-0.5">Reserva {textoVencimiento(marca.reserva_vence_en)}</span>}
         {sinContacto && <span className="bg-sky-100 text-sky-800 px-1.5 py-0.5">Por atender</span>}
         {lead.fuente && <span>{lead.fuente}</span>}
@@ -430,7 +433,7 @@ function Leads({ api, catalogos, abrirLead, version, onCambio }) {
         </div>
       </Tarjeta>
       {msg && <Aviso>{msg}</Aviso>}
-      <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-3 items-start">
+      <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-7 gap-3 items-start">
         {ETAPAS_ACTIVAS.map((id) => {
           const leads = datos.leads.filter((l) => l.etapa === id);
           return (
@@ -523,21 +526,21 @@ function Agenda({ api, catalogos, abrirLead, version, onCambio }) {
 ========================================================= */
 function Inicio({ api, catalogos, abrirLead, irA, version, onCambio }) {
   const { cargando, error, datos } = useCarga(async () => {
-    const [l, t, r, p] = await Promise.all([
+    const [l, t, r, p, c] = await Promise.all([
       api("leads.list", { todos: catalogos.puedeAsignar }),
       catalogos.puedeAgenda ? api("tareas.list", { todas: catalogos.puedeAsignar }) : Promise.resolve({ tareas: [], leads: {} }),
       api("reservas.list").catch(() => ({ reservas: [] })),
       catalogos.puedeAsignar ? api("cotizaciones.pendientes").catch(() => ({ pendientes: [] })) : Promise.resolve({ pendientes: [] }),
+      catalogos.puedeComision ? api("comisiones.resumen").catch(() => null) : Promise.resolve(null),
     ]);
-    return { l, t, r, p };
+    return { l, t, r, p, c };
   }, [api, version]);
   if (cargando && !datos) return <Cargando />;
   if (error && !datos) return <Aviso>{error}</Aviso>;
-  const { l, t, r, p } = datos;
+  const { l, t, r, p, c } = datos;
   const porAtender = leadsPorAtender(l.leads);
   const g = agruparTareas(t.tareas);
   const cliente = (id) => (l.clientes.find((c) => c.id === id) || {}).nombre || "Cliente";
-  const meta = catalogos.meta_mensual_unidades || 0;
   const kpi = (titulo, valor, destacado, onClick) => (
     <button onClick={onClick} className={`text-left bg-white border p-4 ${destacado ? "border-amber-400" : "border-stone-200"} hover:border-amber-500`}>
       <p className="text-xs uppercase tracking-widest text-stone-400">{titulo}</p>
@@ -595,13 +598,16 @@ function Inicio({ api, catalogos, abrirLead, irA, version, onCambio }) {
         </Tarjeta>
       </div>
 
-      <Tarjeta titulo="Meta del mes" ayuda="El avance se calcula con las ventas cerradas, que se registran desde la próxima entrega (cierre de venta).">
-        <div className="flex items-center gap-4">
-          <div className="flex-1 h-3 bg-stone-200"><div className="h-3 bg-amber-500" style={{ width: "0%" }} /></div>
-          <p className="font-mono text-sm text-stone-700 whitespace-nowrap">0 / {meta || "sin meta"} unidades</p>
-        </div>
-        <p className="text-xs text-stone-500 mt-2">Comisión de ventas configurada: {catalogos.comision_ventas_pct || 0}% · el cálculo por tramos llega en la entrega de comisiones.</p>
-      </Tarjeta>
+      {c && (catalogos.puedeAsignar ? (
+        <Tarjeta titulo={`Ventas del equipo · ${c.nombreMes}`} ayuda="Solo cuentan las ventas aprobadas.">
+          <div className="flex flex-wrap items-center gap-x-8 gap-y-2 text-sm">
+            <span>Ventas: <strong className="font-mono">{c.totales.unidades}</strong>{c.meta > 0 ? <span className="text-stone-500"> (meta {c.meta} por ejecutivo)</span> : null}</span>
+            <span>Vendido: <strong className="font-mono">{clp(c.totales.montoVendido)}</strong></span>
+            <span>Comisiones del equipo: <strong className="font-mono">{clp(c.totales.produccion)}</strong></span>
+            <button onClick={() => irA("ventas")} className={BTN}>Ver detalle por ejecutivo</button>
+          </div>
+        </Tarjeta>
+      ) : <TarjetaComision resumen={c} />)}
     </>
   );
 }
@@ -627,17 +633,21 @@ export function ModuloVentas({ permisos = [], esAdmin = false }) {
 
   // Cuántos descuentos esperan aprobación (solo para quien los aprueba): se muestra como insignia en la pestaña.
   const puedeAprobar = can("leads.asignar");
-  const pend = useCarga(() => (puedeAprobar ? api("cotizaciones.pendientes").then((r) => r.pendientes.length).catch(() => 0) : Promise.resolve(0)), [api, version, puedeAprobar]);
+  const pend = useCarga(() => (puedeAprobar
+    ? Promise.all([api("cotizaciones.pendientes").then((r) => r.pendientes.length).catch(() => 0), api("cierres.list", { estado: "pendiente" }).then((r) => r.cierres.length).catch(() => 0)]).then(([a, b]) => a + b)
+    : Promise.resolve(0)), [api, version, puedeAprobar]);
 
   if (cat.cargando && !cat.datos) return <Cargando />;
   if (cat.error && !cat.datos) return <Aviso>{cat.error}</Aviso>;
 
   const catalogos = {
     ...cat.datos, puedeAsignar: can("leads.asignar"), veTodo: can("leads.asignar") || can("leads.local"), puedeAgenda: can("agenda.usar") || can("leads.asignar"),
+    puedeComision: can("comisiones.propias") || can("comisiones.local") || can("leads.asignar"),
   };
   const opciones = [];
   if (usaLeads) opciones.push(["inicio", "Inicio"], ["leads", "Leads"]);
   if (catalogos.puedeAgenda) opciones.push(["agenda", "Agenda"]);
+  if (catalogos.puedeComision) opciones.push(["ventas", "Ventas"]);
   if (puedeAprobar) opciones.push(["aprobaciones", "Aprobaciones", pend.datos || 0]);
   opciones.push(["inventario", "Inventario"]);
   if (usaLeads) opciones.push(["clientes", "Clientes"]);
@@ -652,7 +662,8 @@ export function ModuloVentas({ permisos = [], esAdmin = false }) {
       <Pestanas valor={tab} onCambio={setTab} opciones={opciones} />
       {tab === "inicio" && <Inicio api={api} catalogos={catalogos} abrirLead={setLeadAbierto} irA={setTab} version={version} onCambio={subir} />}
       {tab === "leads" && <Leads api={api} catalogos={catalogos} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
-      {tab === "aprobaciones" && <Aprobaciones api={api} version={version} abrirLead={setLeadAbierto} onCambio={subir} />}
+      {tab === "ventas" && <Ventas api={api} catalogos={catalogos} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
+      {tab === "aprobaciones" && <AprobacionesTodo api={api} version={version} abrirLead={setLeadAbierto} onCambio={subir} />}
       {tab === "agenda" && <Agenda api={api} catalogos={catalogos} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
       {tab === "inventario" && <Inventario api={api} onCambio={subir} />}
       {tab === "clientes" && <Clientes api={api} />}

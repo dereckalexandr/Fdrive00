@@ -6,6 +6,8 @@
 //   - las pruebas (tests/crm-core.test.mjs).
 // Así hay una sola fuente de verdad para la lista de permisos.
 
+import { validarComision } from "./comisiones-core.js";
+
 /* ---------- Roles ---------- */
 export const ROLES = [
   { id: "admin_general", nombre: "Administrador general", asignable: false,
@@ -52,8 +54,8 @@ export const PERMISOS = [
   { id: "inventario.editar", grupo: "Comercial", nombre: "Editar el inventario", disponible: true },
   { id: "cotizaciones.crear", grupo: "Comercial", nombre: "Crear cotizaciones y cierres", disponible: false },
   { id: "agenda.usar", grupo: "Comercial", nombre: "Seguimiento y agenda", disponible: true },
-  { id: "comisiones.propias", grupo: "Comercial", nombre: "Ver sus propias comisiones", disponible: false },
-  { id: "comisiones.local", grupo: "Comercial", nombre: "Ver las comisiones de su local", disponible: false },
+  { id: "comisiones.propias", grupo: "Comercial", nombre: "Ver sus propias comisiones", disponible: true },
+  { id: "comisiones.local", grupo: "Comercial", nombre: "Ver las comisiones de su local", disponible: true },
   { id: "metas.gestionar", grupo: "Comercial", nombre: "Definir metas", disponible: false },
   // Operación
   { id: "inspecciones.usar", grupo: "Operación", nombre: "Módulo de inspecciones", disponible: true },
@@ -204,7 +206,14 @@ export function validarUsuario(input, { esAlta = true } = {}) {
   const telefono = String(i.telefono || "").trim().slice(0, 30);
   const localId = i.localId ? String(i.localId) : null;
 
-  return { ok: true, value: { nombre, rut, roles, email: email || null, telefono: telefono || null, localId, extra: limpiarExtra(i.extra) } };
+  // Tramos de comisión propios (opcional): si no vienen, no se tocan; si vienen vacíos, la persona vuelve a los estándar.
+  let comision;
+  if (i.comision !== undefined) {
+    const c = validarComision(i.comision);
+    if (!c.ok) return { ok: false, error: "tramos_invalidos" };
+    comision = c.value;
+  }
+  return { ok: true, value: { nombre, rut, roles, email: email || null, telefono: telefono || null, localId, extra: limpiarExtra(i.extra), comision } };
 }
 
 /* ---------- Configuración del negocio ----------
@@ -213,9 +222,6 @@ export function validarUsuario(input, { esAlta = true } = {}) {
 export const CONFIG_DEFECTO = {
   fuentes_lead: ["Sitio web", "Llamada", "WhatsApp", "Redes sociales", "Referido", "Visita al local"],
   motivos_perdida: ["Precio", "Compró en otro lugar", "Sin respuesta", "Cambió de idea", "Financiamiento rechazado"],
-  comision_ventas_pct: 0,
-  comision_compras_pct: 0,
-  comision_consignaciones_pct: 0,
   meta_mensual_unidades: 0,
   dias_reserva: 3,
   vigencia_cotizacion_dias: 7,
@@ -223,7 +229,6 @@ export const CONFIG_DEFECTO = {
 };
 
 const CLAVES_LISTA_TEXTO = ["fuentes_lead", "motivos_perdida"];
-const CLAVES_PORCENTAJE = ["comision_ventas_pct", "comision_compras_pct", "comision_consignaciones_pct"];
 
 /** Devuelve { ok, value } con el valor limpio, o { ok:false }. */
 export function validarConfig(clave, valor) {
@@ -232,11 +237,6 @@ export function validarConfig(clave, valor) {
     const limpio = unicos(valor.map((v) => String(v).trim().replace(/\s+/g, " ")).filter(Boolean));
     if (limpio.length === 0 || limpio.some((v) => v.length > 60)) return { ok: false };
     return { ok: true, value: limpio };
-  }
-  if (CLAVES_PORCENTAJE.includes(clave)) {
-    const n = Number(valor);
-    if (!Number.isFinite(n) || n < 0 || n > 100) return { ok: false };
-    return { ok: true, value: Math.round(n * 100) / 100 };
   }
   if (clave === "dias_reserva" || clave === "vigencia_cotizacion_dias") {
     const n = Number(valor);
