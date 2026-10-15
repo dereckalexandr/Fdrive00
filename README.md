@@ -361,6 +361,36 @@ Para quien tiene `leads.asignar` (Jefe Local y la cuenta maestra): pestaña **Ge
 
 Código: reglas puras (alertas, embudo, fuentes, avisos) en `ventas-core.js`; servidor en `ventas.ts` (`gestion.resumen`, `gestion.embudo`, `leads.reasignarLote`, `avisos.*`); pantallas en `src/crm-gestion.jsx`. Pruebas: `tests/gestion-api.test.mjs` (la función real contra una base falsa) y las de `ventas-core`.
 
+## CRM · Entrega 4: perfil del Tasador
+
+**Instalar (una sola vez, después de `supabase-crm-gestion.sql`):**
+1. Supabase → *SQL Editor* → pegar `supabase-crm-tasaciones.sql` → *Run*. Crea la tabla `tasaciones` (RLS activado, sin políticas). Se puede repetir sin riesgo.
+2. Redesplegar la función: `node scripts/deploy-api.mjs`.
+Hasta que se ejecute el SQL el resto sigue funcionando; pedir o tasar avisa que faltan las tablas.
+
+**Permisos nuevos** (pestaña *Permisos*): `tasaciones.pedir` (Ejecutivo y Jefe Local) y `tasaciones.realizar` (Tasador). *Si antes personalizaste los permisos de esos roles, los nuevos no se agregan solos: actívalos ahí.* El Tasador queda con acceso a su módulo; el Inspector no tasa para el CRM.
+
+**Flujo con solicitudes de los ejecutivos y tasaciones directas:**
+- **Pedir** (ficha del lead → *Pedir tasación*): el ejecutivo ingresa el vehículo en parte de pago (patente, marca, modelo, año, km…) y una nota. Queda en la **cola** (*Por tomar*). Solo puede haber una tasación abierta por lead; no se pide en leads cerrados.
+- **Tomar**: el primer Tasador que la toma se la queda (otro recibe "ya la tomó"). Puede **devolverla a la cola**; el supervisor puede **asignarla** a otro Tasador del local o **cancelarla**. La cuenta maestra no tasa.
+- **Tasación directa** (*+ Tasación directa*): para quien llega a vender o consignar; sin lead, con nombre y teléfono opcionales. Queda tomada por quien la crea.
+- **Detalle de la tasación**: vehículo editable; **estimador de Chileautos integrado** (parte con los datos del vehículo y guarda el resultado en la tasación: promedio, publicación y compra sugeridas, avisos usados y la búsqueda); **valor de compra** y **valor de venta esperado** (con margen esperado; el de venta no puede ser menor que el de compra); **inspección vinculada** (se busca por patente entre las inspecciones ya hechas y solo se muestra el vehículo, la fecha y el inspector: **nunca los datos del propietario**); hasta **6 fotos**; observaciones. Se puede guardar un borrador y luego *Completar* (después ya no se edita).
+
+**El valor tasado es el tope del lead** (lo hace cumplir el servidor):
+- Al completar, el lead guarda el vehículo en parte de pago con el **valor de compra** y el vínculo a la tasación, y queda en su historial.
+- En la **cotización**, al **editar el lead** y en el **cierre de venta**, lo que se le reconoce al cliente por su vehículo **no puede superar lo tasado**. Se puede bajar (negociar), no subir. Editar los datos del lead conserva el vínculo con la tasación.
+- Para subirlo hay que **pedir una nueva tasación**; al completarse, el tope pasa a ser el nuevo valor.
+
+**Seguimiento:** el ejecutivo ve en su inicio *Mis tasaciones* (abiertas y las completadas hace menos de 3 días). El Tasador tiene *Resumen* con tasaciones hechas en el mes, **tiempo medio de respuesta** (desde que se pidió hasta que se completó), en proceso, valor de compra total y margen esperado medio. **No tiene comisión por ahora**; se mide su actividad. El supervisor ve las de todos, la cola y cuántas pasaron el plazo.
+
+**Alerta en el panel de gestión:** *Tasaciones sin tomar* — solicitudes que llevan **8 horas** o más en la cola (se cambia en *Configuración → Alertas del panel de gestión*).
+
+**Dónde se usa:** el Tasador tiene la tarjeta **Tasaciones** en su estación; el supervisor y la cuenta maestra, la pestaña **Tasaciones** dentro de Ventas (todas las del local, asignar, cancelar, resumen). Las fotos se guardan como `tfoto::<tasación>::<id>`: las sube quien tasa y las ven quienes piden tasaciones o miran los leads.
+
+**Límite conocido:** la búsqueda de inspecciones recorre los registros guardados por patente con el filtro de la base y lee, como máximo, las 10 coincidencias; si una patente tuviera muchas inspecciones, solo se muestran las primeras 10.
+
+Código: reglas en `supabase/functions/api/tasaciones-core.js`; servidor en `ventas.ts` (`tasaciones.*`); pantallas en `src/crm-tasaciones.jsx`; el estimador (`TasacionCompra` en `src/App.jsx`) ahora acepta `inicial` y `onResultado`. Pruebas: `tests/tasaciones-core.test.mjs` y `tests/tasaciones-api.test.mjs` (la función real contra una base falsa).
+
 ## Desplegar en un hosting público
 
 Las opciones más simples (tienen plan gratuito y se conectan directo a

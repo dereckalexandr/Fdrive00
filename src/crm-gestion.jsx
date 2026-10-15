@@ -76,7 +76,7 @@ export function FranjaAlertas({ resumen, onVer }) {
   const c = resumen.conteos;
   const partes = [
     [c.sinAtender, "sin atender"], [c.detenidos, "detenidos"], [c.sinAsignar, "sin asignar"],
-    [c.tareasVencidas, "tareas vencidas del equipo"], [c.reservasPorVencer, "reservas por vencer"],
+    [c.tareasVencidas, "tareas vencidas del equipo"], [c.reservasPorVencer, "reservas por vencer"], [c.tasacionesSinTomar, "tasaciones sin tomar"],
   ].filter(([n]) => n > 0);
   if (partes.length === 0) return null;
   return (
@@ -95,6 +95,7 @@ const TIPOS = [
   { id: "sinAsignar", nombre: "Sin asignar", color: "border-violet-400", ayuda: () => "Leads sin ejecutivo (por ejemplo, cuando nadie estaba habilitado para recibirlos)." },
   { id: "tareasVencidas", nombre: "Tareas vencidas", color: "border-orange-400", ayuda: () => "Llamadas y visitas del equipo cuya fecha ya pasó." },
   { id: "reservasPorVencer", nombre: "Reservas por vencer", color: "border-sky-400", ayuda: () => "Reservas que vencen en las próximas 48 horas: decide si se extienden." },
+  { id: "tasacionesSinTomar", nombre: "Tasaciones sin tomar", color: "border-teal-400", ayuda: (c) => `Solicitudes de tasación que llevan ${c.horas_tasacion} h o más en la cola sin que un Tasador las tome.` },
 ];
 
 function Alertas({ api, abrirLead, version, onCambio }) {
@@ -133,7 +134,7 @@ function Alertas({ api, abrirLead, version, onCambio }) {
 
   return (
     <>
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
         {TIPOS.map((t) => (
           <button key={t.id} onClick={() => cambiarTipo(t.id)} className={`text-left bg-white border-2 p-4 ${tipo === t.id ? t.color : "border-stone-200"} hover:border-stone-400`}>
             <p className="text-[11px] uppercase tracking-widest text-stone-400">{t.nombre}</p>
@@ -162,6 +163,7 @@ function Alertas({ api, abrirLead, version, onCambio }) {
               {esLeads && <th className="py-3 px-3 w-8"><input type="checkbox" checked={lista.length > 0 && sel.length === lista.length} onChange={todos} aria-label="Seleccionar todos" /></th>}
               {esLeads && <><th className="py-3 px-3">Cliente</th><th className="py-3 px-3">Ejecutivo</th><th className="py-3 px-3">Etapa</th><th className="py-3 px-3">{tipo === "detenidos" ? "Sin actividad" : "Llegó"}</th><th className="py-3 px-3"></th></>}
               {tipo === "tareasVencidas" && <><th className="py-3 px-3">Tarea</th><th className="py-3 px-3">Cliente</th><th className="py-3 px-3">Ejecutivo</th><th className="py-3 px-3">Venció</th><th className="py-3 px-3"></th></>}
+              {tipo === "tasacionesSinTomar" && <><th className="py-3 px-3">Tasación</th><th className="py-3 px-3">Vehículo</th><th className="py-3 px-3">Cliente</th><th className="py-3 px-3">Pidió</th><th className="py-3 px-3">Espera</th></>}
               {tipo === "reservasPorVencer" && <><th className="py-3 px-3">Vehículo</th><th className="py-3 px-3">Cliente</th><th className="py-3 px-3">Ejecutivo</th><th className="py-3 px-3">Reserva</th><th className="py-3 px-3"></th></>}
             </tr>
           </thead>
@@ -185,6 +187,12 @@ function Alertas({ api, abrirLead, version, onCambio }) {
                   <button onClick={() => abrirLead(t.lead_id)} className={BTN}>Abrir lead</button>{" "}
                   {t.asignado_a && <button onClick={() => setAvisar({ para: t.asignado_a, leadId: t.lead_id, cliente: t.cliente })} className={BTN}>Avisar</button>}
                 </td>
+              </tr>
+            ))}
+            {tipo === "tasacionesSinTomar" && lista.map((t) => (
+              <tr key={t.id} className="border-b border-stone-100">
+                <td className="py-2.5 px-3 font-mono text-xs text-stone-500">{t.folio}</td><td className="py-2.5 px-3 text-stone-900">{t.vehiculo}</td><td className="py-2.5 px-3 text-stone-700">{t.cliente}</td>
+                <td className="py-2.5 px-3 text-stone-700">{t.solicitante}</td><td className="py-2.5 px-3 text-rose-700 whitespace-nowrap">{edadTexto(t.solicitada_en)}</td>
               </tr>
             ))}
             {tipo === "reservasPorVencer" && lista.map((r) => (

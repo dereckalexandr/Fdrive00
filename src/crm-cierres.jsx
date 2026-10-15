@@ -11,7 +11,7 @@
 import React, { useState } from "react";
 import { MODULOS_COMISION, getTramo, etiquetaTramo } from "../supabase/functions/api/comisiones-core.js";
 import { calcularCotizacion, validarCierre, cierreNombre, mesChile, FINANCIERAS } from "../supabase/functions/api/ventas-core.js";
-import { Aprobaciones } from "./crm-cotizaciones.jsx";
+import { Aprobaciones, topeTasado } from "./crm-cotizaciones.jsx";
 import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, fechaCorta, hace, Aviso, Cargando, Tarjeta, Campo, Modal, useCarga, mensajeError } from "./crm-ui.jsx";
 
 export const folioVenta = (n) => `VTA-${String(n || 0).padStart(6, "0")}`;
@@ -23,7 +23,7 @@ const valorTramo = (tipo, rate) => (tipo === "porcentaje" ? pctTxt(rate) : `${cl
 /* =========================================================
    FORMULARIO DE CIERRE
 ========================================================= */
-function FormCierre({ api, lead, cotizacion, reserva, catalogos, onCerrar, onGuardado }) {
+function FormCierre({ api, lead, cotizacion, reserva, catalogos, tope, onCerrar, onGuardado }) {
   const calc = calcularCotizacion({ precioLista: cotizacion.precio_lista, descuento: cotizacion.descuento, parteDePago: cotizacion.parte_pago, financiamiento: cotizacion.financiamiento });
   const [f, setF] = useState({
     precioFinal: cotizacion.precio_final, montoParteDePago: calc.parte || 0, montoFinanciado: calc.montoFinanciar || 0,
@@ -42,6 +42,7 @@ function FormCierre({ api, lead, cotizacion, reserva, catalogos, onCerrar, onGua
     setError("");
     const v = validarCierre({ ...f, financiera: financia ? f.financiera : "" });
     if (!v.ok) { setError(mensajeError({ message: v.error })); return; }
+    if (tope && Number(f.montoParteDePago) > tope) { setError(mensajeError({ message: "parte_pago_excede_tasacion" })); return; }
     setGuardando(true);
     try { onGuardado((await api("cierres.crear", { leadId: lead.id, datos: { ...f, financiera: financia ? f.financiera : "" } })).cierre); }
     catch (e) { setError(mensajeError(e)); }
@@ -60,7 +61,7 @@ function FormCierre({ api, lead, cotizacion, reserva, catalogos, onCerrar, onGua
           <Campo etiqueta="Precio final de venta ($)" ayuda={menosQueCotizacion ? `Es ${clp(Number(cotizacion.precio_final) - precio)} menos que la cotización: el Jefe Local lo verá al aprobar.` : ""}>
             <input type="number" min="1" value={f.precioFinal} onChange={(e) => set("precioFinal", e.target.value)} className={INPUT} />
           </Campo>
-          <Campo etiqueta="Vehículo recibido en parte de pago ($)"><input type="number" min="0" value={f.montoParteDePago} onChange={(e) => set("montoParteDePago", e.target.value)} className={INPUT} /></Campo>
+          <Campo etiqueta="Vehículo recibido en parte de pago ($)" ayuda={tope ? `Máximo según la tasación: ${clp(tope)}.` : ""}><input type="number" min="0" max={tope || undefined} value={f.montoParteDePago} onChange={(e) => set("montoParteDePago", e.target.value)} className={INPUT} /></Campo>
           <Campo etiqueta="Monto financiado ($)"><input type="number" min="0" value={f.montoFinanciado} onChange={(e) => set("montoFinanciado", e.target.value)} className={INPUT} /></Campo>
           {financia && (
             <>
@@ -148,7 +149,7 @@ export function SeccionCierres({ api, lead, datos, catalogos, onCambio, avisar }
           )}
         </div>
       ))}
-      {form && reserva && cotizacion && <FormCierre api={api} lead={lead} cotizacion={cotizacion} reserva={reserva} catalogos={catalogos} onCerrar={() => setForm(false)} onGuardado={async () => { setForm(false); await onCambio(); }} />}
+      {form && reserva && cotizacion && <FormCierre api={api} lead={lead} cotizacion={cotizacion} reserva={reserva} catalogos={catalogos} tope={topeTasado(lead, datos)} onCerrar={() => setForm(false)} onGuardado={async () => { setForm(false); await onCambio(); }} />}
     </div>
   );
 }

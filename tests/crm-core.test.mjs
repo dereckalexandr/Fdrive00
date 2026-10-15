@@ -184,3 +184,21 @@ test("Configuración de alertas: horas sin contacto y días de un lead detenido"
   assert.equal(c.horas_sin_contacto, 4);
   assert.equal(c.dias_detenido, 7);
 });
+
+test("Permisos de tasaciones: el ejecutivo y el jefe las piden, el tasador las realiza", () => {
+  const ids = PERMISOS.map((p) => p.id);
+  assert.ok(ids.includes("tasaciones.pedir") && ids.includes("tasaciones.realizar"));
+  assert.ok(permisosDeRol("ejecutivo", null).includes("tasaciones.pedir"));
+  assert.ok(!permisosDeRol("ejecutivo", null).includes("tasaciones.realizar"));
+  assert.ok(permisosDeRol("jefe_local", null).includes("tasaciones.pedir"));
+  assert.ok(permisosDeRol("tasador", null).includes("tasaciones.realizar"));
+  assert.ok(!permisosDeRol("tasador", null).includes("tasaciones.pedir"));
+  assert.ok(!permisosDeRol("inspector", null).includes("tasaciones.realizar"), "el inspector valoriza piezas, no tasa para el CRM");
+});
+
+test("Configuración: horas para tomar una tasación", () => {
+  assert.equal(validarConfig("horas_tasacion", 8).value, 8);
+  assert.ok(!validarConfig("horas_tasacion", 0).ok);
+  assert.ok(!validarConfig("horas_tasacion", 169).ok);
+  assert.equal(configCompleta({}).horas_tasacion, 8);
+});

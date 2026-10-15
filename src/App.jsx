@@ -18,6 +18,7 @@ import { buildBookmarkletHref } from "./chileautos-bookmarklet.js";
 import { buildPatenteBookmarkletHref } from "./patente-bookmarklet.js";
 import { AdminCrmPanel, PESTANAS_CRM } from "./crm-admin.jsx";
 import { ModuloVentas } from "./crm-ventas.jsx";
+import { ModuloTasaciones } from "./crm-tasaciones.jsx";
 import { LoginPersonal, CambioClaveObligatorio, EstacionTrabajo } from "./crm-estacion.jsx";
 import { photoKey, photoPrefix, makePhotoId, compressImage, collectPhotoIds, diffIds, MAX_PHOTOS_PER_ITEM, MAX_PHOTOS_PER_TASACION } from "./photos.js";
 
@@ -3091,16 +3092,20 @@ function AdminAuthGate({ onSuccess, onExit }) {
 ========================================================= */
 const titleCase = (s) => String(s || "").toLowerCase().replace(/(^|[\s-])\S/g, (c) => c.toUpperCase());
 
-function TasacionCompra() {
-  const [patente, setPatente] = useState("");
-  const [km, setKm] = useState("");
-  const [marca, setMarca] = useState("");
-  const [modelo, setModelo] = useState("");
-  const [anio, setAnio] = useState("");
-  const [version, setVersion] = useState("");
+// `inicial` (opcional): datos del vehículo con que parte, cuando se usa dentro de una tasación del CRM.
+// `onResultado` (opcional): si viene, aparece el botón para guardar el resultado en esa tasación.
+function TasacionCompra({ inicial, onResultado } = {}) {
+  const ini = inicial || {};
+  const [patente, setPatente] = useState(ini.patente ? normalizePatente(ini.patente) : "");
+  const [km, setKm] = useState(ini.km != null ? String(ini.km) : "");
+  const [marca, setMarca] = useState(ini.marca || "");
+  const [modelo, setModelo] = useState(ini.modelo || "");
+  const [anio, setAnio] = useState(ini.anio != null ? String(ini.anio) : "");
+  const [version, setVersion] = useState(ini.version || "");
   const [margenAnio, setMargenAnio] = useState(1);
-  const [transmision, setTransmision] = useState("");
-  const [combustible, setCombustible] = useState("");
+  const [transmision, setTransmision] = useState((TRANSMISIONES.find((t) => t.label === ini.transmision) || {}).value || "");
+  const [combustible, setCombustible] = useState((COMBUSTIBLES.find((c) => c.label === ini.combustible) || {}).value || "");
+  const [resultadoUsado, setResultadoUsado] = useState(false);
   const [margenBruto, setMargenBruto] = useState(MARGEN_BRUTO_DEFECTO);
   const [cav, setCav] = useState({ name: "", data: "" });
   const [cavMsg, setCavMsg] = useState("");
@@ -3216,7 +3221,7 @@ function TasacionCompra() {
         <div className="flex items-start justify-between gap-3 mb-4">
           <div>
             <h3 className="font-serif text-lg text-stone-900">Tasación de compra</h3>
-            <p className="text-xs text-stone-500 mt-0.5">Estima cuánto pagar por un vehículo con los avisos de Chileautos. Nada de esto se guarda.</p>
+            <p className="text-xs text-stone-500 mt-0.5">{onResultado ? "Estima cuánto pagar con los avisos de Chileautos. Al terminar, usa el botón del resultado para guardarlo en la tasación." : "Estima cuánto pagar por un vehículo con los avisos de Chileautos. Nada de esto se guarda."}</p>
           </div>
           <button type="button" onClick={limpiar} className="text-xs text-stone-500 hover:underline shrink-0 py-1">Limpiar</button>
         </div>
@@ -3387,6 +3392,21 @@ function TasacionCompra() {
             <Tarjeta titulo="Precio sugerido de compra" sub={`Precio promedio − margen bruto ${clp(calculo.margenBruto)}`} valor={calculo.compra} destacado />
           </div>
           <p className="text-xs text-stone-500">Estimación referencial a partir de precios de publicación, no de ventas concretadas.</p>
+          {onResultado && (
+            <div className="flex flex-wrap items-center gap-3">
+              <button type="button" onClick={() => {
+                onResultado({
+                  promedio: calculo.promedioPrimeros, publicacion: calculo.publicacion, compra: calculo.compra, margenBruto: calculo.margenBruto,
+                  nAvisos: calculo.primeros.length, nValidos: calculo.validos.length, nDescartados: calculo.descartados.length,
+                  anioMin: filtros.anioMin, anioMax: filtros.anioMax, kmMax: filtros.kmMax, transmision: transLabel || "", combustible: combLabel || "",
+                  url: urlBusqueda || "", capturadaEn: new Date().toISOString(),
+                  avisos: calculo.primeros.map((v) => ({ titulo: v.titulo || v.id, anio: v.anio || null, km: v.km || null, precio: v.precio, href: v.href || null })),
+                });
+                setResultadoUsado(true);
+              }} className="bg-stone-900 text-white px-4 py-2 text-sm hover:bg-stone-800">Guardar este resultado en la tasación</button>
+              {resultadoUsado && <span className="text-xs text-emerald-700">Guardado en la tasación ✓ (recuerda pulsar «Guardar borrador» o «Completar» abajo)</span>}
+            </div>
+          )}
 
           <details className="bg-white border border-stone-200 p-4 text-sm">
             <summary className="cursor-pointer text-stone-700">Ver el detalle del cálculo ({calculo.validos.length} usados, {calculo.descartados.length} descartados)</summary>
@@ -4093,7 +4113,7 @@ function AdminDashboard({ vendors, setVendors, inspectors, setInspectors, onExit
         )}
 
         {tab === "compra" && <TasacionCompra />}
-        {tab.startsWith("crm-") && <AdminCrmPanel tab={tab} />}
+        {tab.startsWith("crm-") && <AdminCrmPanel tab={tab} renderEstimador={(p) => <TasacionCompra {...p} />} />}
 
         {tab === "datos" && (
           <div className="bg-white border border-stone-200 p-5">
@@ -4325,7 +4345,7 @@ function AppRoutes() {
   }
 
   if (me && screen === "estacion") {
-    return <EstacionTrabajo me={me} onAbrir={(modulo) => setScreen(modulo === "compra" ? "compraPersonal" : modulo === "ventas" ? "ventasPersonal" : "inspectorPersonal")} onSalir={exitToLanding} />;
+    return <EstacionTrabajo me={me} onAbrir={(modulo) => setScreen(modulo === "compra" ? "compraPersonal" : modulo === "ventas" ? "ventasPersonal" : modulo === "tasaciones" ? "tasacionesPersonal" : "inspectorPersonal")} onSalir={exitToLanding} />;
   }
 
   if (me && screen === "inspectorPersonal") {
@@ -4344,7 +4364,24 @@ function AppRoutes() {
             <button onClick={() => setScreen("estacion")} className="border border-stone-700 px-3 py-1.5 text-sm text-stone-300 hover:bg-stone-800">Volver</button>
           </div>
         </div>
-        <div className="max-w-6xl mx-auto px-6 mt-6"><ModuloVentas permisos={me.permisos} /></div>
+        <div className="max-w-6xl mx-auto px-6 mt-6"><ModuloVentas permisos={me.permisos} renderEstimador={(p) => <TasacionCompra {...p} />} /></div>
+      </div>
+    );
+  }
+
+  if (me && screen === "tasacionesPersonal") {
+    return (
+      <div className="min-h-screen bg-stone-100 pb-16">
+        <div className="bg-stone-900 text-stone-100">
+          <div className="max-w-6xl mx-auto px-6 py-6 flex items-center justify-between gap-4">
+            <div>
+              <p className="text-xs uppercase tracking-widest text-stone-400 mb-1">{me.nombre}{me.local ? ` · ${me.local.nombre}` : ""}</p>
+              <h1 className="font-serif text-2xl md:text-3xl">Tasaciones</h1>
+            </div>
+            <button onClick={() => setScreen("estacion")} className="border border-stone-700 px-3 py-1.5 text-sm text-stone-300 hover:bg-stone-800">Volver</button>
+          </div>
+        </div>
+        <div className="max-w-6xl mx-auto px-6 mt-6"><ModuloTasaciones permisos={me.permisos} renderEstimador={(p) => <TasacionCompra {...p} />} /></div>
       </div>
     );
   }

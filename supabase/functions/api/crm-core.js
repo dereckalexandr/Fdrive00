@@ -61,6 +61,8 @@ export const PERMISOS = [
   { id: "inspecciones.usar", grupo: "Operación", nombre: "Módulo de inspecciones", disponible: true },
   { id: "tasaciones.usar", grupo: "Operación", nombre: "Módulo de tasaciones (valorizaciones)", disponible: true },
   { id: "tasacion_compra.usar", grupo: "Operación", nombre: "Tasación de compra (Chileautos)", disponible: true },
+  { id: "tasaciones.pedir", grupo: "Operación", nombre: "Pedir la tasación de un vehículo en parte de pago", disponible: true },
+  { id: "tasaciones.realizar", grupo: "Operación", nombre: "Tomar y realizar tasaciones de vehículos", disponible: true },
   { id: "validacion.usar", grupo: "Operación", nombre: "Validar documentación y operaciones", disponible: false },
   { id: "anuncios.gestionar", grupo: "Operación", nombre: "Publicar y mantener avisos", disponible: false },
   { id: "marketing.gestionar", grupo: "Operación", nombre: "Campañas y redes sociales", disponible: false },
@@ -72,10 +74,10 @@ export const PERMISOS_POR_ROL = {
   admin_general: PERMISO_IDS.slice(),
   jefe_local: [
     "usuarios.ver", "reportes.local", "leads.propios", "leads.local", "leads.asignar", "inventario.ver", "inventario.editar",
-    "cotizaciones.crear", "agenda.usar", "comisiones.propias", "comisiones.local", "metas.gestionar", "tasacion_compra.usar",
+    "cotizaciones.crear", "agenda.usar", "comisiones.propias", "comisiones.local", "metas.gestionar", "tasacion_compra.usar", "tasaciones.pedir",
   ],
-  ejecutivo: ["leads.propios", "inventario.ver", "cotizaciones.crear", "agenda.usar", "comisiones.propias"],
-  tasador: ["tasacion_compra.usar", "tasaciones.usar", "inventario.ver"],
+  ejecutivo: ["leads.propios", "inventario.ver", "cotizaciones.crear", "agenda.usar", "comisiones.propias", "tasaciones.pedir"],
+  tasador: ["tasacion_compra.usar", "tasaciones.usar", "inventario.ver", "tasaciones.realizar"],
   inspector: ["inspecciones.usar", "tasaciones.usar"],
   validador: ["validacion.usar", "inventario.ver"],
   anunciante: ["anuncios.gestionar", "inventario.ver"],
@@ -225,6 +227,7 @@ export const CONFIG_DEFECTO = {
   meta_mensual_unidades: 0,
   dias_reserva: 3,
   horas_sin_contacto: 4,
+  horas_tasacion: 8,
   dias_detenido: 7,
   vigencia_cotizacion_dias: 7,
   condiciones_cotizacion: "Cotización sujeta a disponibilidad del vehículo y a la aprobación del financiamiento, si corresponde. El precio puede variar si cambian las condiciones. Válida hasta la fecha indicada.",
@@ -240,9 +243,9 @@ export function validarConfig(clave, valor) {
     if (limpio.length === 0 || limpio.some((v) => v.length > 60)) return { ok: false };
     return { ok: true, value: limpio };
   }
-  if (clave === "horas_sin_contacto" || clave === "dias_detenido") {
+  if (clave === "horas_sin_contacto" || clave === "horas_tasacion" || clave === "dias_detenido") {
     const n = Number(valor);
-    const max = clave === "horas_sin_contacto" ? 168 : 90;
+    const max = clave === "dias_detenido" ? 90 : 168;
     if (!Number.isInteger(n) || n < 1 || n > max) return { ok: false };
     return { ok: true, value: n };
   }

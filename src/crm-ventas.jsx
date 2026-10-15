@@ -16,6 +16,7 @@ import { Inventario, Clientes } from "./crm-inventario.jsx";
 import { SeccionCotizaciones } from "./crm-cotizaciones.jsx";
 import { SeccionCierres, AprobacionesTodo, Ventas, TarjetaComision } from "./crm-cierres.jsx";
 import { Gestion, AvisosDelSupervisor, FranjaAlertas } from "./crm-gestion.jsx";
+import { SeccionTasacion, MisTasaciones, ModuloTasaciones } from "./crm-tasaciones.jsx";
 import {
   INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, useCarga, mensajeError,
 } from "./crm-ui.jsx";
@@ -136,6 +137,7 @@ function LeadFicha({ api, leadId, catalogos, onCerrar, onCambio, onEditar }) {
       </div>
 
       <SeccionCotizaciones api={api} lead={lead} datos={datos} catalogos={catalogos} avisar={setMsg} onCambio={async () => { await recargar(); onCambio(); }} />
+      <SeccionTasacion api={api} lead={lead} datos={datos} catalogos={catalogos} avisar={setMsg} onCambio={async () => { await recargar(); onCambio(); }} />
       <SeccionCierres api={api} lead={lead} datos={datos} catalogos={catalogos} avisar={setMsg} onCambio={async () => { await recargar(); onCambio(); }} />
 
       {puedeEditar && (
@@ -553,6 +555,7 @@ function Inicio({ api, catalogos, abrirLead, irA, version, onCambio }) {
   return (
     <>
       <AvisosDelSupervisor api={api} version={version} abrirLead={abrirLead} />
+      {catalogos.puedePedirTasacion && <MisTasaciones api={api} version={version} abrirLead={abrirLead} />}
       <FranjaAlertas resumen={ge} onVer={() => irA("gestion")} />
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
         {catalogos.puedeAsignar && kpi("Descuentos por aprobar", p.pendientes.length, p.pendientes.length > 0, () => irA("aprobaciones"))}
@@ -619,7 +622,7 @@ function Inicio({ api, catalogos, abrirLead, irA, version, onCambio }) {
 /* =========================================================
    ENTRADA DEL MÓDULO
 ========================================================= */
-export function ModuloVentas({ permisos = [], esAdmin = false }) {
+export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador }) {
   const can = (p) => esAdmin || permisos.includes(p);
   const usaLeads = can("leads.propios") || can("leads.local") || can("leads.asignar");
   const [localSel, setLocalSel] = useState("");
@@ -647,12 +650,13 @@ export function ModuloVentas({ permisos = [], esAdmin = false }) {
   const catalogos = {
     ...cat.datos, puedeAsignar: can("leads.asignar"), veTodo: can("leads.asignar") || can("leads.local"), puedeAgenda: can("agenda.usar") || can("leads.asignar"),
     puedeComision: can("comisiones.propias") || can("comisiones.local") || can("leads.asignar"),
+    puedePedirTasacion: can("tasaciones.pedir") || can("leads.asignar"),
   };
   const opciones = [];
   if (usaLeads) opciones.push(["inicio", "Inicio"], ["leads", "Leads"]);
   if (catalogos.puedeAgenda) opciones.push(["agenda", "Agenda"]);
   if (catalogos.puedeComision) opciones.push(["ventas", "Ventas"]);
-  if (puedeAprobar) opciones.push(["gestion", "Gestión"], ["aprobaciones", "Aprobaciones", pend.datos || 0]);
+  if (puedeAprobar) opciones.push(["gestion", "Gestión"], ["tasaciones", "Tasaciones"], ["aprobaciones", "Aprobaciones", pend.datos || 0]);
   opciones.push(["inventario", "Inventario"]);
   if (usaLeads) opciones.push(["clientes", "Clientes"]);
 
@@ -666,6 +670,7 @@ export function ModuloVentas({ permisos = [], esAdmin = false }) {
       <Pestanas valor={tab} onCambio={setTab} opciones={opciones} />
       {tab === "inicio" && <Inicio api={api} catalogos={catalogos} abrirLead={setLeadAbierto} irA={setTab} version={version} onCambio={subir} />}
       {tab === "leads" && <Leads api={api} catalogos={catalogos} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
+      {tab === "tasaciones" && <ModuloTasaciones api={api} permisos={permisos} esAdmin={esAdmin} renderEstimador={renderEstimador} />}
       {tab === "gestion" && <Gestion api={api} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
       {tab === "ventas" && <Ventas api={api} catalogos={catalogos} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
       {tab === "aprobaciones" && <AprobacionesTodo api={api} version={version} abrirLead={setLeadAbierto} onCambio={subir} />}

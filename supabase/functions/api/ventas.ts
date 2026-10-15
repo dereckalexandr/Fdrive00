@@ -14,9 +14,13 @@ import {
   validarVehiculo, ocultarCosto, validarCliente, validarLead, validarCambioEtapa, elegirAsignado, validarTarea,
   puedeEditarLead, etapaNombre,
   validarCierre, margenVenta, mesChile, esMes, nombreMes, FINANCIERAS,
-  ETAPAS_ABIERTAS, esSinAtender, esDetenido, ultimaActividad, embudoCohorte, rendimientoPorFuente, motivosDePerdida, validarAviso, claseTarea,
+  horasDesde, ETAPAS_ABIERTAS, esSinAtender, esDetenido, ultimaActividad, embudoCohorte, rendimientoPorFuente, motivosDePerdida, validarAviso, claseTarea,
 } from "./ventas-core.js";
 import { tramosEfectivos, calcularProduccion } from "./comisiones-core.js";
+import {
+  folioTasacion, validarSolicitudTasacion, validarTasacionDirecta, validarBorradorTasacion, validarCompletarTasacion, validarTransicionTasacion,
+  topeParteDePago, verificarTopeParteDePago, fusionarParteDePago, metricasTasador, colaTasaciones,
+} from "./tasaciones-core.js";
 
 export type Ctx = {
   sb: any;
@@ -107,6 +111,13 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     const { data, error } = await scoped(sb.from("leads").select("*").eq("id", id)).maybeSingle();
     if (error) throw error;
     return data;
+  }
+  /** Lo máximo que se le puede reconocer al cliente por su vehículo en parte de pago: lo tasado (o null si no hay tasación). */
+  async function topeDeLead(lead: any): Promise<number | null> {
+    const id = lead && lead.parte_pago && lead.parte_pago.tasacion_id;
+    if (!id) return null;
+    const { data } = await sb.from("tasaciones").select("*").eq("id", id).maybeSingle();
+    return topeParteDePago(data);
   }
   const puedeVer = (lead: any) => veTodoElLocal || lead.asignado_a === userId;
   const puedeTocar = (lead: any) => puedeEditarLead({ permisos: ctx.esAdmin ? ["leads.asignar"] : permisos, esAdmin: ctx.esAdmin, usuarioId: userId, lead });
@@ -256,6 +267,257 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     return err("unknown_op");
   }
 
+  /* ---------- tasaciones (Tasador y solicitudes de los ejecutivos) ---------- */
+  if (op.startsWith("tasaciones.")) {
+    const realiza = can("tasaciones.realizar");
+    const puedePedir = can("tasaciones.pedir") || esSupervisor;
+    if (!realiza && !puedePedir && !esSupervisor) return err("forbidden", 403);
+
+    /** Personas activas del local que pueden realizar tasaciones. */
+    async function tasadoresDe(local: string) {
+      const overrides = await ctx.rolePermOverrides();
+      const { data, error } = await sb.from("usuarios").select("id, nombre, roles, permisos_extra, activo, local_id").eq("local_id", local);
+      if (error) throw error;
+      return (data ?? [])
+        .filter((u: any) => u.activo && permisosEfectivos(u.roles ?? [], overrides, u.permisos_extra).includes("tasaciones.realizar"))
+        .map((u: any) => ({ id: u.id, nombre: u.nombre }));
+    }
+    async function cargarTasacion(id: string) {
+      const { data, error } = await scoped(sb.from("tasaciones").select("*").eq("id", id)).maybeSingle();
+      if (error) throw error;
+      return data;
+    }
+    /** ¿Puede esta persona ver la tasación? Quien tasa, el supervisor, quien la pidió o quien ve el lead. */
+    async function veTasacion(t: any) {
+      if (realiza || esSupervisor || (!ctx.esAdmin && t.solicitante_id === userId)) return true;
+      if (!t.lead_id) return false;
+      const l = await cargarLead(t.lead_id);
+      return !!l && puedeVer(l);
+    }
+    /** Agrega los nombres para mostrar (cliente, solicitante, tasador). */
+    async function enriquecer(filas: any[]) {
+      const leads = await porIds("leads", filas.map((t) => t.lead_id));
+      const clientes = await porIds("clientes", leads.map((l: any) => l.cliente_id));
+      const usuarios = await porIds("usuarios", filas.flatMap((t) => [t.solicitante_id, t.tasador_id]));
+      const nombre = (id: string) => (usuarios.find((u: any) => u.id === id) || {}).nombre ?? "";
+      return filas.map(({ fotos, ...t }) => {
+        const l = leads.find((x: any) => x.id === t.lead_id);
+        const cli = l ? (clientes.find((c: any) => c.id === l.cliente_id) || {}).nombre ?? "" : (t.contacto && t.contacto.nombre) || "";
+        return { ...t, fotos: fotos ?? [], folio: folioTasacion(t.numero), cliente: cli, solicitante: nombre(t.solicitante_id), tasador: nombre(t.tasador_id), lead_etapa: l ? l.etapa : null };
+      });
+    }
+    const fallar = (e: any) => fallo(e);
+
+    if (op === "tasaciones.equipo") {
+      if (!esSupervisor) return err("forbidden", 403);
+      const local = await localParaCrear();
+      if (!local) return err("sin_local");
+      return json({ tasadores: await tasadoresDe(local) });
+    }
+
+    if (op === "tasaciones.pedir") {
+      if (!puedePedir) return err("forbidden", 403);
+      const lead = await cargarLead(String(body.leadId ?? ""));
+      if (!lead || !puedeVer(lead)) return err("no_existe", 404);
+      if (!puedeTocar(lead)) return err("forbidden", 403);
+      if (ETAPAS_CERRADAS.includes(lead.etapa)) return err("lead_cerrado");
+      const v = validarSolicitudTasacion(body.datos);
+      if (!v.ok) return err(v.error!);
+      const previas = await sb.from("tasaciones").select("id, estado").eq("lead_id", lead.id);
+      if (previas.error) return fallar(previas.error);
+      if ((previas.data ?? []).some((t: any) => t.estado === "pendiente" || t.estado === "en_proceso")) return err("tasacion_en_curso", 409);
+      const ins = await sb.from("tasaciones").insert({
+        local_id: lead.local_id, tipo: "parte_pago", lead_id: lead.id, solicitante_id: ctx.esAdmin ? null : userId,
+        vehiculo: v.value.vehiculo, patente: v.value.vehiculo.patente, notas_solicitud: v.value.notas, creado_por: userId,
+      }).select().single();
+      if (ins.error) return fallar(ins.error);
+      const t = ins.data;
+      // El vehículo en parte de pago del lead queda con los datos que se pidieron tasar.
+      const vh = v.value.vehiculo;
+      const pp = { ...(lead.parte_pago || {}), tiene: true, patente: vh.patente, marca: vh.marca, modelo: vh.modelo, anio: vh.anio, km: vh.km };
+      await sb.from("leads").update({ parte_pago: pp, actualizado_en: new Date().toISOString() }).eq("id", lead.id);
+      await evento(lead.id, "tasacion", `Tasación ${folioTasacion(t.numero)} pedida por ${userName}: ${vh.marca} ${vh.modelo} ${vh.anio} (${vh.patente})`);
+      await audit(ctx.actor, "tasacion.pedir", "tasacion", t.id, { numero: t.numero, patente: vh.patente, lead_id: lead.id });
+      return json({ tasacion: (await enriquecer([t]))[0] });
+    }
+
+    if (op === "tasaciones.directa") {
+      if (!realiza && !ctx.esAdmin) return err("forbidden", 403);
+      const local = await localParaCrear();
+      if (!local) return err("sin_local");
+      const v = validarTasacionDirecta(body.datos);
+      if (!v.ok) return err(v.error!);
+      const ahora = new Date().toISOString();
+      // Quien la crea la toma de inmediato; la cuenta maestra la deja en la cola para que un Tasador la tome.
+      const ins = await sb.from("tasaciones").insert({
+        local_id: local, tipo: "directa", contacto: v.value.contacto, vehiculo: v.value.vehiculo, patente: v.value.vehiculo.patente, notas_solicitud: v.value.notas,
+        estado: ctx.esAdmin ? "pendiente" : "en_proceso", tasador_id: ctx.esAdmin ? null : userId, tomada_en: ctx.esAdmin ? null : ahora, creado_por: userId,
+      }).select().single();
+      if (ins.error) return fallar(ins.error);
+      await audit(ctx.actor, "tasacion.crear", "tasacion", ins.data.id, { numero: ins.data.numero, patente: v.value.vehiculo.patente, tipo: "directa" });
+      return json({ tasacion: (await enriquecer([ins.data]))[0] });
+    }
+
+    if (op === "tasaciones.list") {
+      const vista = String(body.vista ?? "");
+      let q = scoped(sb.from("tasaciones").select("*").order("solicitada_en", { ascending: false }));
+      const { data, error } = await q;
+      if (error) return fallar(error);
+      let filas: any[] = data ?? [];
+      if (vista === "cola") { if (!realiza && !esSupervisor) return err("forbidden", 403); filas = filas.filter((t) => t.estado === "pendiente"); }
+      else if (vista === "mias") { if (!realiza) return err("forbidden", 403); filas = filas.filter((t) => t.tasador_id === userId && t.estado !== "cancelada"); }
+      else if (vista === "local") { if (!esSupervisor && !realiza) return err("forbidden", 403); if (body.estado) filas = filas.filter((t) => t.estado === String(body.estado)); }
+      else if (vista === "solicitadas") filas = filas.filter((t) => t.solicitante_id === userId);
+      else return err("vista_invalida");
+      // Las canceladas hace tiempo no estorban.
+      const hace60 = Date.now() - 60 * 86_400_000;
+      filas = filas.filter((t) => !(t.estado === "cancelada" && Date.parse(t.actualizado_en) < hace60)).slice(0, 200);
+      return json({ tasaciones: await enriquecer(filas), puedeRealizar: realiza, puedeGestionar: esSupervisor });
+    }
+
+    if (op === "tasaciones.get") {
+      const t = await cargarTasacion(String(body.id ?? ""));
+      if (!t || !(await veTasacion(t))) return err("no_existe", 404);
+      return json({ tasacion: (await enriquecer([t]))[0], puedeEditar: t.estado === "en_proceso" && (t.tasador_id === userId), puedeGestionar: esSupervisor, puedeRealizar: realiza });
+    }
+
+    if (op === "tasaciones.tomar") {
+      if (!realiza || ctx.esAdmin) return err("forbidden", 403);
+      const t = await cargarTasacion(String(body.id ?? ""));
+      if (!t) return err("no_existe", 404);
+      const tr = validarTransicionTasacion(t.estado, "tomar");
+      if (!tr.ok) return err(t.estado === "en_proceso" ? "tasacion_ya_tomada" : tr.error!, 409);
+      const r = await sb.from("tasaciones").update({ estado: "en_proceso", tasador_id: userId, tomada_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }).eq("id", t.id).eq("estado", "pendiente").select().maybeSingle();
+      if (r.error) return fallar(r.error);
+      if (!r.data) return err("tasacion_ya_tomada", 409);
+      if (t.lead_id) await evento(t.lead_id, "tasacion", `${userName} tomó la tasación ${folioTasacion(t.numero)}`);
+      await audit(ctx.actor, "tasacion.tomar", "tasacion", t.id, { numero: t.numero });
+      return json({ tasacion: (await enriquecer([r.data]))[0] });
+    }
+
+    if (op === "tasaciones.liberar" || op === "tasaciones.asignar") {
+      const t = await cargarTasacion(String(body.id ?? ""));
+      if (!t) return err("no_existe", 404);
+      if (!(await veTasacion(t))) return err("no_existe", 404);
+      const asignar = op === "tasaciones.asignar";
+      const tr = validarTransicionTasacion(t.estado, asignar ? "asignar" : "liberar");
+      if (!tr.ok) return err(tr.error!);
+      if (asignar ? !esSupervisor : !(esSupervisor || (realiza && t.tasador_id === userId))) return err("forbidden", 403);
+      let patch: Record<string, unknown>;
+      let texto: string;
+      if (asignar) {
+        const destino = (await tasadoresDe(t.local_id)).find((x: any) => x.id === body.tasadorId);
+        if (!destino) return err("asignado_invalido");
+        patch = { estado: "en_proceso", tasador_id: destino.id, tomada_en: new Date().toISOString() };
+        texto = `Tasación ${folioTasacion(t.numero)} asignada a ${destino.nombre} por ${userName}`;
+      } else {
+        patch = { estado: "pendiente", tasador_id: null, tomada_en: null };
+        texto = `${userName} devolvió la tasación ${folioTasacion(t.numero)} a la cola`;
+      }
+      const { data, error } = await sb.from("tasaciones").update({ ...patch, actualizado_en: new Date().toISOString() }).eq("id", t.id).select().single();
+      if (error) return fallar(error);
+      if (t.lead_id) await evento(t.lead_id, "tasacion", texto);
+      await audit(ctx.actor, asignar ? "tasacion.asignar" : "tasacion.liberar", "tasacion", t.id, { numero: t.numero });
+      return json({ tasacion: (await enriquecer([data]))[0] });
+    }
+
+    if (op === "tasaciones.guardar" || op === "tasaciones.completar") {
+      const t = await cargarTasacion(String(body.id ?? ""));
+      if (!t) return err("no_existe", 404);
+      if (ctx.esAdmin || t.tasador_id !== userId || !realiza) return err("forbidden", 403);
+      const completar = op === "tasaciones.completar";
+      const tr = validarTransicionTasacion(t.estado, completar ? "completar" : "guardar");
+      if (!tr.ok) return err(tr.error!);
+      const b = validarBorradorTasacion(body.borrador);
+      if (!b.ok) return err(b.error!);
+      const patch: Record<string, any> = { ...b.value, actualizado_en: new Date().toISOString() };
+      if (b.value.vehiculo) { patch.patente = b.value.vehiculo.patente; }
+      if (completar) {
+        const fin = validarCompletarTasacion({ valor_compra: patch.valor_compra ?? t.valor_compra, valor_venta: patch.valor_venta ?? t.valor_venta });
+        if (!fin.ok) return err(fin.error!);
+        patch.valor_compra = fin.value.valor_compra;
+        patch.valor_venta = fin.value.valor_venta;
+        patch.estado = "completada";
+        patch.completada_en = new Date().toISOString();
+      }
+      const { data, error } = await sb.from("tasaciones").update(patch).eq("id", t.id).select().single();
+      if (error) return fallar(error);
+      if (completar) {
+        // El valor tasado queda como el valor del vehículo en parte de pago del lead (y como su tope).
+        if (t.lead_id) {
+          const lead = await cargarLead(t.lead_id);
+          if (lead) {
+            const vh = data.vehiculo || {};
+            const pp = { ...(lead.parte_pago || {}), tiene: true, patente: vh.patente, marca: vh.marca, modelo: vh.modelo, anio: vh.anio, km: vh.km, valor: data.valor_compra, tasacion_id: data.id };
+            await sb.from("leads").update({ parte_pago: pp, actualizado_en: new Date().toISOString() }).eq("id", lead.id);
+          }
+          await evento(t.lead_id, "tasacion", `Tasación ${folioTasacion(t.numero)} completada por ${userName}: se reconoce ${dinero(data.valor_compra)} por el vehículo (venta esperada ${dinero(data.valor_venta)}). Las cotizaciones deben usar este valor o uno menor.`);
+        }
+        await audit(ctx.actor, "tasacion.completar", "tasacion", t.id, { numero: t.numero, valor_compra: data.valor_compra, valor_venta: data.valor_venta, lead_id: t.lead_id });
+      }
+      return json({ tasacion: (await enriquecer([data]))[0] });
+    }
+
+    if (op === "tasaciones.cancelar") {
+      const t = await cargarTasacion(String(body.id ?? ""));
+      if (!t) return err("no_existe", 404);
+      if (!(await veTasacion(t))) return err("no_existe", 404);
+      const tr = validarTransicionTasacion(t.estado, "cancelar");
+      if (!tr.ok) return err(tr.error!);
+      const esDuenoDeLaSolicitud = !ctx.esAdmin && t.solicitante_id === userId && t.estado === "pendiente";
+      if (!(esSupervisor || esDuenoDeLaSolicitud || (realiza && t.tasador_id === userId))) return err("forbidden", 403);
+      const motivo = String(body.motivo ?? "").trim().slice(0, 150);
+      if (motivo.length < 3) return err("motivo_requerido");
+      const ahora = new Date().toISOString();
+      const { data, error } = await sb.from("tasaciones").update({ estado: "cancelada", cancelada_en: ahora, motivo_cancelacion: motivo, actualizado_en: ahora }).eq("id", t.id).select().single();
+      if (error) return fallar(error);
+      if (t.lead_id) await evento(t.lead_id, "tasacion", `Tasación ${folioTasacion(t.numero)} cancelada por ${userName}: ${motivo}`);
+      await audit(ctx.actor, "tasacion.cancelar", "tasacion", t.id, { numero: t.numero, motivo });
+      return json({ tasacion: (await enriquecer([data]))[0] });
+    }
+
+    // Inspecciones ya hechas del mismo vehículo (por patente). Solo se devuelven datos del vehículo: nunca los del propietario.
+    if (op === "tasaciones.inspecciones") {
+      if (!realiza && !ctx.esAdmin) return err("forbidden", 403);
+      const pat = String(body.patente ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+      if (pat.length !== 6) return err("patente_invalida");
+      // En la ficha se guarda con puntos y dígito verificador (ej. "ABCD.12-3"): se busca el inicio de la inscripción.
+      const patron = /^[A-Z]{4}/.test(pat) ? `%"inscripcion":"${pat.slice(0, 4)}%${pat.slice(4)}%` : `%"inscripcion":"${pat.slice(0, 2)}%${pat.slice(2)}%`;
+      const r = await sb.from("kv_store").select("key").like("key", "inspeccion::%").ilike("value", patron).limit(10);
+      if (r.error) return fallar(r.error);
+      const out: any[] = [];
+      for (const { key } of r.data ?? []) {
+        const g = await sb.from("kv_store").select("value").eq("key", key).maybeSingle();
+        try {
+          const d = JSON.parse(g.data ? g.data.value : "{}");
+          if (String(d.inscripcion ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "").startsWith(pat)) {
+            out.push({ key, fecha: d.fecha ?? null, inspector: d.inspectorNombre ?? null, patente: pat, marca: d.marca ?? null, modelo: d.modelo ?? null, anio: d.anio ?? null });
+          }
+        } catch (e) { /* registro ilegible: se ignora */ }
+      }
+      out.sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)));
+      return json({ inspecciones: out });
+    }
+
+    if (op === "tasaciones.resumen") {
+      if (!realiza && !esSupervisor) return err("forbidden", 403);
+      const mes = body.mes === undefined ? mesChile() : String(body.mes);
+      if (!esMes(mes)) return err("mes_invalido");
+      const { data, error } = await scoped(sb.from("tasaciones").select("*"));
+      if (error) return fallar(error);
+      const todas: any[] = data ?? [];
+      let cfg;
+      try { cfg = await configNegocio(); } catch (e) { return fallo(e); }
+      const ids = esSupervisor ? Array.from(new Set(todas.map((t) => t.tasador_id).filter(Boolean))) : [userId];
+      const usuarios = await porIds("usuarios", ids);
+      const tasadores = ids.map((id) => ({ id, nombre: (usuarios.find((u: any) => u.id === id) || {}).nombre ?? "", ...metricasTasador(todas, id, mes) }));
+      const cola = colaTasaciones(todas, new Date(), cfg.horas_tasacion);
+      return json({ mes, nombreMes: nombreMes(mes), tasadores, cola: { pendientes: cola.pendientes, masAntiguaHoras: cola.masAntiguaHoras, atrasadas: cola.atrasadas.length }, horasLimite: cfg.horas_tasacion });
+    }
+
+    return err("unknown_op");
+  }
+
   /* Todo lo que sigue exige poder trabajar con leads. */
   if (!usaLeads) return err("forbidden", 403);
 
@@ -348,13 +610,16 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     const cot = await sb.from("cotizaciones").select("*").eq("lead_id", lead.id).order("creado_en", { ascending: false });
     const res = await sb.from("reservas").select("*").eq("lead_id", lead.id).order("creado_en", { ascending: false });
     const cie = await sb.from("cierres").select("*").eq("lead_id", lead.id).order("creado_en", { ascending: false });
+    const tas = await sb.from("tasaciones").select("*").eq("lead_id", lead.id).order("creado_en", { ascending: false });
     const puedeCosto = can("inventario.editar");
+    const tasUsuarios = tas.error ? [] : await porIds("usuarios", (tas.data ?? []).map((t: any) => t.tasador_id));
     const loc = lead.local_id ? await sb.from("locales").select("nombre").eq("id", lead.local_id).maybeSingle() : { data: null };
     return json({
       lead, cliente: cliente ?? null, vehiculo: vehiculo ? ocultarCosto(vehiculo, can("inventario.editar")) : null,
       asignado: asignado ? { id: asignado.id, nombre: asignado.nombre } : null, eventos: ev.data ?? [], tareas: ta.data ?? [], puedeEditar: puedeTocar(lead),
       cotizaciones: cot.error ? [] : cot.data ?? [], reservas: res.error ? [] : res.data ?? [], localNombre: loc.data ? loc.data.nombre : "",
       cierres: cie.error ? [] : (cie.data ?? []).map((c: any) => sinCosto(c, puedeCosto)),
+      tasaciones: tas.error ? [] : (tas.data ?? []).map(({ fotos, ...t }: any) => ({ ...t, folio: folioTasacion(t.numero), tasador: (tasUsuarios.find((u: any) => u.id === t.tasador_id) || {}).nombre ?? "", nFotos: (fotos ?? []).length })),
     });
   }
 
@@ -423,6 +688,10 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       const { data: veh } = await sb.from("vehiculos").select("id, local_id").eq("id", v.value.vehiculo_id).maybeSingle();
       if (!veh || veh.local_id !== lead.local_id) return err("vehiculo_invalido");
     }
+    // El valor del vehículo en parte de pago no puede superar lo tasado, y el vínculo con la tasación se conserva.
+    const tope = verificarTopeParteDePago(v.value.parte_pago, await topeDeLead(lead));
+    if (!tope.ok) return err(tope.error!);
+    v.value.parte_pago = fusionarParteDePago(lead.parte_pago, v.value.parte_pago);
     const { data, error } = await sb.from("leads").update({ ...v.value, actualizado_en: new Date().toISOString() }).eq("id", lead.id).select().single();
     if (error) return fallo(error);
     await evento(lead.id, "nota", "Se actualizaron los datos del lead");
@@ -573,6 +842,9 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     // El precio de lista es siempre el actual del inventario; si cambió y hay descuento, se vuelve a pedir aprobación.
     const v = validarCotizacion(body.datos, veh.precio_lista);
     if (!v.ok) return err(v.error!);
+    // El vehículo en parte de pago no se puede valorar por sobre lo tasado.
+    const tope = verificarTopeParteDePago(v.value.parte_pago, await topeDeLead(lead));
+    if (!tope.ok) return err(tope.error!);
 
     let cfg;
     try { cfg = await configNegocio(); } catch (e) { return fallo(e); }
@@ -820,6 +1092,9 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
 
     const v = validarCierre(body.datos);
     if (!v.ok) return err(v.error!);
+    // Lo que se recibe por el vehículo en parte de pago no puede superar lo tasado.
+    const tope = verificarTopeParteDePago({ tiene: v.value.monto_parte_pago > 0, valor: v.value.monto_parte_pago }, await topeDeLead(lead));
+    if (!tope.ok) return err(tope.error!);
     const costo = veh.costo != null ? Number(veh.costo) : null;
     const ins = await sb.from("cierres").insert({
       ...v.value, local_id: lead.local_id, lead_id: lead.id, cotizacion_id: cot.id, reserva_id: reserva.id, vehiculo_id: veh.id,
@@ -1029,15 +1304,17 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     const tareasVencidas: any[] = (tr.data ?? []).filter((t: any) => claseTarea(t.vence_en, ahora) === "vencida");
     const porVencer: any[] = (rr.data ?? []).filter((r: any) => Date.parse(r.vence_en) - ahora.getTime() <= 48 * 3_600_000);
 
+    const tsr = await scoped(sb.from("tasaciones").select("*").eq("estado", "pendiente"));
+    const tasSinTomar: any[] = tsr.error ? [] : (tsr.data ?? []).filter((t: any) => horasDesde(t.solicitada_en, ahora) >= cfg.horas_tasacion);
     const sinAtender = abiertos.filter((l) => esSinAtender(l, ahora, cfg.horas_sin_contacto));
     const detenidos = abiertos.filter((l) => esDetenido(l, ahora, cfg.dias_detenido));
     const sinAsignar = abiertos.filter((l) => !l.asignado_a);
 
-    const leadsDeTareas = await porIds("leads", [...tareasVencidas, ...porVencer].map((x) => x.lead_id));
+    const leadsDeTareas = await porIds("leads", [...tareasVencidas, ...porVencer, ...tasSinTomar].map((x) => x.lead_id));
     const clientes = await porIds("clientes", [...abiertos, ...leadsDeTareas].map((l: any) => l.cliente_id));
     const vehiculos = await porIds("vehiculos", porVencer.map((r) => r.vehiculo_id));
     const equipoBase = localId ? await elegibles(localId) : [];
-    const usuarios = await porIds("usuarios", [...abiertos.map((l) => l.asignado_a), ...tareasVencidas.map((t) => t.asignado_a), ...equipoBase.map((e: any) => e.id)]);
+    const usuarios = await porIds("usuarios", [...abiertos.map((l) => l.asignado_a), ...tareasVencidas.map((t) => t.asignado_a), ...equipoBase.map((e: any) => e.id), ...tasSinTomar.map((t) => t.solicitante_id)]);
     const nombreDe = (id: string) => (usuarios.find((u: any) => u.id === id) || {}).nombre ?? "";
     const clienteDe = (id: string) => (clientes.find((c: any) => c.id === id) || {}).nombre ?? "";
     const fila = (l: any) => ({ id: l.id, cliente: clienteDe(l.cliente_id), ejecutivo: l.asignado_a ? nombreDe(l.asignado_a) : "", asignado_a: l.asignado_a, etapa: l.etapa, fuente: l.fuente, creado_en: l.creado_en, ultima_actividad: ultimaActividad(l) });
@@ -1054,8 +1331,8 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     })).filter((e) => e.id !== null || e.abiertos > 0).sort((a, b) => (a.id === null ? -1 : b.id === null ? 1 : a.nombre.localeCompare(b.nombre)));
 
     return json({
-      config: { horas_sin_contacto: cfg.horas_sin_contacto, dias_detenido: cfg.dias_detenido },
-      conteos: { abiertos: abiertos.length, sinAtender: sinAtender.length, detenidos: detenidos.length, sinAsignar: sinAsignar.length, tareasVencidas: tareasVencidas.length, reservasPorVencer: porVencer.length },
+      config: { horas_sin_contacto: cfg.horas_sin_contacto, dias_detenido: cfg.dias_detenido, horas_tasacion: cfg.horas_tasacion },
+      conteos: { abiertos: abiertos.length, sinAtender: sinAtender.length, detenidos: detenidos.length, sinAsignar: sinAsignar.length, tareasVencidas: tareasVencidas.length, reservasPorVencer: porVencer.length, tasacionesSinTomar: tasSinTomar.length },
       sinAtender: tope(sinAtender).map(fila),
       detenidos: tope(detenidos).map(fila),
       sinAsignar: tope(sinAsignar).map(fila),
@@ -1067,6 +1344,11 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
         const l = leadsDeTareas.find((x: any) => x.id === r.lead_id);
         const v = vehiculos.find((x: any) => x.id === r.vehiculo_id) || {};
         return { id: r.id, lead_id: r.lead_id, monto: r.monto, vence_en: r.vence_en, vehiculo: v.marca ? `${v.marca} ${v.modelo} ${v.anio} · ${v.patente}` : "", cliente: l ? clienteDe(l.cliente_id) : "", ejecutivo: l && l.asignado_a ? nombreDe(l.asignado_a) : "" };
+      }),
+      tasacionesSinTomar: tope(tasSinTomar).map((t) => {
+        const l = leadsDeTareas.find((x: any) => x.id === t.lead_id);
+        const vh = t.vehiculo || {};
+        return { id: t.id, lead_id: t.lead_id, folio: folioTasacion(t.numero), vehiculo: `${vh.marca ?? ""} ${vh.modelo ?? ""} ${vh.anio ?? ""} · ${vh.patente ?? ""}`.trim(), cliente: l ? clienteDe(l.cliente_id) : (t.contacto && t.contacto.nombre) || "", solicitante: nombreDe(t.solicitante_id), solicitada_en: t.solicitada_en };
       }),
       equipo,
     });

@@ -11,6 +11,7 @@ void test; void assert;
 /* ---------- base falsa ---------- */
 let contadorCotizaciones = 0;
 let contadorCierres = 0;
+let contadorTasaciones = 0;
 const DEFAULTS = {
   usuarios: () => ({ id: randomUUID(), comision: {}, activo: true, debe_cambiar_clave: true, roles: [], permisos_extra: { otorgar: [], quitar: [] },
     email: null, telefono: null, local_id: null, ultimo_acceso: null, creado_en: new Date().toISOString() }),
@@ -20,6 +21,7 @@ const DEFAULTS = {
   leads: () => ({ id: randomUUID(), etapa: "nuevo", tipo: "venta", parte_pago: {}, financiamiento: {}, ultimo_contacto: null, motivo_perdida: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
   lead_eventos: () => ({ id: Math.floor(Math.random() * 1e9), creado_en: new Date().toISOString() }),
   cotizaciones: () => ({ id: randomUUID(), numero: ++contadorCotizaciones, estado: "vigente", descuento: 0, aprobado_por: null, aprobado_en: null, motivo_rechazo: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
+  tasaciones: () => ({ id: randomUUID(), numero: ++contadorTasaciones, estado: "pendiente", tipo: "parte_pago", tasador_id: null, contacto: {}, estimacion: {}, inspeccion: {}, fotos: [], valor_compra: null, valor_venta: null, observaciones: null, solicitada_en: new Date().toISOString(), tomada_en: null, completada_en: null, cancelada_en: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
   avisos: () => ({ id: randomUUID(), leido_en: null, creado_en: new Date().toISOString() }),
   cierres: () => ({ id: randomUUID(), numero: ++contadorCierres, estado: "pendiente", mes: null, aprobado_por: null, aprobado_en: null, motivo_rechazo: null, anulado_por: null, anulado_en: null, motivo_anulacion: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
   reservas: () => ({ id: randomUUID(), estado: "activa", motivo: null, cerrado_en: null, creado_en: new Date().toISOString() }),
@@ -28,12 +30,27 @@ const DEFAULTS = {
 };
 const UNICOS = { vehiculos: ["patente"], usuarios: ["rut"], locales: ["nombre"], roles_permisos: ["rol"], config_negocio: ["clave"], kv_store: ["key"] };
 
+/** Convierte un patrón LIKE/ILIKE de SQL (% = cualquier texto, _ = una letra, \ escapa) a una expresión regular. */
+function patronARegex(patron, insensible) {
+  const BARRA = String.fromCharCode(92);
+  const ESPECIALES = ".*+?^${}()|[]" + BARRA;
+  let fuente = "";
+  for (let i = 0; i < patron.length; i++) {
+    const c = patron[i];
+    if (c === BARRA && i + 1 < patron.length) { const n = patron[++i]; fuente += ESPECIALES.includes(n) ? BARRA + n : n; }
+    else if (c === "%") fuente += ".*";
+    else if (c === "_") fuente += ".";
+    else fuente += ESPECIALES.includes(c) ? BARRA + c : c;
+  }
+  return new RegExp("^" + fuente + "$", insensible ? "is" : "s");
+}
+
 export function crearBaseFalsa() {
-  const tablas = { usuarios: [], locales: [], roles_permisos: [], bitacora: [], config_negocio: [], kv_store: [], vehiculos: [], clientes: [], leads: [], lead_eventos: [], tareas: [], cotizaciones: [], reservas: [], cierres: [], avisos: [] };
+  const tablas = { usuarios: [], locales: [], roles_permisos: [], bitacora: [], config_negocio: [], kv_store: [], vehiculos: [], clientes: [], leads: [], lead_eventos: [], tareas: [], cotizaciones: [], reservas: [], cierres: [], avisos: [], tasaciones: [] };
   const consultas = [];
 
   function builder(nombre) {
-    const st = { op: "select", filtros: [], payload: null, devolver: false, uno: null, opts: {}, orden: null, rango: null, like: null };
+    const st = { op: "select", filtros: [], payload: null, devolver: false, uno: null, opts: {}, orden: null, rango: null, likes: [] };
     const b = {
       select(_c, opts) { if (st.op !== "select") st.devolver = true; st.opts = opts || {}; return b; },
       insert(p) { st.op = "insert"; st.payload = p; return b; },
@@ -45,7 +62,8 @@ export function crearBaseFalsa() {
       limit(n) { st.limite = n; return b; },
       gte(c, v) { st.filtros.push([c, (x) => x !== null && x !== undefined && x >= v]); return b; },
       lt(c, v) { st.filtros.push([c, (x) => x !== null && x !== undefined && x < v]); return b; },
-      like(c, p) { st.like = [c, p]; return b; },
+      like(c, p) { st.likes.push([c, patronARegex(p, false)]); return b; },
+      ilike(c, p) { st.likes.push([c, patronARegex(p, true)]); return b; },
       order(c, o) { st.orden = [c, o && o.ascending === false ? -1 : 1]; return b; },
       range(a, z) { st.rango = [a, z]; return b; },
       maybeSingle() { st.uno = "maybe"; return b; },
@@ -73,7 +91,7 @@ export function crearBaseFalsa() {
         T.length = 0; T.push(...quedan);
       } else {
         filas = T.filter(coincide);
-        if (st.like) { const pre = st.like[1].replace(/%$/, "").replace(/\\(.)/g, "$1"); filas = filas.filter((f) => String(f[st.like[0]]).startsWith(pre)); }
+        for (const [col, re] of st.likes) filas = filas.filter((f) => re.test(String(f[col])));
         if (st.orden) filas = [...filas].sort((a, z) => (a[st.orden[0]] > z[st.orden[0]] ? 1 : -1) * st.orden[1]);
       }
       filas = filas.map((f) => structuredClone(f)); // como la base real: devuelve copias, no las filas guardadas

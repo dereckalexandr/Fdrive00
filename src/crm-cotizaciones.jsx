@@ -20,6 +20,13 @@ export const folio = (n) => `COT-${String(n || 0).padStart(6, "0")}`;
 const diaChile = (iso) => new Date(iso).toLocaleDateString("en-CA", { timeZone: "America/Santiago" });
 const fechaDia = (iso) => new Date(iso).toLocaleDateString("es-CL", { day: "2-digit", month: "2-digit", year: "2-digit", timeZone: "America/Santiago" });
 
+/** Valor máximo que se le puede reconocer al cliente por su vehículo: el de su tasación completada (o null si no hay). */
+export function topeTasado(lead, datos) {
+  const id = lead.parte_pago && lead.parte_pago.tasacion_id;
+  const t = id && (datos.tasaciones || []).find((x) => x.id === id && x.estado === "completada");
+  return t ? Number(t.valor_compra) : null;
+}
+
 /** Genera el PDF de una cotización y lo descarga. Las fotos se leen del almacenamiento (hasta 2). */
 export async function descargarCotizacionPdf(cot, { cliente, ejecutivo, local, condiciones }) {
   const snap = cot.vehiculo_snapshot || {};
@@ -43,7 +50,7 @@ export async function descargarCotizacionPdf(cot, { cliente, ejecutivo, local, c
 /* =========================================================
    FORMULARIO DE COTIZACIÓN
 ========================================================= */
-function FormCotizacion({ api, lead, cotizacion, catalogos, onCerrar, onGuardado }) {
+function FormCotizacion({ api, lead, cotizacion, catalogos, tope, onCerrar, onGuardado }) {
   const editando = !!cotizacion;
   const { datos: inv } = useCarga(() => api("inventario.list"), [api]);
   const pp0 = (cotizacion ? cotizacion.parte_pago : lead.parte_pago) || {};
@@ -69,6 +76,7 @@ function FormCotizacion({ api, lead, cotizacion, catalogos, onCerrar, onGuardado
     if (!veh) { setError("Elige el vehículo que se cotiza."); return; }
     const v = validarCotizacion(datos, veh.precio_lista);
     if (!v.ok) { setError(mensajeError({ message: v.error })); return; }
+    if (tope && tienePP && Number(pp.valor) > tope) { setError(mensajeError({ message: "parte_pago_excede_tasacion" })); return; }
     setGuardando(true);
     try { onGuardado((await api("cotizaciones.save", { leadId: lead.id, id: cotizacion ? cotizacion.id : undefined, vehiculoId, datos })).cotizacion); }
     catch (e) { setError(mensajeError(e)); }
@@ -103,7 +111,7 @@ function FormCotizacion({ api, lead, cotizacion, catalogos, onCerrar, onGuardado
             <Campo etiqueta="Modelo"><input value={pp.modelo} onChange={(e) => setPp({ ...pp, modelo: e.target.value })} className={INPUT} /></Campo>
             <Campo etiqueta="Año"><input type="number" value={pp.anio} onChange={(e) => setPp({ ...pp, anio: e.target.value })} className={INPUT} /></Campo>
             <Campo etiqueta="Kilometraje"><input type="number" value={pp.km} onChange={(e) => setPp({ ...pp, km: e.target.value })} className={INPUT} /></Campo>
-            <Campo etiqueta="Valor que se le reconoce ($)"><input type="number" value={pp.valor} onChange={(e) => setPp({ ...pp, valor: e.target.value })} className={INPUT} /></Campo>
+            <Campo etiqueta="Valor que se le reconoce ($)" ayuda={tope ? `Máximo según la tasación: ${clp(tope)}. Para subirlo, pide una nueva tasación.` : ""}><input type="number" max={tope || undefined} value={pp.valor} onChange={(e) => setPp({ ...pp, valor: e.target.value })} className={INPUT} /></Campo>
           </div>
         )}
         <label className="flex items-center gap-2 text-sm text-stone-800 mt-4"><input type="checkbox" checked={quiereFin} onChange={(e) => setQuiereFin(e.target.checked)} /> Necesita financiamiento</label>
@@ -269,7 +277,7 @@ export function SeccionCotizaciones({ api, lead, datos, catalogos, onCambio, avi
         );
       })}
 
-      {form && <FormCotizacion api={api} lead={lead} cotizacion={form === "nueva" ? null : form} catalogos={catalogos} onCerrar={() => setForm(null)} onGuardado={async () => { setForm(null); await onCambio(); }} />}
+      {form && <FormCotizacion api={api} lead={lead} cotizacion={form === "nueva" ? null : form} catalogos={catalogos} tope={topeTasado(lead, datos)} onCerrar={() => setForm(null)} onGuardado={async () => { setForm(null); await onCambio(); }} />}
       {reservando && <FormReserva api={api} cotizacion={reservando} catalogos={catalogos} onCerrar={() => setReservando(null)} onGuardado={async () => { setReservando(null); await onCambio(); }} />}
     </div>
   );
