@@ -418,6 +418,34 @@ Hasta que se ejecute el SQL el resto sigue funcionando; pedir o registrar inspec
 
 Código: reglas en `supabase/functions/api/inspecciones-core.js`; servidor en `ventas.ts` (`inspecciones.*`); pantallas en `src/crm-inspecciones.jsx` (y el enganche con el checklist en `InspectorDashboard`, `src/App.jsx`). Pruebas: `tests/inspecciones-core.test.mjs` y `tests/inspecciones-api.test.mjs` (la función real contra una base falsa).
 
+## CRM · Entrega 6: perfil del Validador
+
+**Instalar (una sola vez, después de `supabase-crm-inspecciones.sql`):**
+1. Supabase → *SQL Editor* → pegar `supabase-crm-validaciones.sql` → *Run*. Crea las tablas `validaciones` y `validacion_docs` (RLS activado, sin políticas). Se puede repetir sin riesgo.
+2. Redesplegar la función: `node scripts/deploy-api.mjs`.
+Hasta que se ejecute el SQL el resto sigue funcionando y las ventas se aprueban como antes.
+
+**Permisos** (pestaña *Permisos*): `validacion.usar` (ahora disponible: ver el módulo) y `validacion.realizar` (tomar y revisar documentos; el Validador lo trae por defecto). *Si antes personalizaste los permisos del rol Validador, activa `validacion.realizar` ahí.*
+
+**Revisión automática por etapa** (no se pide a mano):
+- **Cierre de venta**: al pedir el cierre se crea una validación con sus documentos: los 5 del vehículo (padrón/CAV, permiso de circulación, revisión técnica, SOAP, multas y prendas) y los del cliente (cédula, domicilio, comprobante de pago); con financiamiento se suman renta y solicitud de crédito, y con parte de pago, los documentos de ese vehículo.
+- **Vehículo nuevo en el inventario**: se crea la validación de sus 5 documentos. Cuando queda aprobada, **se reutiliza** en la venta de ese vehículo (esos documentos ya aparecen aprobados y no se vuelven a pedir).
+- **Compra directa** (tasación directa completada): documentos del vehículo, cédula del vendedor, contrato de compraventa y comprobante de pago (opcional). Hoy es informativa: el módulo de compras llegará más adelante.
+
+**Cola y revisión:** el Validador toma la validación de la cola (o el supervisor se la asigna, reasigna o la devuelve a la cola). Solo quien la tomó revisa. Por cada documento: **Aprobar** (exige al menos un archivo), **Observar** (falta algo; con motivo), **Rechazar** (con motivo) o **No aplica** (con motivo). Cada documento admite hasta 3 archivos (foto JPG/PNG o PDF de hasta 4 MB; las fotos se reducen en el dispositivo). Quien trabaja la venta (o el vehículo, o la compra) sube la corrección y el documento **vuelve a revisión** solo. Un documento aprobado ya no se modifica. El estado de la validación sale de sus documentos: *Por tomar → En revisión → Con observaciones / Rechazada → Aprobada* (cuando todos los requeridos están aprobados o no aplican).
+
+**Bloqueo de la venta (lo hace cumplir el servidor):** si el local tiene al menos un Validador activo, el Jefe Local **no puede aprobar un cierre de venta** mientras su validación no esté aprobada (*"Los documentos de esta venta aún no están validados"*). Cuando el supervisor cierra su propia venta tampoco se aprueba sola: espera la validación. Los cierres pedidos antes de instalar esto reciben su validación al intentar aprobarlos. **Si el local no tiene ningún Validador, nada se frena** (para no dejar ventas atascadas). Una venta retirada, rechazada o anulada deja de aparecer en la cola de validación.
+
+**Seguimiento:** pestaña *Resumen* con la cola, validaciones aprobadas en el mes, tiempo medio (desde que se pidió hasta que quedó aprobada), abiertas y con observaciones de cada Validador (sin comisión por ahora). **Alerta en el panel de gestión:** *Validaciones sin tomar* — llevan **8 horas** o más en la cola (se cambia en *Configuración → Alertas del panel de gestión*). Los pasos importantes quedan en el historial del lead y en la bitácora.
+
+**Dónde se usa:** el Validador, en la tarjeta **Validaciones** de su estación; el Ejecutivo, en la ficha del lead (*Validación de documentos de la venta*, donde sube las correcciones); quien edita el inventario, en la ficha del vehículo; el Tasador, en la tasación directa; el supervisor y la cuenta maestra, en la pestaña **Validaciones** dentro de Ventas.
+
+**Privacidad de los archivos:** se guardan como `dval::<validación>::<archivo>` en la base (la clave incluye el id de la validación, imposible de adivinar). El servidor decide quién puede registrar un archivo en cada documento; guardar o leer el contenido lo pueden hacer, a nivel de base, quienes trabajan leads, inventario, tasaciones o validaciones de su local. Para cédulas y documentos personales, limita el permiso `leads.local` (Marketing) si no corresponde que los vea.
+
+**Límites conocidos:** los archivos de una corrección que se descarta a medias pueden quedar sueltos sin uso. Los documentos de una venta no se copian al vehículo (solo del vehículo hacia la venta). Hasta que exista el módulo de Compras y Consignaciones, esas validaciones no bloquean nada.
+
+Código: reglas en `supabase/functions/api/validaciones-core.js`; servidor en `ventas.ts` (`validacion.*` y los enganches en `inventario.save`, `tasaciones.completar`, `cierres.crear` y `cierres.aprobar`); pantallas en `src/crm-validaciones.jsx`. Pruebas: `tests/validaciones-core.test.mjs` y `tests/validaciones-api.test.mjs` (la función real contra una base falsa).
+
 ## Desplegar en un hosting público
 
 Las opciones más simples (tienen plan gratuito y se conectan directo a

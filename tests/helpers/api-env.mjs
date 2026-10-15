@@ -13,6 +13,7 @@ let contadorCotizaciones = 0;
 let contadorCierres = 0;
 let contadorTasaciones = 0;
 let contadorInspecciones = 0;
+let contadorValidaciones = 0;
 const DEFAULTS = {
   usuarios: () => ({ id: randomUUID(), comision: {}, activo: true, debe_cambiar_clave: true, roles: [], permisos_extra: { otorgar: [], quitar: [] },
     email: null, telefono: null, local_id: null, ultimo_acceso: null, creado_en: new Date().toISOString() }),
@@ -24,6 +25,8 @@ const DEFAULTS = {
   cotizaciones: () => ({ id: randomUUID(), numero: ++contadorCotizaciones, estado: "vigente", descuento: 0, aprobado_por: null, aprobado_en: null, motivo_rechazo: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
   tasaciones: () => ({ id: randomUUID(), numero: ++contadorTasaciones, estado: "pendiente", tipo: "parte_pago", tasador_id: null, contacto: {}, estimacion: {}, inspeccion: {}, fotos: [], valor_compra: null, valor_venta: null, observaciones: null, solicitada_en: new Date().toISOString(), tomada_en: null, completada_en: null, cancelada_en: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
   inspecciones: () => ({ id: randomUUID(), numero: ++contadorInspecciones, estado: "pendiente", origen: "lead", inspector_id: null, inspeccion_key: null, resultado: {}, fotos: [], vehiculo: {}, solicitada_en: new Date().toISOString(), tomada_en: null, completada_en: null, cancelada_en: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
+  validaciones: () => ({ id: randomUUID(), numero: ++contadorValidaciones, estado: "pendiente", validador_id: null, sujeto: {}, solicitada_en: new Date().toISOString(), tomada_en: null, resuelta_en: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
+  validacion_docs: () => ({ id: randomUUID(), estado: "pendiente", comentario: null, archivos: [], requerido: true, grupo: "vehiculo", revisado_por: null, revisado_en: null, orden: 0, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
   avisos: () => ({ id: randomUUID(), leido_en: null, creado_en: new Date().toISOString() }),
   cierres: () => ({ id: randomUUID(), numero: ++contadorCierres, estado: "pendiente", mes: null, aprobado_por: null, aprobado_en: null, motivo_rechazo: null, anulado_por: null, anulado_en: null, motivo_anulacion: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
   reservas: () => ({ id: randomUUID(), estado: "activa", motivo: null, cerrado_en: null, creado_en: new Date().toISOString() }),
@@ -48,7 +51,7 @@ function patronARegex(patron, insensible) {
 }
 
 export function crearBaseFalsa() {
-  const tablas = { usuarios: [], locales: [], roles_permisos: [], bitacora: [], config_negocio: [], kv_store: [], vehiculos: [], clientes: [], leads: [], lead_eventos: [], tareas: [], cotizaciones: [], reservas: [], cierres: [], avisos: [], tasaciones: [], inspecciones: [] };
+  const tablas = { usuarios: [], locales: [], roles_permisos: [], bitacora: [], config_negocio: [], kv_store: [], vehiculos: [], clientes: [], leads: [], lead_eventos: [], tareas: [], cotizaciones: [], reservas: [], cierres: [], avisos: [], tasaciones: [], inspecciones: [], validaciones: [], validacion_docs: [] };
   const consultas = [];
 
   function builder(nombre) {
@@ -78,7 +81,11 @@ export function crearBaseFalsa() {
       const T = tablas[nombre];
       if (!T) return { data: null, error: { code: "42P01", message: `relation "${nombre}" does not exist` } };
       let filas = [];
-      if (st.op === "insert" || st.op === "upsert") {
+      if (st.op === "insert" && Array.isArray(st.payload)) {
+        // Varias filas a la vez (como la base real).
+        filas = st.payload.map((p) => ({ ...(DEFAULTS[nombre] ? DEFAULTS[nombre]() : {}), ...p }));
+        T.push(...filas);
+      } else if (st.op === "insert" || st.op === "upsert") {
         const nuevo = { ...(DEFAULTS[nombre] ? DEFAULTS[nombre]() : {}), ...st.payload };
         const claves = UNICOS[nombre] || [];
         const dup = T.find((f) => claves.some((c) => String(f[c]).toLowerCase() === String(nuevo[c]).toLowerCase()));

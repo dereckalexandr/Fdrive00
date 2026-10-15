@@ -18,6 +18,7 @@ import { SeccionCierres, AprobacionesTodo, Ventas, TarjetaComision } from "./crm
 import { Gestion, AvisosDelSupervisor, FranjaAlertas } from "./crm-gestion.jsx";
 import { SeccionTasacion, MisTasaciones, ModuloTasaciones } from "./crm-tasaciones.jsx";
 import { SeccionInspeccion, ModuloInspecciones } from "./crm-inspecciones.jsx";
+import { SeccionValidacion, ModuloValidaciones } from "./crm-validaciones.jsx";
 import {
   INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, useCarga, mensajeError,
 } from "./crm-ui.jsx";
@@ -143,6 +144,7 @@ function LeadFicha({ api, leadId, catalogos, onCerrar, onCambio, onEditar }) {
         <SeccionInspeccion api={api} origen={{ tipo: "lead", id: lead.id }} cerrado={lead.etapa === "ganado" || lead.etapa === "perdido" || !puedeEditar}
           vehiculo={pp.tiene && pp.patente ? { patente: pp.patente, marca: pp.marca, modelo: pp.modelo, anio: pp.anio, km: pp.km } : vehiculo ? { patente: vehiculo.patente, marca: vehiculo.marca, modelo: vehiculo.modelo, anio: vehiculo.anio, km: vehiculo.km } : {}} />
       )}
+      <SeccionValidacion api={api} origen={{ tipo: "lead", id: lead.id }} titulo="Validación de documentos de la venta" version={datos.cierres.length} />
       <SeccionCierres api={api} lead={lead} datos={datos} catalogos={catalogos} avisar={setMsg} onCambio={async () => { await recargar(); onCambio(); }} />
 
       {puedeEditar && (
@@ -664,6 +666,7 @@ export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador }
   if (catalogos.puedeComision) opciones.push(["ventas", "Ventas"]);
   if (puedeAprobar) opciones.push(["gestion", "Gestión"], ["tasaciones", "Tasaciones"], ["aprobaciones", "Aprobaciones", pend.datos || 0]);
   if (catalogos.puedeInspecciones) opciones.push(["inspecciones", "Inspecciones"]);
+  if (puedeAprobar) opciones.push(["validaciones", "Validaciones"]);
   opciones.push(["inventario", "Inventario"]);
   if (usaLeads) opciones.push(["clientes", "Clientes"]);
 
@@ -678,6 +681,7 @@ export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador }
       {tab === "inicio" && <Inicio api={api} catalogos={catalogos} abrirLead={setLeadAbierto} irA={setTab} version={version} onCambio={subir} />}
       {tab === "leads" && <Leads api={api} catalogos={catalogos} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
       {tab === "tasaciones" && <ModuloTasaciones api={api} permisos={permisos} esAdmin={esAdmin} renderEstimador={renderEstimador} />}
+      {tab === "validaciones" && <ModuloValidaciones api={api} permisos={permisos} esAdmin={esAdmin} />}
       {tab === "inspecciones" && <ModuloInspecciones api={api} permisos={permisos} esAdmin={esAdmin} />}
       {tab === "gestion" && <Gestion api={api} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
       {tab === "ventas" && <Ventas api={api} catalogos={catalogos} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}

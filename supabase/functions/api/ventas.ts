@@ -23,6 +23,10 @@ import {
 } from "./tasaciones-core.js";
 
 import {
+  folioValidacion, validarRevision, validarArchivo, MAX_ARCHIVOS_DOC, checklistPara, estadoDeValidacion, progreso, docsReutilizables,
+  colaValidaciones, metricasValidador, validarTransicionValidacion, ESTADOS_ABIERTOS,
+} from "./validaciones-core.js";
+import {
   folioInspeccion, VEREDICTOS, validarSolicitudInspeccion, validarReprogramacion, validarResultadoInspeccion, claveEsDe,
   validarTransicionInspeccion, idDeClave, ordenarAgenda, hayChoque, metricasInspector, colaInspecciones,
 } from "./inspecciones-core.js";
@@ -127,6 +131,40 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
   const puedeVer = (lead: any) => veTodoElLocal || lead.asignado_a === userId;
   const puedeTocar = (lead: any) => puedeEditarLead({ permisos: ctx.esAdmin ? ["leads.asignar"] : permisos, esAdmin: ctx.esAdmin, usuarioId: userId, lead });
 
+
+  /* ---------- validaciones: creación automática y exigencia ---------- */
+  /** ¿Hay al menos un Validador activo en el local? Si no, ninguna aprobación se frena esperando una validación. */
+  async function hayValidadores(local: string) {
+    const overrides = await ctx.rolePermOverrides();
+    const { data, error } = await sb.from("usuarios").select("id, roles, permisos_extra, activo, local_id").eq("local_id", local);
+    if (error) throw error;
+    return (data ?? []).some((u: any) => u.activo && permisosEfectivos(u.roles ?? [], overrides, u.permisos_extra).includes("validacion.realizar"));
+  }
+  /** Crea una validación con su lista de documentos (reutiliza los del vehículo ya aprobados). null si las tablas aún no existen. */
+  async function crearValidacion(p: { tipo: string; local_id: string; cierre_id?: string; lead_id?: string | null; vehiculo_id?: string | null; tasacion_id?: string | null; sujeto: Record<string, unknown>; opciones?: { conFinanciamiento?: boolean; conParteDePago?: boolean } }) {
+    try {
+      const ins = await sb.from("validaciones").insert({
+        local_id: p.local_id, tipo: p.tipo, cierre_id: p.cierre_id ?? null, lead_id: p.lead_id ?? null, vehiculo_id: p.vehiculo_id ?? null,
+        tasacion_id: p.tasacion_id ?? null, sujeto: p.sujeto, creado_por: userId,
+      }).select().single();
+      if (ins.error) { if (ctx.isMissingTable(ins.error)) return null; throw ins.error; }
+      const v = ins.data;
+      let reutil: Record<string, any> = {};
+      if (p.tipo !== "vehiculo" && p.vehiculo_id) {
+        const o = await sb.from("validaciones").select("*").eq("vehiculo_id", p.vehiculo_id).eq("tipo", "vehiculo").eq("estado", "aprobada");
+        const origen = (o.data ?? [])[0];
+        if (origen) reutil = docsReutilizables(await enLotes("validacion_docs", "validacion_id", [origen.id]), origen.id);
+      }
+      const docs = checklistPara(p.tipo, p.opciones).map((d, i) => ({ validacion_id: v.id, ...d, orden: i, ...(reutil[d.clave] ?? {}) }));
+      const di = await sb.from("validacion_docs").insert(docs);
+      if (di.error) throw di.error;
+      const estado = estadoDeValidacion(docs, false);
+      if (estado !== v.estado) { const u = await sb.from("validaciones").update({ estado, resuelta_en: estado === "aprobada" ? new Date().toISOString() : null }).eq("id", v.id).select().single(); return u.data ?? v; }
+      return v;
+    } catch (e) { console.error("crearValidacion:", (e as any)?.message ?? e); return null; }
+  }
+  const sujetoDeVehiculo = (v: any, extra: Record<string, unknown> = {}) => ({ patente: v.patente, marca: v.marca, modelo: v.modelo, anio: v.anio, ...extra });
+
   const usaLeads = can("leads.propios") || can("leads.local") || can("leads.asignar");
 
   async function configNegocio() {
@@ -229,6 +267,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
         const { data, error } = await sb.from("vehiculos").insert({ ...v.value, local_id: local, creado_por: ctx.esAdmin ? null : userId }).select().single();
         if (error) return error.code === "23505" ? err("patente_duplicada", 409) : fallo(error);
         await audit(ctx.actor, "vehiculo.crear", "vehiculo", data.id, { patente: data.patente, marca: data.marca, modelo: data.modelo });
+        await crearValidacion({ tipo: "vehiculo", local_id: local, vehiculo_id: data.id, sujeto: sujetoDeVehiculo(data) });
         return json({ vehiculo: data });
       }
       const { data: antes } = await scoped(sb.from("vehiculos").select("*").eq("id", id)).maybeSingle();
@@ -459,6 +498,10 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
           await evento(t.lead_id, "tasacion", `Tasación ${folioTasacion(t.numero)} completada por ${userName}: se reconoce ${dinero(data.valor_compra)} por el vehículo (venta esperada ${dinero(data.valor_venta)}). Las cotizaciones deben usar este valor o uno menor.`);
         }
         await audit(ctx.actor, "tasacion.completar", "tasacion", t.id, { numero: t.numero, valor_compra: data.valor_compra, valor_venta: data.valor_venta, lead_id: t.lead_id });
+        if (t.tipo === "directa") {
+          const ya = await sb.from("validaciones").select("id").eq("tasacion_id", t.id);
+          if (!ya.error && (ya.data ?? []).length === 0) await crearValidacion({ tipo: "compra", local_id: t.local_id, tasacion_id: t.id, sujeto: sujetoDeVehiculo(data.vehiculo || {}, { vendedor: (t.contacto && t.contacto.nombre) || "" }) });
+        }
       }
       return json({ tasacion: (await enriquecer([data]))[0] });
     }
@@ -518,6 +561,219 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       const tasadores = ids.map((id) => ({ id, nombre: (usuarios.find((u: any) => u.id === id) || {}).nombre ?? "", ...metricasTasador(todas, id, mes) }));
       const cola = colaTasaciones(todas, new Date(), cfg.horas_tasacion);
       return json({ mes, nombreMes: nombreMes(mes), tasadores, cola: { pendientes: cola.pendientes, masAntiguaHoras: cola.masAntiguaHoras, atrasadas: cola.atrasadas.length }, horasLimite: cfg.horas_tasacion });
+    }
+
+    return err("unknown_op");
+  }
+
+  /* ---------- validaciones (Validador: revisión de documentos) ---------- */
+  if (op.startsWith("validacion.")) {
+    const realiza = !ctx.esAdmin && can("validacion.realizar");
+    if (!realiza && !esSupervisor && !can("validacion.usar") && !can("leads.propios") && !can("inventario.editar") && !can("tasaciones.realizar")) return err("forbidden", 403);
+
+    async function validadoresDe(local: string) {
+      const overrides = await ctx.rolePermOverrides();
+      const { data, error } = await sb.from("usuarios").select("id, nombre, roles, permisos_extra, activo, local_id").eq("local_id", local);
+      if (error) throw error;
+      return (data ?? []).filter((u: any) => u.activo && permisosEfectivos(u.roles ?? [], overrides, u.permisos_extra).includes("validacion.realizar"));
+    }
+    async function cargarVal(id: string) {
+      const { data, error } = await scoped(sb.from("validaciones").select("*").eq("id", id)).maybeSingle();
+      if (error) throw error;
+      return data;
+    }
+    async function docsDe(ids: string[]) {
+      const filas = await enLotes("validacion_docs", "validacion_id", ids);
+      return filas.sort((a: any, b: any) => (a.orden ?? 0) - (b.orden ?? 0));
+    }
+    /** ¿Puede ver la validación? Quien valida, el supervisor, o quien trabaja el lead, el vehículo o la tasación de origen. */
+    async function veVal(v: any) {
+      if (realiza || esSupervisor) return true;
+      if (v.tipo === "venta") { const l = v.lead_id ? await cargarLead(v.lead_id) : null; return !!l && puedeVer(l); }
+      if (v.tipo === "vehiculo") return can("inventario.ver") || can("inventario.editar");
+      return can("tasaciones.realizar");
+    }
+    /** ¿Puede subir o quitar archivos? Quien la tiene asignada, el supervisor, o quien la originó. */
+    async function puedeAdjuntar(v: any) {
+      if (esSupervisor) return true;
+      if (realiza && v.validador_id === userId) return true;
+      if (ctx.esAdmin) return false;
+      if (v.tipo === "venta") { const l = v.lead_id ? await cargarLead(v.lead_id) : null; return !!l && puedeVer(l) && puedeTocar(l); }
+      if (v.tipo === "vehiculo") return can("inventario.editar");
+      return can("tasaciones.realizar");
+    }
+    async function enriquecerVal(filas: any[]) {
+      const docs = await docsDe(filas.map((v) => v.id));
+      const cierres = await porIds("cierres", filas.map((v) => v.cierre_id));
+      const usuarios = await porIds("usuarios", filas.map((v) => v.validador_id));
+      return filas.map((v) => ({
+        ...v, folio: folioValidacion(v.numero), validador: (usuarios.find((u: any) => u.id === v.validador_id) || {}).nombre ?? "",
+        progreso: progreso(docs.filter((d: any) => d.validacion_id === v.id)), cierre_estado: v.cierre_id ? (cierres.find((c: any) => c.id === v.cierre_id) || {}).estado ?? null : null,
+      }));
+    }
+    /** Recalcula el estado a partir de los documentos y lo guarda. */
+    async function recalcular(v: any, tieneValidador = !!v.validador_id) {
+      const docs = await docsDe([v.id]);
+      const estado = estadoDeValidacion(docs, tieneValidador);
+      const ahora = new Date().toISOString();
+      const patch: Record<string, unknown> = { estado, actualizado_en: ahora };
+      if (estado === "aprobada" && v.estado !== "aprobada") patch.resuelta_en = ahora;
+      if (estado !== "aprobada") patch.resuelta_en = null;
+      const { data, error } = await sb.from("validaciones").update(patch).eq("id", v.id).select().single();
+      if (error) throw error;
+      return { val: data, docs };
+    }
+    const detalle = async (v: any) => {
+      const docs = await docsDe([v.id]);
+      const [fila] = await enriquecerVal([v]);
+      return { validacion: fila, docs, esMia: realiza && v.validador_id === userId, puedeRevisar: realiza && v.validador_id === userId && ESTADOS_ABIERTOS.includes(v.estado) && v.estado !== "pendiente", puedeAdjuntar: v.estado !== "aprobada" && v.estado !== "cancelada" && (await puedeAdjuntar(v)), puedeGestionar: esSupervisor, puedeRealizar: realiza };
+    };
+    const anotarVal = async (v: any, texto: string) => { if (v.lead_id) await evento(v.lead_id, "validacion", texto); };
+    const fallar = (e: any) => fallo(e);
+
+    if (op === "validacion.equipo") {
+      if (!esSupervisor) return err("forbidden", 403);
+      const local = await localParaCrear();
+      if (!local) return err("sin_local");
+      return json({ validadores: (await validadoresDe(local)).map((u: any) => ({ id: u.id, nombre: u.nombre })) });
+    }
+
+    if (op === "validacion.list") {
+      const vista = String(body.vista ?? "");
+      const { data, error } = await scoped(sb.from("validaciones").select("*").order("solicitada_en", { ascending: false }));
+      if (error) return fallar(error);
+      let filas: any[] = data ?? [];
+      // Una venta cuyo cierre se retiró, rechazó o anuló ya no necesita validación.
+      const cierres = await porIds("cierres", filas.map((v) => v.cierre_id));
+      const vigente = (v: any) => v.estado !== "cancelada" && (v.tipo !== "venta" || !v.cierre_id || ["pendiente", "aprobada"].includes((cierres.find((c: any) => c.id === v.cierre_id) || {}).estado));
+      filas = filas.filter(vigente);
+      if (vista === "cola") { if (!realiza && !esSupervisor) return err("forbidden", 403); filas = filas.filter((v) => v.estado === "pendiente"); }
+      else if (vista === "mias") { if (!realiza) return err("forbidden", 403); filas = filas.filter((v) => v.validador_id === userId && (v.estado !== "aprobada" || Date.now() - Date.parse(v.resuelta_en ?? v.actualizado_en) < 14 * 86_400_000)); }
+      else if (vista === "local") { if (!realiza && !esSupervisor) return err("forbidden", 403); if (body.estado) filas = filas.filter((v) => v.estado === String(body.estado)); }
+      else if (vista === "origen") {
+        const campo = body.cierreId ? "cierre_id" : body.leadId ? "lead_id" : body.vehiculoId ? "vehiculo_id" : body.tasacionId ? "tasacion_id" : "";
+        if (!campo) return err("vista_invalida");
+        const valor = String(body.cierreId || body.leadId || body.vehiculoId || body.tasacionId);
+        filas = filas.filter((v) => v[campo] === valor);
+        const visibles: any[] = [];
+        for (const v of filas) if (await veVal(v)) visibles.push(v);
+        filas = visibles;
+      } else return err("vista_invalida");
+      return json({ validaciones: await enriquecerVal(filas.slice(0, 200)), puedeRealizar: realiza, puedeGestionar: esSupervisor });
+    }
+
+    if (op === "validacion.get") {
+      const v = await cargarVal(String(body.id ?? ""));
+      if (!v || !(await veVal(v))) return err("no_existe", 404);
+      return json(await detalle(v));
+    }
+
+    if (op === "validacion.tomar") {
+      if (!realiza) return err("forbidden", 403);
+      const v = await cargarVal(String(body.id ?? ""));
+      if (!v) return err("no_existe", 404);
+      const tr = validarTransicionValidacion(v.estado, "tomar");
+      if (!tr.ok) return err(v.validador_id ? "validacion_ya_tomada" : tr.error!, 409);
+      const ahora = new Date().toISOString();
+      const r = await sb.from("validaciones").update({ estado: "en_revision", validador_id: userId, tomada_en: ahora, actualizado_en: ahora }).eq("id", v.id).eq("estado", "pendiente").select().maybeSingle();
+      if (r.error) return fallar(r.error);
+      if (!r.data) return err("validacion_ya_tomada", 409);
+      await anotarVal(v, `${userName} tomó la validación ${folioValidacion(v.numero)}`);
+      await audit(ctx.actor, "validacion.tomar", "validacion", v.id, { numero: v.numero });
+      return json(await detalle(r.data));
+    }
+
+    if (op === "validacion.liberar" || op === "validacion.asignar") {
+      const v = await cargarVal(String(body.id ?? ""));
+      if (!v || !(await veVal(v))) return err("no_existe", 404);
+      const asignar = op === "validacion.asignar";
+      const tr = validarTransicionValidacion(v.estado, asignar ? "asignar" : "liberar");
+      if (!tr.ok) return err(tr.error!);
+      if (asignar ? !esSupervisor : !(esSupervisor || (realiza && v.validador_id === userId))) return err("forbidden", 403);
+      let destino: any = null;
+      if (asignar) {
+        destino = (await validadoresDe(v.local_id)).find((u: any) => u.id === body.validadorId);
+        if (!destino) return err("asignado_invalido");
+      }
+      const { error } = await sb.from("validaciones").update({ validador_id: destino ? destino.id : null, tomada_en: destino ? new Date().toISOString() : null }).eq("id", v.id);
+      if (error) return fallar(error);
+      const { val } = await recalcular({ ...v, validador_id: destino ? destino.id : null }, !!destino);
+      await anotarVal(v, destino ? `Validación ${folioValidacion(v.numero)} asignada a ${destino.nombre} por ${userName}` : `${userName} devolvió la validación ${folioValidacion(v.numero)} a la cola`);
+      await audit(ctx.actor, asignar ? "validacion.asignar" : "validacion.liberar", "validacion", v.id, { numero: v.numero });
+      return json(await detalle(val));
+    }
+
+    // El Validador aprueba, observa, rechaza o declara "no aplica" un documento.
+    if (op === "validacion.revisar") {
+      if (!realiza) return err("forbidden", 403);
+      const v = await cargarVal(String(body.id ?? ""));
+      if (!v) return err("no_existe", 404);
+      if (v.validador_id !== userId) return err("forbidden", 403);
+      const tr = validarTransicionValidacion(v.estado, "revisar");
+      if (!tr.ok) return err(tr.error!);
+      const doc = (await docsDe([v.id])).find((d: any) => d.id === body.docId);
+      if (!doc) return err("no_existe", 404);
+      const r = validarRevision(body);
+      if (!r.ok) return err(r.error!);
+      if (r.value.estado === "aprobado" && (doc.archivos ?? []).length === 0) return err("doc_sin_archivo");
+      const ahora = new Date().toISOString();
+      const up = await sb.from("validacion_docs").update({ estado: r.value.estado, comentario: r.value.comentario, revisado_por: userName, revisado_en: ahora, actualizado_en: ahora }).eq("id", doc.id);
+      if (up.error) return fallar(up.error);
+      const { val } = await recalcular(v);
+      if (val.estado === "aprobada") await anotarVal(v, `Validación ${folioValidacion(v.numero)} aprobada por ${userName}: documentos en orden`);
+      else if (r.value.estado === "observado" || r.value.estado === "rechazado") await anotarVal(v, `${userName} ${r.value.estado === "observado" ? "observó" : "rechazó"} «${doc.nombre}» (${folioValidacion(v.numero)}): ${r.value.comentario}`);
+      await audit(ctx.actor, "validacion.revisar", "validacion", v.id, { numero: v.numero, doc: doc.clave, estado: r.value.estado, resultado: val.estado });
+      return json(await detalle(val));
+    }
+
+    if (op === "validacion.adjuntar" || op === "validacion.quitar") {
+      const v = await cargarVal(String(body.id ?? ""));
+      if (!v || !(await veVal(v))) return err("no_existe", 404);
+      if (!(await puedeAdjuntar(v))) return err("forbidden", 403);
+      if (v.estado === "aprobada" || v.estado === "cancelada") return err("validacion_estado_invalido");
+      const doc = (await docsDe([v.id])).find((d: any) => d.id === body.docId);
+      if (!doc) return err("no_existe", 404);
+      if (doc.estado === "aprobado" || doc.estado === "no_aplica") return err("doc_cerrado");
+      let archivos: any[] = doc.archivos ?? [];
+      if (op === "validacion.adjuntar") {
+        const a = validarArchivo(body.archivo);
+        if (!a.ok) return err(a.error!);
+        if (archivos.length >= MAX_ARCHIVOS_DOC) return err("demasiados_archivos");
+        archivos = [...archivos, a.value];
+      } else {
+        const que = archivos.find((a: any) => a.id === String(body.archivoId ?? ""));
+        if (!que) return err("no_existe", 404);
+        if (que.v && que.v !== v.id) return err("archivo_reutilizado");
+        archivos = archivos.filter((a: any) => a.id !== que.id);
+      }
+      // Si el documento estaba observado o rechazado, vuelve a revisión con el archivo nuevo.
+      const reabre = op === "validacion.adjuntar" && (doc.estado === "observado" || doc.estado === "rechazado");
+      const { error } = await sb.from("validacion_docs").update({ archivos, ...(reabre ? { estado: "pendiente" } : {}), actualizado_en: new Date().toISOString() }).eq("id", doc.id);
+      if (error) return fallar(error);
+      const { val } = await recalcular(v);
+      if (reabre) await anotarVal(v, `${userName} corrigió «${doc.nombre}» (${folioValidacion(v.numero)}): vuelve a revisión`);
+      await audit(ctx.actor, op === "validacion.adjuntar" ? "validacion.adjuntar" : "validacion.quitar", "validacion", v.id, { numero: v.numero, doc: doc.clave });
+      return json(await detalle(val));
+    }
+
+    if (op === "validacion.resumen") {
+      if (!realiza && !esSupervisor) return err("forbidden", 403);
+      const mes = body.mes === undefined ? mesChile() : String(body.mes);
+      if (!esMes(mes)) return err("mes_invalido");
+      const { data, error } = await scoped(sb.from("validaciones").select("*"));
+      if (error) return fallar(error);
+      const todas: any[] = (data ?? []).filter((v: any) => v.estado !== "cancelada");
+      let cfg;
+      try { cfg = await configNegocio(); } catch (e) { return fallo(e); }
+      let personas: any[];
+      if (esSupervisor) {
+        const base = localId ? await validadoresDe(localId) : [];
+        const extra = await porIds("usuarios", todas.map((v) => v.validador_id).filter((id) => id && !base.some((b: any) => b.id === id)));
+        personas = [...base, ...extra];
+      } else personas = await porIds("usuarios", [userId]);
+      const validadores = personas.map((u: any) => ({ id: u.id, nombre: u.nombre, ...metricasValidador(todas, u.id, mes) })).sort((a: any, b: any) => b.aprobadas - a.aprobadas || a.nombre.localeCompare(b.nombre));
+      const cola = colaValidaciones(todas, new Date(), cfg.horas_validacion);
+      return json({ mes, nombreMes: nombreMes(mes), validadores, cola: { pendientes: cola.pendientes, masAntiguaHoras: cola.masAntiguaHoras, atrasadas: cola.atrasadas.length }, horasLimite: cfg.horas_validacion, esSupervisor });
     }
 
     return err("unknown_op");
@@ -1394,9 +1650,16 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     let cierre = ins.data;
     await evento(lead.id, "cierre", `Cierre de venta ${folioVenta(cierre.numero)} pedido por ${userName} · ${dinero(cierre.precio_final)}${cierre.precio_final < cierre.precio_cotizado ? ` (${dinero(cierre.precio_cotizado - cierre.precio_final)} menos que la cotización)` : ""}`);
     await audit(ctx.actor, "venta.solicitar", "cierre", cierre.id, { numero: cierre.numero, precio_final: cierre.precio_final, precio_cotizado: cierre.precio_cotizado });
-    // El supervisor que cierra aprueba su propia venta (queda a su nombre en la bitácora).
-    if (esSupervisor) cierre = await aprobarCierre(cierre);
-    return json({ cierre: sinCosto(cierre, can("inventario.editar")) });
+    // Cada venta pide la revisión de sus documentos.
+    const valCierre = await crearValidacion({
+      tipo: "venta", local_id: lead.local_id, cierre_id: cierre.id, lead_id: lead.id, vehiculo_id: veh.id,
+      sujeto: sujetoDeVehiculo(veh, { folio: folioVenta(cierre.numero) }), opciones: { conFinanciamiento: Number(cierre.monto_financiado) > 0, conParteDePago: Number(cierre.monto_parte_pago) > 0 },
+    });
+    if (valCierre) await evento(lead.id, "validacion", `Validación ${folioValidacion(valCierre.numero)} creada para revisar los documentos de la venta`);
+    // Si hay Validadores en el local, la venta espera su aprobación; si no, el supervisor que cierra aprueba su propia venta (queda a su nombre en la bitácora).
+    const exige = !!valCierre && (await hayValidadores(lead.local_id));
+    if (esSupervisor && !exige) cierre = await aprobarCierre(cierre);
+    return json({ cierre: sinCosto(cierre, can("inventario.editar")), validacion: valCierre ? { id: valCierre.id, folio: folioValidacion(valCierre.numero), estado: valCierre.estado, exige } : null });
   }
 
   if (op === "cierres.aprobar" || op === "cierres.rechazar") {
@@ -1417,6 +1680,22 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     const reserva = c.reserva_id ? (await sb.from("reservas").select("*").eq("id", c.reserva_id).maybeSingle()).data : null;
     const { data: veh } = await sb.from("vehiculos").select("estado").eq("id", c.vehiculo_id).maybeSingle();
     if (!reserva || reserva.estado !== "activa" || !veh || veh.estado !== "reservado") return err("reserva_no_vigente", 409);
+    // Con Validadores en el local, la venta solo se aprueba con sus documentos validados.
+    if (await hayValidadores(c.local_id)) {
+      const vq = await sb.from("validaciones").select("*").eq("cierre_id", c.id);
+      if (!vq.error) {
+        const activas = (vq.data ?? []).filter((x: any) => x.estado !== "cancelada");
+        let val = activas.find((x: any) => x.estado === "aprobada") || activas[0];
+        if (!val) {
+          const { data: vh } = await sb.from("vehiculos").select("*").eq("id", c.vehiculo_id).maybeSingle();
+          val = await crearValidacion({
+            tipo: "venta", local_id: c.local_id, cierre_id: c.id, lead_id: c.lead_id, vehiculo_id: c.vehiculo_id,
+            sujeto: sujetoDeVehiculo(vh || c.vehiculo_snapshot || {}, { folio: folioVenta(c.numero) }), opciones: { conFinanciamiento: Number(c.monto_financiado) > 0, conParteDePago: Number(c.monto_parte_pago) > 0 },
+          });
+        }
+        if (val && val.estado !== "aprobada") return err("validacion_pendiente", 409);
+      }
+    }
     return json({ cierre: sinCosto(await aprobarCierre(c), can("inventario.editar")) });
   }
 
@@ -1595,6 +1874,12 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     const tasSinTomar: any[] = tsr.error ? [] : (tsr.data ?? []).filter((t: any) => horasDesde(t.solicitada_en, ahora) >= cfg.horas_tasacion);
     const isr = await scoped(sb.from("inspecciones").select("*").eq("estado", "pendiente"));
     const inspSinTomar: any[] = isr.error ? [] : colaInspecciones(isr.data ?? [], ahora, cfg.horas_inspeccion).atrasadas;
+    const vsr = await scoped(sb.from("validaciones").select("*").eq("estado", "pendiente"));
+    let valSinTomar: any[] = vsr.error ? [] : colaValidaciones(vsr.data ?? [], ahora, cfg.horas_validacion).atrasadas;
+    if (valSinTomar.length > 0) {
+      const cv = await porIds("cierres", valSinTomar.map((x) => x.cierre_id));
+      valSinTomar = valSinTomar.filter((x) => x.tipo !== "venta" || !x.cierre_id || ["pendiente", "aprobada"].includes((cv.find((c: any) => c.id === x.cierre_id) || {}).estado));
+    }
     const sinAtender = abiertos.filter((l) => esSinAtender(l, ahora, cfg.horas_sin_contacto));
     const detenidos = abiertos.filter((l) => esDetenido(l, ahora, cfg.dias_detenido));
     const sinAsignar = abiertos.filter((l) => !l.asignado_a);
@@ -1620,8 +1905,8 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     })).filter((e) => e.id !== null || e.abiertos > 0).sort((a, b) => (a.id === null ? -1 : b.id === null ? 1 : a.nombre.localeCompare(b.nombre)));
 
     return json({
-      config: { horas_sin_contacto: cfg.horas_sin_contacto, dias_detenido: cfg.dias_detenido, horas_tasacion: cfg.horas_tasacion, horas_inspeccion: cfg.horas_inspeccion },
-      conteos: { abiertos: abiertos.length, sinAtender: sinAtender.length, detenidos: detenidos.length, sinAsignar: sinAsignar.length, tareasVencidas: tareasVencidas.length, reservasPorVencer: porVencer.length, tasacionesSinTomar: tasSinTomar.length, inspeccionesSinTomar: inspSinTomar.length },
+      config: { horas_sin_contacto: cfg.horas_sin_contacto, dias_detenido: cfg.dias_detenido, horas_tasacion: cfg.horas_tasacion, horas_inspeccion: cfg.horas_inspeccion, horas_validacion: cfg.horas_validacion },
+      conteos: { abiertos: abiertos.length, sinAtender: sinAtender.length, detenidos: detenidos.length, sinAsignar: sinAsignar.length, tareasVencidas: tareasVencidas.length, reservasPorVencer: porVencer.length, tasacionesSinTomar: tasSinTomar.length, inspeccionesSinTomar: inspSinTomar.length, validacionesSinTomar: valSinTomar.length },
       sinAtender: tope(sinAtender).map(fila),
       detenidos: tope(detenidos).map(fila),
       sinAsignar: tope(sinAsignar).map(fila),
@@ -1638,6 +1923,10 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
         const l = leadsDeTareas.find((x: any) => x.id === t.lead_id);
         const vh = t.vehiculo || {};
         return { id: t.id, lead_id: t.lead_id, folio: folioTasacion(t.numero), vehiculo: `${vh.marca ?? ""} ${vh.modelo ?? ""} ${vh.anio ?? ""} · ${vh.patente ?? ""}`.trim(), cliente: l ? clienteDe(l.cliente_id) : (t.contacto && t.contacto.nombre) || "", solicitante: nombreDe(t.solicitante_id), solicitada_en: t.solicitada_en };
+      }),
+      validacionesSinTomar: tope(valSinTomar).map((x) => {
+        const s = x.sujeto || {};
+        return { id: x.id, lead_id: x.lead_id, folio: folioValidacion(x.numero), tipo: x.tipo, vehiculo: `${s.marca ?? ""} ${s.modelo ?? ""} ${s.anio ?? ""} · ${s.patente ?? ""}`.trim(), solicitada_en: x.solicitada_en };
       }),
       inspeccionesSinTomar: tope(inspSinTomar).map((x) => {
         const vh = x.vehiculo || {};

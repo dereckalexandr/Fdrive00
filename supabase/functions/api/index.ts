@@ -182,6 +182,14 @@ function canKv(s: Session, op: string, key: string): boolean {
     if (op === "get") return p.includes("inspecciones.realizar") || p.includes("inspecciones.pedir") || p.includes("leads.propios") || p.includes("leads.local") || p.includes("leads.asignar") || p.includes("tasaciones.realizar");
     return p.includes("inspecciones.realizar");
   }
+  // Documentos de una validación (dval::<validación>::<archivo>): el servidor decide quién los registra en cada documento;
+  // aquí solo se limita quién puede guardar o leer el contenido (la clave incluye el id de la validación, imposible de adivinar).
+  if (s.role === "user" && key.startsWith("dval::")) {
+    const p = s.perms ?? [];
+    const sube = p.includes("validacion.realizar") || p.includes("leads.propios") || p.includes("leads.asignar") || p.includes("inventario.editar") || p.includes("tasaciones.realizar");
+    if (op === "get") return sube || p.includes("validacion.usar") || p.includes("leads.local");
+    return sube;
+  }
   if (op === "get" || op === "set") return ownPrefixes(s).some((p) => key.startsWith(p));
   // El inspector puede eliminar SUS PROPIAS inspecciones y tasaciones (no las de otros, ni los ejecutivos nada).
   if (op === "delete" && (s.role === "inspector" || s.role === "user")) return ownPrefixes(s).some((p) => key.startsWith(p));

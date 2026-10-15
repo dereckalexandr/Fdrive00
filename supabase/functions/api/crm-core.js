@@ -65,7 +65,8 @@ export const PERMISOS = [
   { id: "tasacion_compra.usar", grupo: "Operación", nombre: "Tasación de compra (Chileautos)", disponible: true },
   { id: "tasaciones.pedir", grupo: "Operación", nombre: "Pedir la tasación de un vehículo en parte de pago", disponible: true },
   { id: "tasaciones.realizar", grupo: "Operación", nombre: "Tomar y realizar tasaciones de vehículos", disponible: true },
-  { id: "validacion.usar", grupo: "Operación", nombre: "Validar documentación y operaciones", disponible: false },
+  { id: "validacion.usar", grupo: "Operación", nombre: "Módulo de validación de documentos", disponible: true },
+  { id: "validacion.realizar", grupo: "Operación", nombre: "Tomar y revisar documentos (aprobar, observar o rechazar)", disponible: true },
   { id: "anuncios.gestionar", grupo: "Operación", nombre: "Publicar y mantener avisos", disponible: false },
   { id: "marketing.gestionar", grupo: "Operación", nombre: "Campañas y redes sociales", disponible: false },
 ];
@@ -81,7 +82,7 @@ export const PERMISOS_POR_ROL = {
   ejecutivo: ["leads.propios", "inventario.ver", "cotizaciones.crear", "agenda.usar", "comisiones.propias", "tasaciones.pedir", "inspecciones.pedir"],
   tasador: ["tasacion_compra.usar", "tasaciones.usar", "inventario.ver", "tasaciones.realizar", "inspecciones.pedir"],
   inspector: ["inspecciones.usar", "tasaciones.usar", "inspecciones.realizar"],
-  validador: ["validacion.usar", "inventario.ver"],
+  validador: ["validacion.usar", "validacion.realizar", "inventario.ver"],
   anunciante: ["anuncios.gestionar", "inventario.ver"],
   marketing: ["marketing.gestionar", "leads.local"],
 };
@@ -231,6 +232,7 @@ export const CONFIG_DEFECTO = {
   horas_sin_contacto: 4,
   horas_tasacion: 8,
   horas_inspeccion: 8,
+  horas_validacion: 8,
   dias_detenido: 7,
   vigencia_cotizacion_dias: 7,
   condiciones_cotizacion: "Cotización sujeta a disponibilidad del vehículo y a la aprobación del financiamiento, si corresponde. El precio puede variar si cambian las condiciones. Válida hasta la fecha indicada.",
@@ -246,7 +248,7 @@ export function validarConfig(clave, valor) {
     if (limpio.length === 0 || limpio.some((v) => v.length > 60)) return { ok: false };
     return { ok: true, value: limpio };
   }
-  if (clave === "horas_sin_contacto" || clave === "horas_tasacion" || clave === "horas_inspeccion" || clave === "dias_detenido") {
+  if (clave === "horas_sin_contacto" || clave === "horas_tasacion" || clave === "horas_inspeccion" || clave === "horas_validacion" || clave === "dias_detenido") {
     const n = Number(valor);
     const max = clave === "dias_detenido" ? 90 : 168;
     if (!Number.isInteger(n) || n < 1 || n > max) return { ok: false };

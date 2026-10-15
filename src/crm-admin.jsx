@@ -618,6 +618,7 @@ function ConfigTab() {
         <NumeroEditor clave="horas_sin_contacto" etiqueta="Lead nuevo sin ningún contacto desde hace" valor={c.horas_sin_contacto} sufijo="horas" paso="1" onGuardado={ok} onError={mal} />
         <NumeroEditor clave="horas_tasacion" etiqueta="Solicitud de tasación sin que un Tasador la tome desde hace" valor={c.horas_tasacion} sufijo="horas" paso="1" onGuardado={ok} onError={mal} />
         <NumeroEditor clave="horas_inspeccion" etiqueta="Solicitud de inspección sin que un Inspector la tome desde hace" valor={c.horas_inspeccion} sufijo="horas" paso="1" onGuardado={ok} onError={mal} />
+        <NumeroEditor clave="horas_validacion" etiqueta="Validación de documentos sin que un Validador la tome desde hace" valor={c.horas_validacion} sufijo="horas" paso="1" onGuardado={ok} onError={mal} />
         <NumeroEditor clave="dias_detenido" etiqueta="Lead en seguimiento o cotizado sin actividad desde hace" valor={c.dias_detenido} sufijo="días" paso="1" onGuardado={ok} onError={mal} />
       </Tarjeta>
       <Tarjeta titulo="Meta mensual" ayuda="Cuántas ventas aprobadas se espera de cada ejecutivo al mes. La comisión no se configura aquí: sale de los tramos de cada ejecutivo (pestaña Usuarios → Editar → Comisiones por tramos).">

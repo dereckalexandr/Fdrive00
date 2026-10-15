@@ -10,6 +10,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { ESTADOS_VEHICULO, TRANSMISIONES, COMBUSTIBLES, validarVehiculo, validarCliente, textoVencimiento } from "../supabase/functions/api/ventas-core.js";
 import { compressImage, makePhotoId } from "./photos.js";
 import { SeccionInspeccion } from "./crm-inspecciones.jsx";
+import { SeccionValidacion } from "./crm-validaciones.jsx";
 import { INPUT, BTN, BTN_PRIMARIO, clp, Aviso, Cargando, Campo, Modal, Tarjeta, useCarga, mensajeError, fechaCorta } from "./crm-ui.jsx";
 
 const MAX_FOTOS = 6;
@@ -136,6 +137,7 @@ function FormVehiculo({ api, vehiculo, puedeCosto, onCerrar, onGuardado }) {
         <p className="text-xs text-stone-500 mt-2">Las fotos se reducen en tu dispositivo antes de guardarse.</p>
       </div>
 
+      {f.id && <SeccionValidacion api={api} origen={{ tipo: "vehiculo", id: f.id }} titulo="Documentos del vehículo" />}
       {f.id && <SeccionInspeccion api={api} origen={{ tipo: "vehiculo", id: f.id }} vehiculo={f} />}
 
       {error && <Aviso>{error}</Aviso>}

@@ -15,6 +15,7 @@ import { tasacionNombre, validarVehiculoTasacion, validarTasacionDirecta, MAX_FO
 import { compressImage, makePhotoId } from "./photos.js";
 import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, useCarga, mensajeError, CamposVehiculo, aVehiculoForm, VEH_VACIO } from "./crm-ui.jsx";
 import { SeccionInspeccion } from "./crm-inspecciones.jsx";
+import { SeccionValidacion } from "./crm-validaciones.jsx";
 
 const COLOR = { pendiente: "bg-amber-100 text-amber-800", en_proceso: "bg-sky-100 text-sky-800", completada: "bg-emerald-100 text-emerald-800", cancelada: "bg-stone-200 text-stone-600" };
 const Estado = ({ id }) => <span className={`text-[11px] px-2 py-0.5 ${COLOR[id] || ""}`}>{tasacionNombre(id)}</span>;
@@ -222,6 +223,7 @@ function TasacionDetalle({ api, id, renderEstimador, onCerrar, onCambio }) {
         {editable && f.valorCompra !== "" && f.valorVenta !== "" && margen < 0 && <p className="text-xs text-rose-600 mt-2">El valor de venta esperado no puede ser menor que el de compra.</p>}
       </Tarjeta>
 
+      {t.tipo === "directa" && <SeccionValidacion api={api} origen={{ tipo: "tasacion", id: t.id }} titulo="Validación de documentos de la compra" />}
       <SeccionInspeccion api={api} origen={{ tipo: "tasacion", id: t.id }} vehiculo={t.vehiculo} cerrado={t.estado === "cancelada"} />
 
       <Tarjeta titulo="Inspección">

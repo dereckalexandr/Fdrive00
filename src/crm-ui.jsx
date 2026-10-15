@@ -104,6 +104,18 @@ const MENSAJES = {
   inspeccion_ya_tomada: "Otro Inspector ya tomó esa inspección.",
   inspeccion_estado_invalido: "Esa acción ya no corresponde al estado actual de la inspección.",
   inspeccion_invalida: "La ficha de la inspección no es válida.",
+  estado_doc_invalido: "Elige qué hacer con el documento: aprobar, observar, rechazar o marcar que no aplica.",
+  comentario_requerido: "Escribe el motivo (mínimo 3 letras).",
+  archivo_invalido: "No se pudo registrar el archivo. Inténtalo de nuevo.",
+  archivo_tipo_invalido: "Solo se aceptan fotos (JPG, PNG) o archivos PDF.",
+  archivo_muy_grande: "El archivo es demasiado grande (máximo 4 MB). Reduce el PDF o sube una foto.",
+  demasiados_archivos: "Cada documento admite hasta 3 archivos.",
+  doc_cerrado: "Ese documento ya está aprobado: no se modifica.",
+  doc_sin_archivo: "Para aprobar un documento debe tener al menos un archivo adjunto.",
+  archivo_reutilizado: "Ese archivo viene de otra validación ya aprobada y no se puede quitar aquí.",
+  validacion_estado_invalido: "Esa acción ya no corresponde al estado de la validación.",
+  validacion_ya_tomada: "Otro Validador ya tomó esa validación.",
+  validacion_pendiente: "Los documentos de esta venta aún no están validados. Un Validador debe aprobarlos antes de aprobar la venta.",
   tramos_invalidos: "Los tramos no son válidos: no pueden superponerse y solo el último puede quedar sin tope.",
 };
 export const mensajeError = (e) => MENSAJES[e && e.message] || "No se pudo completar la operación. Inténtalo de nuevo.";

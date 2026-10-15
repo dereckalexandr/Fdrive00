@@ -108,6 +108,7 @@ export function CambioClaveObligatorio({ me, onListo, onSalir }) {
 // Módulos que ya existen. Cada uno se abre si la persona tiene alguno de sus permisos.
 const MODULOS_ACTIVOS = [
   { id: "tasaciones", titulo: "Tasaciones", texto: "Cola de solicitudes, tasaciones directas, estimación con Chileautos, inspecciones y fotos.", permisos: ["tasaciones.realizar"] },
+  { id: "validacion", titulo: "Validaciones", texto: "Cola de revisión de documentos de ventas, vehículos y compras: aprobar, observar o rechazar cada documento.", permisos: ["validacion.realizar", "validacion.usar"] },
   { id: "ventas", titulo: "Ventas", texto: "Leads, embudo en columnas, agenda, inventario y clientes.", permisos: ["leads.propios", "leads.local", "leads.asignar", "inventario.ver", "inventario.editar"] },
   { id: "inspector", titulo: "Inspecciones y tasaciones", texto: "Checklist de inspección, valorizaciones, fotos y PDF.", permisos: ["inspecciones.usar", "tasaciones.usar"] },
   { id: "compra", titulo: "Tasación de compra", texto: "Precio de compra sugerido según los avisos de Chileautos.", permisos: ["tasacion_compra.usar"] },
