@@ -2,6 +2,7 @@
  * Piezas de interfaz compartidas por los módulos del CRM (comercial, inventario…).
  */
 import React, { useState, useEffect, useCallback } from "react";
+import { TRANSMISIONES, COMBUSTIBLES } from "../supabase/functions/api/ventas-core.js";
 
 export const INPUT = "border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-amber-500 w-full";
 export const BTN = "px-3 py-1.5 text-sm border border-stone-300 bg-white text-stone-700 hover:bg-stone-50 disabled:opacity-50";
@@ -97,6 +98,12 @@ const MENSAJES = {
   aviso_invalido: "El aviso debe tener entre 3 y 300 caracteres.",
   destinatario_requerido: "Elige a quién va dirigido el aviso.",
   lote_invalido: "Selecciona entre 1 y 50 leads.",
+  direccion_requerida: "Escribe la dirección donde está el vehículo (mínimo 5 letras).",
+  origen_invalido: "No se pudo identificar de dónde nace la inspección.",
+  inspeccion_en_curso: "Ese vehículo (patente) ya tiene una inspección pedida o agendada.",
+  inspeccion_ya_tomada: "Otro Inspector ya tomó esa inspección.",
+  inspeccion_estado_invalido: "Esa acción ya no corresponde al estado actual de la inspección.",
+  inspeccion_invalida: "La ficha de la inspección no es válida.",
   tramos_invalidos: "Los tramos no son válidos: no pueden superponerse y solo el último puede quedar sin tope.",
 };
 export const mensajeError = (e) => MENSAJES[e && e.message] || "No se pudo completar la operación. Inténtalo de nuevo.";
@@ -179,3 +186,29 @@ export function Pestanas({ valor, onCambio, opciones }) {
     </div>
   );
 }
+
+/* --- Datos de un vehículo (tasaciones e inspecciones) --- */
+export const VEH_VACIO = { patente: "", marca: "", modelo: "", version: "", anio: "", km: "", color: "", transmision: "", combustible: "" };
+
+export function CamposVehiculo({ v, set, bloqueado = false }) {
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+      <Campo etiqueta="Patente"><input value={v.patente} disabled={bloqueado} onChange={(e) => set({ ...v, patente: e.target.value.toUpperCase() })} className={`${INPUT} font-mono`} placeholder="ABCD12" /></Campo>
+      <Campo etiqueta="Marca"><input value={v.marca} disabled={bloqueado} onChange={(e) => set({ ...v, marca: e.target.value })} className={INPUT} /></Campo>
+      <Campo etiqueta="Modelo"><input value={v.modelo} disabled={bloqueado} onChange={(e) => set({ ...v, modelo: e.target.value })} className={INPUT} /></Campo>
+      <Campo etiqueta="Versión (opcional)"><input value={v.version || ""} disabled={bloqueado} onChange={(e) => set({ ...v, version: e.target.value })} className={INPUT} /></Campo>
+      <Campo etiqueta="Año"><input type="number" value={v.anio} disabled={bloqueado} onChange={(e) => set({ ...v, anio: e.target.value })} className={INPUT} /></Campo>
+      <Campo etiqueta="Kilometraje"><input type="number" min="0" value={v.km} disabled={bloqueado} onChange={(e) => set({ ...v, km: e.target.value })} className={INPUT} /></Campo>
+      <Campo etiqueta="Color (opcional)"><input value={v.color || ""} disabled={bloqueado} onChange={(e) => set({ ...v, color: e.target.value })} className={INPUT} /></Campo>
+      <Campo etiqueta="Transmisión">
+        <select value={v.transmision || ""} disabled={bloqueado} onChange={(e) => set({ ...v, transmision: e.target.value })} className={INPUT}><option value="">—</option>{TRANSMISIONES.map((t) => <option key={t}>{t}</option>)}</select>
+      </Campo>
+      <Campo etiqueta="Combustible">
+        <select value={v.combustible || ""} disabled={bloqueado} onChange={(e) => set({ ...v, combustible: e.target.value })} className={INPUT}><option value="">—</option>{COMBUSTIBLES.map((t) => <option key={t}>{t}</option>)}</select>
+      </Campo>
+    </div>
+  );
+}
+
+export const aVehiculoForm = (v) => ({ ...VEH_VACIO, ...(v || {}), anio: v && v.anio != null ? v.anio : "", km: v && v.km != null ? v.km : "" });
+

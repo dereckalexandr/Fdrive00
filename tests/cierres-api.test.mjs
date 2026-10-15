@@ -290,7 +290,7 @@ test("Comisiones: la supervisora ve a todo el equipo con sus márgenes; otro loc
   assert.equal(r.ejecutivos[0].datos.ventasN >= r.ejecutivos[1].datos.ventasN, true, "ordenados por ventas");
   assert.equal(r.totales.unidades, r.ejecutivos.reduce((a, e) => a + e.datos.ventasN, 0));
   assert.equal(r.totales.produccion, r.ejecutivos.reduce((a, e) => a + e.produccion.total, 0));
-  assert.deepEqual(r.pendientesDeOtrosModulos, ["compras", "consignaciones", "inspecciones"]);
+  assert.deepEqual(r.pendientesDeOtrosModulos, ["compras", "consignaciones"]);
   assert.equal((await ve(U.jefeSur.token, "comisiones.resumen")).ejecutivos.length, 0);
   assert.equal((await ve(U.mkt.token, "comisiones.resumen")).status, 403, "Marketing no ve comisiones");
   assert.equal((await ve(U.e1.token, "comisiones.resumen")).ejecutivos.length, 1, "Eva solo ve la suya");

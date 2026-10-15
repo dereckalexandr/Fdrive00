@@ -50,7 +50,7 @@ test("Permisos: ids únicos y todos los de los roles existen en el catálogo", (
 
 test("Permisos efectivos: unión de roles + otorgados − quitados", () => {
   const base = permisosEfectivos(["inspector"], null, null);
-  assert.deepEqual(base, ["inspecciones.usar", "tasaciones.usar"]);
+  assert.deepEqual(base, ["inspecciones.usar", "inspecciones.realizar", "tasaciones.usar"]);
 
   const dos = permisosEfectivos(["inspector", "tasador"], null, null);
   assert.ok(dos.includes("inspecciones.usar") && dos.includes("tasacion_compra.usar"));
@@ -61,7 +61,7 @@ test("Permisos efectivos: unión de roles + otorgados − quitados", () => {
 
   // Quitar gana sobre lo heredado.
   const sinFotos = permisosEfectivos(["inspector"], null, { otorgar: [], quitar: ["tasaciones.usar"] });
-  assert.deepEqual(sinFotos, ["inspecciones.usar"]);
+  assert.deepEqual(sinFotos, ["inspecciones.usar", "inspecciones.realizar"]);
 });
 
 test("Permisos efectivos: ignora ids desconocidos y respeta el orden del catálogo", () => {

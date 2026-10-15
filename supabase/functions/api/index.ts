@@ -176,6 +176,12 @@ function canKv(s: Session, op: string, key: string): boolean {
     if (op === "get") return p.includes("tasaciones.realizar") || p.includes("tasaciones.pedir") || p.includes("leads.propios") || p.includes("leads.local") || p.includes("leads.asignar");
     return p.includes("tasaciones.realizar");
   }
+  // Fotos del resultado de una inspección (ifoto::<ficha>::<foto>): las sube y borra quien inspecciona; las ven quienes piden inspecciones o miran los leads.
+  if (s.role === "user" && key.startsWith("ifoto::")) {
+    const p = s.perms ?? [];
+    if (op === "get") return p.includes("inspecciones.realizar") || p.includes("inspecciones.pedir") || p.includes("leads.propios") || p.includes("leads.local") || p.includes("leads.asignar") || p.includes("tasaciones.realizar");
+    return p.includes("inspecciones.realizar");
+  }
   if (op === "get" || op === "set") return ownPrefixes(s).some((p) => key.startsWith(p));
   // El inspector puede eliminar SUS PROPIAS inspecciones y tasaciones (no las de otros, ni los ejecutivos nada).
   if (op === "delete" && (s.role === "inspector" || s.role === "user")) return ownPrefixes(s).some((p) => key.startsWith(p));

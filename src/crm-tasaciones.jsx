@@ -10,10 +10,11 @@
  * ----------------------------------------------------------------
  */
 import React, { useState, useEffect } from "react";
-import { TRANSMISIONES, COMBUSTIBLES, mesChile } from "../supabase/functions/api/ventas-core.js";
+import { mesChile } from "../supabase/functions/api/ventas-core.js";
 import { tasacionNombre, validarVehiculoTasacion, validarTasacionDirecta, MAX_FOTOS_TASACION } from "../supabase/functions/api/tasaciones-core.js";
 import { compressImage, makePhotoId } from "./photos.js";
-import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, useCarga, mensajeError } from "./crm-ui.jsx";
+import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, useCarga, mensajeError, CamposVehiculo, aVehiculoForm, VEH_VACIO } from "./crm-ui.jsx";
+import { SeccionInspeccion } from "./crm-inspecciones.jsx";
 
 const COLOR = { pendiente: "bg-amber-100 text-amber-800", en_proceso: "bg-sky-100 text-sky-800", completada: "bg-emerald-100 text-emerald-800", cancelada: "bg-stone-200 text-stone-600" };
 const Estado = ({ id }) => <span className={`text-[11px] px-2 py-0.5 ${COLOR[id] || ""}`}>{tasacionNombre(id)}</span>;
@@ -40,30 +41,6 @@ function Miniatura({ tasacionId, fotoId, onQuitar }) {
 /* =========================================================
    FORMULARIO DEL VEHÍCULO (para pedir o crear una tasación)
 ========================================================= */
-const VEH_VACIO = { patente: "", marca: "", modelo: "", version: "", anio: "", km: "", color: "", transmision: "", combustible: "" };
-
-function CamposVehiculo({ v, set, bloqueado = false }) {
-  return (
-    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-      <Campo etiqueta="Patente"><input value={v.patente} disabled={bloqueado} onChange={(e) => set({ ...v, patente: e.target.value.toUpperCase() })} className={`${INPUT} font-mono`} placeholder="ABCD12" /></Campo>
-      <Campo etiqueta="Marca"><input value={v.marca} disabled={bloqueado} onChange={(e) => set({ ...v, marca: e.target.value })} className={INPUT} /></Campo>
-      <Campo etiqueta="Modelo"><input value={v.modelo} disabled={bloqueado} onChange={(e) => set({ ...v, modelo: e.target.value })} className={INPUT} /></Campo>
-      <Campo etiqueta="Versión (opcional)"><input value={v.version || ""} disabled={bloqueado} onChange={(e) => set({ ...v, version: e.target.value })} className={INPUT} /></Campo>
-      <Campo etiqueta="Año"><input type="number" value={v.anio} disabled={bloqueado} onChange={(e) => set({ ...v, anio: e.target.value })} className={INPUT} /></Campo>
-      <Campo etiqueta="Kilometraje"><input type="number" min="0" value={v.km} disabled={bloqueado} onChange={(e) => set({ ...v, km: e.target.value })} className={INPUT} /></Campo>
-      <Campo etiqueta="Color (opcional)"><input value={v.color || ""} disabled={bloqueado} onChange={(e) => set({ ...v, color: e.target.value })} className={INPUT} /></Campo>
-      <Campo etiqueta="Transmisión">
-        <select value={v.transmision || ""} disabled={bloqueado} onChange={(e) => set({ ...v, transmision: e.target.value })} className={INPUT}><option value="">—</option>{TRANSMISIONES.map((t) => <option key={t}>{t}</option>)}</select>
-      </Campo>
-      <Campo etiqueta="Combustible">
-        <select value={v.combustible || ""} disabled={bloqueado} onChange={(e) => set({ ...v, combustible: e.target.value })} className={INPUT}><option value="">—</option>{COMBUSTIBLES.map((t) => <option key={t}>{t}</option>)}</select>
-      </Campo>
-    </div>
-  );
-}
-
-const aVehiculoForm = (v) => ({ ...VEH_VACIO, ...(v || {}), anio: v && v.anio != null ? v.anio : "", km: v && v.km != null ? v.km : "" });
-
 /* =========================================================
    PEDIR UNA TASACIÓN (desde la ficha del lead)
 ========================================================= */
@@ -244,6 +221,8 @@ function TasacionDetalle({ api, id, renderEstimador, onCerrar, onCambio }) {
         )}
         {editable && f.valorCompra !== "" && f.valorVenta !== "" && margen < 0 && <p className="text-xs text-rose-600 mt-2">El valor de venta esperado no puede ser menor que el de compra.</p>}
       </Tarjeta>
+
+      <SeccionInspeccion api={api} origen={{ tipo: "tasacion", id: t.id }} vehiculo={t.vehiculo} cerrado={t.estado === "cancelada"} />
 
       <Tarjeta titulo="Inspección">
         {editable ? <BuscadorInspecciones api={api} patente={f.vehiculo.patente} actual={f.inspeccion} onElegir={(i) => set("inspeccion", i)} />

@@ -17,6 +17,7 @@ import { SeccionCotizaciones } from "./crm-cotizaciones.jsx";
 import { SeccionCierres, AprobacionesTodo, Ventas, TarjetaComision } from "./crm-cierres.jsx";
 import { Gestion, AvisosDelSupervisor, FranjaAlertas } from "./crm-gestion.jsx";
 import { SeccionTasacion, MisTasaciones, ModuloTasaciones } from "./crm-tasaciones.jsx";
+import { SeccionInspeccion, ModuloInspecciones } from "./crm-inspecciones.jsx";
 import {
   INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, useCarga, mensajeError,
 } from "./crm-ui.jsx";
@@ -138,6 +139,10 @@ function LeadFicha({ api, leadId, catalogos, onCerrar, onCambio, onEditar }) {
 
       <SeccionCotizaciones api={api} lead={lead} datos={datos} catalogos={catalogos} avisar={setMsg} onCambio={async () => { await recargar(); onCambio(); }} />
       <SeccionTasacion api={api} lead={lead} datos={datos} catalogos={catalogos} avisar={setMsg} onCambio={async () => { await recargar(); onCambio(); }} />
+      {(puedeEditar || catalogos.veTodo) && (
+        <SeccionInspeccion api={api} origen={{ tipo: "lead", id: lead.id }} cerrado={lead.etapa === "ganado" || lead.etapa === "perdido" || !puedeEditar}
+          vehiculo={pp.tiene && pp.patente ? { patente: pp.patente, marca: pp.marca, modelo: pp.modelo, anio: pp.anio, km: pp.km } : vehiculo ? { patente: vehiculo.patente, marca: vehiculo.marca, modelo: vehiculo.modelo, anio: vehiculo.anio, km: vehiculo.km } : {}} />
+      )}
       <SeccionCierres api={api} lead={lead} datos={datos} catalogos={catalogos} avisar={setMsg} onCambio={async () => { await recargar(); onCambio(); }} />
 
       {puedeEditar && (
@@ -651,12 +656,14 @@ export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador }
     ...cat.datos, puedeAsignar: can("leads.asignar"), veTodo: can("leads.asignar") || can("leads.local"), puedeAgenda: can("agenda.usar") || can("leads.asignar"),
     puedeComision: can("comisiones.propias") || can("comisiones.local") || can("leads.asignar"),
     puedePedirTasacion: can("tasaciones.pedir") || can("leads.asignar"),
+    puedeInspecciones: can("inspecciones.pedir") || can("leads.asignar"),
   };
   const opciones = [];
   if (usaLeads) opciones.push(["inicio", "Inicio"], ["leads", "Leads"]);
   if (catalogos.puedeAgenda) opciones.push(["agenda", "Agenda"]);
   if (catalogos.puedeComision) opciones.push(["ventas", "Ventas"]);
   if (puedeAprobar) opciones.push(["gestion", "Gestión"], ["tasaciones", "Tasaciones"], ["aprobaciones", "Aprobaciones", pend.datos || 0]);
+  if (catalogos.puedeInspecciones) opciones.push(["inspecciones", "Inspecciones"]);
   opciones.push(["inventario", "Inventario"]);
   if (usaLeads) opciones.push(["clientes", "Clientes"]);
 
@@ -671,6 +678,7 @@ export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador }
       {tab === "inicio" && <Inicio api={api} catalogos={catalogos} abrirLead={setLeadAbierto} irA={setTab} version={version} onCambio={subir} />}
       {tab === "leads" && <Leads api={api} catalogos={catalogos} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
       {tab === "tasaciones" && <ModuloTasaciones api={api} permisos={permisos} esAdmin={esAdmin} renderEstimador={renderEstimador} />}
+      {tab === "inspecciones" && <ModuloInspecciones api={api} permisos={permisos} esAdmin={esAdmin} />}
       {tab === "gestion" && <Gestion api={api} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
       {tab === "ventas" && <Ventas api={api} catalogos={catalogos} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
       {tab === "aprobaciones" && <AprobacionesTodo api={api} version={version} abrirLead={setLeadAbierto} onCambio={subir} />}

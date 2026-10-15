@@ -22,6 +22,11 @@ import {
   topeParteDePago, verificarTopeParteDePago, fusionarParteDePago, metricasTasador, colaTasaciones,
 } from "./tasaciones-core.js";
 
+import {
+  folioInspeccion, VEREDICTOS, validarSolicitudInspeccion, validarReprogramacion, validarResultadoInspeccion, claveEsDe,
+  validarTransicionInspeccion, idDeClave, ordenarAgenda, hayChoque, metricasInspector, colaInspecciones,
+} from "./inspecciones-core.js";
+
 export type Ctx = {
   sb: any;
   json: (data: unknown, status?: number) => Response;
@@ -513,6 +518,288 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       const tasadores = ids.map((id) => ({ id, nombre: (usuarios.find((u: any) => u.id === id) || {}).nombre ?? "", ...metricasTasador(todas, id, mes) }));
       const cola = colaTasaciones(todas, new Date(), cfg.horas_tasacion);
       return json({ mes, nombreMes: nombreMes(mes), tasadores, cola: { pendientes: cola.pendientes, masAntiguaHoras: cola.masAntiguaHoras, atrasadas: cola.atrasadas.length }, horasLimite: cfg.horas_tasacion });
+    }
+
+    return err("unknown_op");
+  }
+
+  /* ---------- inspecciones (Inspector, solicitudes con cola y agenda) ---------- */
+  if (op.startsWith("inspecciones.")) {
+    const realiza = can("inspecciones.realizar");
+    const puedePedir = can("inspecciones.pedir") || esSupervisor;
+    if (!realiza && !puedePedir) return err("forbidden", 403);
+
+    /** Personas activas del local que pueden realizar inspecciones. */
+    async function inspectoresDe(local: string) {
+      const overrides = await ctx.rolePermOverrides();
+      const { data, error } = await sb.from("usuarios").select("id, nombre, roles, permisos_extra, activo, local_id, comision").eq("local_id", local);
+      if (error) throw error;
+      return (data ?? []).filter((u: any) => u.activo && permisosEfectivos(u.roles ?? [], overrides, u.permisos_extra).includes("inspecciones.realizar"));
+    }
+    async function cargarInspeccion(id: string) {
+      const { data, error } = await scoped(sb.from("inspecciones").select("*").eq("id", id)).maybeSingle();
+      if (error) throw error;
+      return data;
+    }
+    /** ¿Puede ver la inspección? Quien inspecciona, el supervisor, quien la pidió o quien ve el lead de origen. */
+    async function veInspeccion(i: any) {
+      if (realiza || esSupervisor || (!ctx.esAdmin && i.solicitante_id === userId)) return true;
+      if (i.lead_id) { const l = await cargarLead(i.lead_id); if (l && puedeVer(l)) return true; }
+      return false;
+    }
+    /** Agrega nombres para mostrar. La ficha completa del Inspector (con datos del propietario) nunca sale de aquí. */
+    async function enriquecer(filas: any[]) {
+      const leads = await porIds("leads", filas.map((x) => x.lead_id));
+      const clientes = await porIds("clientes", leads.map((l: any) => l.cliente_id));
+      const usuarios = await porIds("usuarios", filas.flatMap((x) => [x.solicitante_id, x.inspector_id]));
+      const nombre = (id: string) => (usuarios.find((u: any) => u.id === id) || {}).nombre ?? "";
+      return filas.map(({ inspeccion_key, ...x }) => {
+        const l = leads.find((y: any) => y.id === x.lead_id);
+        return {
+          ...x, fotos: x.fotos ?? [], folio: folioInspeccion(x.numero), cliente: l ? (clientes.find((c: any) => c.id === l.cliente_id) || {}).nombre ?? "" : "",
+          solicitante: nombre(x.solicitante_id), inspector: nombre(x.inspector_id), tieneFicha: !!inspeccion_key, fichaId: idDeClave(inspeccion_key),
+          // Solo su Inspector (o la cuenta maestra) recibe la clave de su ficha, para abrirla.
+          fichaKey: inspeccion_key && (ctx.esAdmin || x.inspector_id === userId) ? inspeccion_key : null,
+        };
+      });
+    }
+    const fallar = (e: any) => fallo(e);
+    const anotar = async (i: any, texto: string) => { if (i.lead_id) await evento(i.lead_id, "inspeccion", texto); };
+
+    if (op === "inspecciones.equipo") {
+      if (!esSupervisor) return err("forbidden", 403);
+      const local = await localParaCrear();
+      if (!local) return err("sin_local");
+      return json({ inspectores: (await inspectoresDe(local)).map((u: any) => ({ id: u.id, nombre: u.nombre })) });
+    }
+
+    if (op === "inspecciones.pedir") {
+      if (!puedePedir) return err("forbidden", 403);
+      const v = validarSolicitudInspeccion(body.datos);
+      if (!v.ok) return err(v.error!);
+      const origen = String(body.origen ?? "");
+      let fila: Record<string, unknown> = { vehiculo: v.value.vehiculo, patente: v.value.vehiculo.patente, direccion: v.value.direccion, agendada_para: v.value.fechaHora, contacto_lugar: v.value.contactoLugar, notas_solicitud: v.value.notas, solicitante_id: ctx.esAdmin ? null : userId, creado_por: userId };
+      if (origen === "lead") {
+        const lead = await cargarLead(String(body.leadId ?? ""));
+        if (!lead || !puedeVer(lead)) return err("no_existe", 404);
+        if (!puedeTocar(lead)) return err("forbidden", 403);
+        if (ETAPAS_CERRADAS.includes(lead.etapa)) return err("lead_cerrado");
+        fila = { ...fila, origen: "lead", lead_id: lead.id, local_id: lead.local_id };
+      } else if (origen === "tasacion") {
+        const tq = await scoped(sb.from("tasaciones").select("id, local_id, lead_id, solicitante_id").eq("id", String(body.tasacionId ?? ""))).maybeSingle();
+        if (tq.error) return fallar(tq.error);
+        const t = tq.data;
+        if (!t) return err("no_existe", 404);
+        if (!(esSupervisor || can("tasaciones.realizar") || (!ctx.esAdmin && t.solicitante_id === userId))) return err("forbidden", 403);
+        fila = { ...fila, origen: "tasacion", tasacion_id: t.id, lead_id: t.lead_id ?? null, local_id: t.local_id };
+      } else if (origen === "vehiculo") {
+        if (!can("inventario.ver") && !can("inventario.editar") && !esSupervisor) return err("forbidden", 403);
+        const vq = await scoped(sb.from("vehiculos").select("id, local_id").eq("id", String(body.vehiculoId ?? ""))).maybeSingle();
+        if (vq.error) return fallar(vq.error);
+        if (!vq.data) return err("no_existe", 404);
+        fila = { ...fila, origen: "vehiculo", vehiculo_id: vq.data.id, local_id: vq.data.local_id };
+      } else return err("origen_invalido");
+      // Una misma patente no puede tener dos inspecciones abiertas a la vez.
+      const previas = await sb.from("inspecciones").select("id, estado").eq("patente", v.value.vehiculo.patente).in("estado", ["pendiente", "en_proceso"]);
+      if (previas.error) return fallar(previas.error);
+      if ((previas.data ?? []).length > 0) return err("inspeccion_en_curso", 409);
+      const ins = await sb.from("inspecciones").insert(fila).select().single();
+      if (ins.error) return fallar(ins.error);
+      const vh = v.value.vehiculo;
+      await anotar(ins.data, `Inspección ${folioInspeccion(ins.data.numero)} pedida por ${userName} para el ${fechaCL(v.value.fechaHora)}: ${vh.marca} ${vh.modelo} ${vh.anio} (${vh.patente}) en ${v.value.direccion}`);
+      await audit(ctx.actor, "inspeccion.pedir", "inspeccion", ins.data.id, { numero: ins.data.numero, patente: vh.patente, origen });
+      return json({ inspeccion: (await enriquecer([ins.data]))[0] });
+    }
+
+    if (op === "inspecciones.list") {
+      const vista = String(body.vista ?? "");
+      const { data, error } = await scoped(sb.from("inspecciones").select("*").order("agendada_para", { ascending: true }));
+      if (error) return fallar(error);
+      let filas: any[] = data ?? [];
+      const masNuevaPrimero = (a: any, b: any) => String(b.agendada_para ?? b.completada_en).localeCompare(String(a.agendada_para ?? a.completada_en));
+      if (vista === "cola") { if (!realiza && !esSupervisor) return err("forbidden", 403); filas = filas.filter((x) => x.estado === "pendiente"); }
+      else if (vista === "agenda") { if (!realiza) return err("forbidden", 403); filas = ordenarAgenda(filas.filter((x) => x.inspector_id === userId)); }
+      else if (vista === "mias") { if (!realiza) return err("forbidden", 403); filas = filas.filter((x) => x.inspector_id === userId && x.estado !== "cancelada").sort(masNuevaPrimero); }
+      else if (vista === "local") { if (!esSupervisor && !realiza) return err("forbidden", 403); if (body.estado) filas = filas.filter((x) => x.estado === String(body.estado)); filas.sort(masNuevaPrimero); }
+      else if (vista === "solicitadas") filas = filas.filter((x) => x.solicitante_id === userId).sort(masNuevaPrimero);
+      else if (vista === "origen") {
+        const campo = body.leadId ? "lead_id" : body.tasacionId ? "tasacion_id" : body.vehiculoId ? "vehiculo_id" : "";
+        if (!campo) return err("vista_invalida");
+        const valor = String(body.leadId || body.tasacionId || body.vehiculoId);
+        if (campo === "lead_id") { const l = await cargarLead(valor); if (!l || !puedeVer(l)) return err("no_existe", 404); }
+        else if (!(puedePedir || realiza || can("inventario.ver") || can("inventario.editar"))) return err("forbidden", 403);
+        filas = filas.filter((x) => x[campo] === valor).sort((a, b) => String(b.solicitada_en).localeCompare(String(a.solicitada_en)));
+      } else return err("vista_invalida");
+      const hace60 = Date.now() - 60 * 86_400_000;
+      filas = filas.filter((x) => !(x.estado === "cancelada" && Date.parse(x.actualizado_en) < hace60)).slice(0, 200);
+      return json({ inspecciones: await enriquecer(filas), puedeRealizar: realiza, puedeGestionar: esSupervisor, puedePedir });
+    }
+
+    if (op === "inspecciones.get") {
+      const x = await cargarInspeccion(String(body.id ?? ""));
+      if (!x || !(await veInspeccion(x))) return err("no_existe", 404);
+      return json({ inspeccion: (await enriquecer([x]))[0], puedeGestionar: esSupervisor, puedeRealizar: realiza, esMia: !ctx.esAdmin && x.inspector_id === userId, esSolicitante: !ctx.esAdmin && x.solicitante_id === userId });
+    }
+
+    if (op === "inspecciones.tomar") {
+      if (!realiza || ctx.esAdmin) return err("forbidden", 403);
+      const x = await cargarInspeccion(String(body.id ?? ""));
+      if (!x) return err("no_existe", 404);
+      const tr = validarTransicionInspeccion(x.estado, "tomar");
+      if (!tr.ok) return err(x.estado === "en_proceso" ? "inspeccion_ya_tomada" : tr.error!, 409);
+      const r = await sb.from("inspecciones").update({ estado: "en_proceso", inspector_id: userId, tomada_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }).eq("id", x.id).eq("estado", "pendiente").select().maybeSingle();
+      if (r.error) return fallar(r.error);
+      if (!r.data) return err("inspeccion_ya_tomada", 409);
+      await anotar(x, `${userName} tomó la inspección ${folioInspeccion(x.numero)}: irá el ${fechaCL(x.agendada_para)}`);
+      await audit(ctx.actor, "inspeccion.tomar", "inspeccion", x.id, { numero: x.numero });
+      const suyas = await sb.from("inspecciones").select("*").eq("inspector_id", userId).eq("estado", "en_proceso");
+      return json({ inspeccion: (await enriquecer([r.data]))[0], choque: hayChoque(suyas.data ?? [], userId, x.agendada_para, x.id) });
+    }
+
+    if (op === "inspecciones.liberar" || op === "inspecciones.asignar") {
+      const x = await cargarInspeccion(String(body.id ?? ""));
+      if (!x || !(await veInspeccion(x))) return err("no_existe", 404);
+      const asignar = op === "inspecciones.asignar";
+      const tr = validarTransicionInspeccion(x.estado, asignar ? "asignar" : "liberar");
+      if (!tr.ok) return err(tr.error!);
+      if (asignar ? !esSupervisor : !(esSupervisor || (realiza && x.inspector_id === userId))) return err("forbidden", 403);
+      let patch: Record<string, unknown>;
+      let texto: string;
+      if (asignar) {
+        const destino = (await inspectoresDe(x.local_id)).find((u: any) => u.id === body.inspectorId);
+        if (!destino) return err("asignado_invalido");
+        patch = { estado: "en_proceso", inspector_id: destino.id, tomada_en: new Date().toISOString() };
+        texto = `Inspección ${folioInspeccion(x.numero)} asignada a ${destino.nombre} por ${userName}`;
+      } else {
+        patch = { estado: "pendiente", inspector_id: null, tomada_en: null };
+        texto = `${userName} devolvió la inspección ${folioInspeccion(x.numero)} a la cola`;
+      }
+      const { data, error } = await sb.from("inspecciones").update({ ...patch, actualizado_en: new Date().toISOString() }).eq("id", x.id).select().single();
+      if (error) return fallar(error);
+      await anotar(x, texto);
+      await audit(ctx.actor, asignar ? "inspeccion.asignar" : "inspeccion.liberar", "inspeccion", x.id, { numero: x.numero });
+      return json({ inspeccion: (await enriquecer([data]))[0] });
+    }
+
+    if (op === "inspecciones.reprogramar") {
+      const x = await cargarInspeccion(String(body.id ?? ""));
+      if (!x || !(await veInspeccion(x))) return err("no_existe", 404);
+      const tr = validarTransicionInspeccion(x.estado, "reprogramar");
+      if (!tr.ok) return err(tr.error!);
+      const suya = !ctx.esAdmin && (x.solicitante_id === userId || x.inspector_id === userId);
+      if (!(esSupervisor || suya)) return err("forbidden", 403);
+      const v = validarReprogramacion(body.datos);
+      if (!v.ok) return err(v.error!);
+      const { data, error } = await sb.from("inspecciones").update({ agendada_para: v.value.fechaHora, direccion: v.value.direccion, contacto_lugar: v.value.contactoLugar, actualizado_en: new Date().toISOString() }).eq("id", x.id).select().single();
+      if (error) return fallar(error);
+      await anotar(x, `${userName} reprogramó la inspección ${folioInspeccion(x.numero)} para el ${fechaCL(v.value.fechaHora)} en ${v.value.direccion}`);
+      await audit(ctx.actor, "inspeccion.reprogramar", "inspeccion", x.id, { numero: x.numero, agendada_para: v.value.fechaHora });
+      return json({ inspeccion: (await enriquecer([data]))[0] });
+    }
+
+    if (op === "inspecciones.cancelar") {
+      const x = await cargarInspeccion(String(body.id ?? ""));
+      if (!x || !(await veInspeccion(x))) return err("no_existe", 404);
+      const tr = validarTransicionInspeccion(x.estado, "cancelar");
+      if (!tr.ok) return err(tr.error!);
+      const duenoDeLaSolicitud = !ctx.esAdmin && x.solicitante_id === userId && x.estado === "pendiente";
+      if (!(esSupervisor || duenoDeLaSolicitud || (realiza && x.inspector_id === userId))) return err("forbidden", 403);
+      const motivo = String(body.motivo ?? "").trim().slice(0, 150);
+      if (motivo.length < 3) return err("motivo_requerido");
+      const ahora = new Date().toISOString();
+      const { data, error } = await sb.from("inspecciones").update({ estado: "cancelada", cancelada_en: ahora, motivo_cancelacion: motivo, actualizado_en: ahora }).eq("id", x.id).select().single();
+      if (error) return fallar(error);
+      await anotar(x, `Inspección ${folioInspeccion(x.numero)} cancelada por ${userName}: ${motivo}`);
+      await audit(ctx.actor, "inspeccion.cancelar", "inspeccion", x.id, { numero: x.numero, motivo });
+      return json({ inspeccion: (await enriquecer([data]))[0] });
+    }
+
+    // El Inspector guardó una ficha: aquí queda el resultado visible para el equipo (nunca los datos del propietario).
+    if (op === "inspecciones.registrar") {
+      if (!realiza || ctx.esAdmin) return err("forbidden", 403);
+      const v = validarResultadoInspeccion(body);
+      if (!v.ok) return err(v.error!);
+      if (!claveEsDe(v.value.key, userId)) return err("forbidden", 403);
+      const ahora = new Date().toISOString();
+      const datos = { resultado: v.value.resumen, fotos: v.value.fotos, actualizado_en: ahora };
+      const hallada = await sb.from("inspecciones").select("*").eq("inspeccion_key", v.value.key).maybeSingle();
+      if (hallada.error) return fallar(hallada.error);
+      let fila: any;
+      if (hallada.data) {
+        if (hallada.data.inspector_id !== userId) return err("forbidden", 403);
+        const r = await sb.from("inspecciones").update(datos).eq("id", hallada.data.id).select().single();
+        if (r.error) return fallar(r.error);
+        fila = r.data;
+      } else if (body.solicitudId) {
+        const x = await cargarInspeccion(String(body.solicitudId));
+        if (!x) return err("no_existe", 404);
+        if (x.inspector_id !== userId) return err("forbidden", 403);
+        const tr = validarTransicionInspeccion(x.estado, "completar");
+        if (!tr.ok) return err(tr.error!);
+        const r = await sb.from("inspecciones").update({ ...datos, estado: "completada", inspeccion_key: v.value.key, completada_en: ahora }).eq("id", x.id).eq("estado", "en_proceso").select().maybeSingle();
+        if (r.error) return fallar(r.error);
+        if (!r.data) return err("inspeccion_estado_invalido", 409);
+        fila = r.data;
+        const distinta = r.data.patente && v.value.vehiculo.patente !== r.data.patente;
+        await anotar(x, `Inspección ${folioInspeccion(x.numero)} realizada por ${userName}: ${VEREDICTOS[v.value.resumen.veredicto as keyof typeof VEREDICTOS]}${distinta ? ` (la patente de la ficha es ${v.value.vehiculo.patente})` : ""}`);
+      } else {
+        const r = await sb.from("inspecciones").insert({
+          ...datos, origen: "espontanea", estado: "completada", inspector_id: userId, local_id: localId, vehiculo: v.value.vehiculo, patente: v.value.vehiculo.patente,
+          inspeccion_key: v.value.key, solicitada_en: ahora, tomada_en: ahora, completada_en: ahora, creado_por: userId,
+        }).select().single();
+        if (r.error) return fallar(r.error);
+        fila = r.data;
+      }
+      await audit(ctx.actor, "inspeccion.registrar", "inspeccion", fila.id, { numero: fila.numero, patente: v.value.vehiculo.patente, origen: fila.origen, veredicto: v.value.resumen.veredicto });
+      return json({ inspeccion: (await enriquecer([fila]))[0] });
+    }
+
+    // El Inspector eliminó su ficha: la espontánea desaparece; la pedida vuelve a "agendada" para rehacerla.
+    if (op === "inspecciones.eliminar") {
+      if (!realiza || ctx.esAdmin) return err("forbidden", 403);
+      const clave = String(body.key ?? "");
+      if (!claveEsDe(clave, userId)) return err("forbidden", 403);
+      const h = await sb.from("inspecciones").select("*").eq("inspeccion_key", clave).maybeSingle();
+      if (h.error) return fallar(h.error);
+      if (!h.data) return json({ ok: true });
+      if (h.data.inspector_id !== userId) return err("forbidden", 403);
+      if (h.data.origen === "espontanea") {
+        const d = await sb.from("inspecciones").delete().eq("id", h.data.id);
+        if (d.error) return fallar(d.error);
+      } else {
+        const u = await sb.from("inspecciones").update({ estado: "en_proceso", inspeccion_key: null, resultado: {}, fotos: [], completada_en: null, actualizado_en: new Date().toISOString() }).eq("id", h.data.id);
+        if (u.error) return fallar(u.error);
+        await anotar(h.data, `${userName} eliminó la ficha de la inspección ${folioInspeccion(h.data.numero)}: quedó pendiente de rehacer`);
+      }
+      await audit(ctx.actor, "inspeccion.eliminar", "inspeccion", h.data.id, { numero: h.data.numero, origen: h.data.origen });
+      return json({ ok: true });
+    }
+
+    if (op === "inspecciones.resumen") {
+      if (!realiza && !esSupervisor) return err("forbidden", 403);
+      const mes = body.mes === undefined ? mesChile() : String(body.mes);
+      if (!esMes(mes)) return err("mes_invalido");
+      const { data, error } = await scoped(sb.from("inspecciones").select("*"));
+      if (error) return fallar(error);
+      const todas: any[] = data ?? [];
+      let cfg;
+      try { cfg = await configNegocio(); } catch (e) { return fallo(e); }
+      let personas: any[];
+      if (esSupervisor) {
+        const base = localId ? await inspectoresDe(localId) : [];
+        const extra = await porIds("usuarios", todas.map((x) => x.inspector_id).filter((id) => id && !base.some((b: any) => b.id === id)));
+        personas = [...base, ...extra];
+      } else personas = await porIds("usuarios", [userId]);
+      const inspectores = personas.map((u: any) => {
+        const m = metricasInspector(todas, u.id, mes);
+        const tramos = tramosEfectivos(u.comision);
+        return {
+          id: u.id, nombre: u.nombre, ...m, tramos, produccion: calcularProduccion({ inspeccionesN: m.hechas }, tramos).inspecciones,
+          personalizado: Object.keys((u.comision && u.comision.tramos) || {}).length > 0,
+        };
+      }).sort((a: any, b: any) => b.hechas - a.hechas || a.nombre.localeCompare(b.nombre));
+      const cola = colaInspecciones(todas, new Date(), cfg.horas_inspeccion);
+      return json({ mes, nombreMes: nombreMes(mes), inspectores, cola: { pendientes: cola.pendientes, masAntiguaHoras: cola.masAntiguaHoras, atrasadas: cola.atrasadas.length }, horasLimite: cfg.horas_inspeccion, esSupervisor });
     }
 
     return err("unknown_op");
@@ -1241,7 +1528,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     return json({
       mes, nombreMes: nombreMes(mes), meta, ejecutivos, verTodos,
       totales: { unidades: delMes.length, produccion: ejecutivos.reduce((a: number, e: any) => a + e.produccion.total, 0), montoVendido: ejecutivos.reduce((a: number, e: any) => a + e.montoVendido, 0) },
-      pendientesDeOtrosModulos: ["compras", "consignaciones", "inspecciones"],
+      pendientesDeOtrosModulos: ["compras", "consignaciones"],
     });
   }
 
@@ -1306,6 +1593,8 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
 
     const tsr = await scoped(sb.from("tasaciones").select("*").eq("estado", "pendiente"));
     const tasSinTomar: any[] = tsr.error ? [] : (tsr.data ?? []).filter((t: any) => horasDesde(t.solicitada_en, ahora) >= cfg.horas_tasacion);
+    const isr = await scoped(sb.from("inspecciones").select("*").eq("estado", "pendiente"));
+    const inspSinTomar: any[] = isr.error ? [] : colaInspecciones(isr.data ?? [], ahora, cfg.horas_inspeccion).atrasadas;
     const sinAtender = abiertos.filter((l) => esSinAtender(l, ahora, cfg.horas_sin_contacto));
     const detenidos = abiertos.filter((l) => esDetenido(l, ahora, cfg.dias_detenido));
     const sinAsignar = abiertos.filter((l) => !l.asignado_a);
@@ -1314,7 +1603,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     const clientes = await porIds("clientes", [...abiertos, ...leadsDeTareas].map((l: any) => l.cliente_id));
     const vehiculos = await porIds("vehiculos", porVencer.map((r) => r.vehiculo_id));
     const equipoBase = localId ? await elegibles(localId) : [];
-    const usuarios = await porIds("usuarios", [...abiertos.map((l) => l.asignado_a), ...tareasVencidas.map((t) => t.asignado_a), ...equipoBase.map((e: any) => e.id), ...tasSinTomar.map((t) => t.solicitante_id)]);
+    const usuarios = await porIds("usuarios", [...abiertos.map((l) => l.asignado_a), ...tareasVencidas.map((t) => t.asignado_a), ...equipoBase.map((e: any) => e.id), ...tasSinTomar.map((t) => t.solicitante_id), ...inspSinTomar.map((x) => x.solicitante_id)]);
     const nombreDe = (id: string) => (usuarios.find((u: any) => u.id === id) || {}).nombre ?? "";
     const clienteDe = (id: string) => (clientes.find((c: any) => c.id === id) || {}).nombre ?? "";
     const fila = (l: any) => ({ id: l.id, cliente: clienteDe(l.cliente_id), ejecutivo: l.asignado_a ? nombreDe(l.asignado_a) : "", asignado_a: l.asignado_a, etapa: l.etapa, fuente: l.fuente, creado_en: l.creado_en, ultima_actividad: ultimaActividad(l) });
@@ -1331,8 +1620,8 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     })).filter((e) => e.id !== null || e.abiertos > 0).sort((a, b) => (a.id === null ? -1 : b.id === null ? 1 : a.nombre.localeCompare(b.nombre)));
 
     return json({
-      config: { horas_sin_contacto: cfg.horas_sin_contacto, dias_detenido: cfg.dias_detenido, horas_tasacion: cfg.horas_tasacion },
-      conteos: { abiertos: abiertos.length, sinAtender: sinAtender.length, detenidos: detenidos.length, sinAsignar: sinAsignar.length, tareasVencidas: tareasVencidas.length, reservasPorVencer: porVencer.length, tasacionesSinTomar: tasSinTomar.length },
+      config: { horas_sin_contacto: cfg.horas_sin_contacto, dias_detenido: cfg.dias_detenido, horas_tasacion: cfg.horas_tasacion, horas_inspeccion: cfg.horas_inspeccion },
+      conteos: { abiertos: abiertos.length, sinAtender: sinAtender.length, detenidos: detenidos.length, sinAsignar: sinAsignar.length, tareasVencidas: tareasVencidas.length, reservasPorVencer: porVencer.length, tasacionesSinTomar: tasSinTomar.length, inspeccionesSinTomar: inspSinTomar.length },
       sinAtender: tope(sinAtender).map(fila),
       detenidos: tope(detenidos).map(fila),
       sinAsignar: tope(sinAsignar).map(fila),
@@ -1349,6 +1638,10 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
         const l = leadsDeTareas.find((x: any) => x.id === t.lead_id);
         const vh = t.vehiculo || {};
         return { id: t.id, lead_id: t.lead_id, folio: folioTasacion(t.numero), vehiculo: `${vh.marca ?? ""} ${vh.modelo ?? ""} ${vh.anio ?? ""} · ${vh.patente ?? ""}`.trim(), cliente: l ? clienteDe(l.cliente_id) : (t.contacto && t.contacto.nombre) || "", solicitante: nombreDe(t.solicitante_id), solicitada_en: t.solicitada_en };
+      }),
+      inspeccionesSinTomar: tope(inspSinTomar).map((x) => {
+        const vh = x.vehiculo || {};
+        return { id: x.id, lead_id: x.lead_id, folio: folioInspeccion(x.numero), vehiculo: `${vh.marca ?? ""} ${vh.modelo ?? ""} ${vh.anio ?? ""} · ${vh.patente ?? ""}`.trim(), direccion: x.direccion, agendada_para: x.agendada_para, solicitante: nombreDe(x.solicitante_id), solicitada_en: x.solicitada_en };
       }),
       equipo,
     });

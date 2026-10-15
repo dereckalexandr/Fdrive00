@@ -77,12 +77,12 @@ test("Alertas: sin atender, detenidos, sin asignar, con los plazos por defecto (
 
   const r = await ve(U.jefe.token, "gestion.resumen");
   assert.equal(r.status, 200, JSON.stringify(r));
-  assert.deepEqual(r.config, { horas_sin_contacto: 4, dias_detenido: 7, horas_tasacion: 8 });
+  assert.deepEqual(r.config, { horas_sin_contacto: 4, dias_detenido: 7, horas_tasacion: 8, horas_inspeccion: 8 });
   const ids = (lista) => lista.map((x) => x.id).sort();
   assert.deepEqual(ids(r.sinAtender), ids([U.A, U.H]));
   assert.deepEqual(ids(r.detenidos), ids([U.D, U.F]));
   assert.deepEqual(ids(r.sinAsignar), [U.H.id]);
-  assert.deepEqual(r.conteos, { abiertos: 8, sinAtender: 2, detenidos: 2, sinAsignar: 1, tareasVencidas: 0, reservasPorVencer: 0, tasacionesSinTomar: 0 });
+  assert.deepEqual(r.conteos, { abiertos: 8, sinAtender: 2, detenidos: 2, sinAsignar: 1, tareasVencidas: 0, reservasPorVencer: 0, tasacionesSinTomar: 0, inspeccionesSinTomar: 0 });
   const a = r.sinAtender.find((x) => x.id === U.A.id);
   assert.equal(a.ejecutivo, "Eva Uno");
   assert.equal(a.etapa, "nuevo");
@@ -104,7 +104,7 @@ test("Los plazos salen de la configuración", async () => {
   assert.equal((await crm(admin, "config.set", { clave: "horas_sin_contacto", valor: 8 })).status, 200);
   assert.equal((await crm(admin, "config.set", { clave: "dias_detenido", valor: 9 })).status, 200);
   const r = await ve(U.jefe.token, "gestion.resumen");
-  assert.deepEqual(r.config, { horas_sin_contacto: 8, dias_detenido: 9, horas_tasacion: 8 });
+  assert.deepEqual(r.config, { horas_sin_contacto: 8, dias_detenido: 9, horas_tasacion: 8, horas_inspeccion: 8 });
   assert.deepEqual(r.sinAtender.map((x) => x.id), [], "5 h y 6 h ya no pasan el plazo de 8 h");
   assert.deepEqual(r.detenidos.map((x) => x.id), [U.D.id], "el de 8 días ya no está detenido con 9");
   await crm(admin, "config.set", { clave: "horas_sin_contacto", valor: 4 });

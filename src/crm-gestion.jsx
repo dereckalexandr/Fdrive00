@@ -76,7 +76,7 @@ export function FranjaAlertas({ resumen, onVer }) {
   const c = resumen.conteos;
   const partes = [
     [c.sinAtender, "sin atender"], [c.detenidos, "detenidos"], [c.sinAsignar, "sin asignar"],
-    [c.tareasVencidas, "tareas vencidas del equipo"], [c.reservasPorVencer, "reservas por vencer"], [c.tasacionesSinTomar, "tasaciones sin tomar"],
+    [c.tareasVencidas, "tareas vencidas del equipo"], [c.reservasPorVencer, "reservas por vencer"], [c.tasacionesSinTomar, "tasaciones sin tomar"], [c.inspeccionesSinTomar, "inspecciones sin tomar"],
   ].filter(([n]) => n > 0);
   if (partes.length === 0) return null;
   return (
@@ -96,6 +96,7 @@ const TIPOS = [
   { id: "tareasVencidas", nombre: "Tareas vencidas", color: "border-orange-400", ayuda: () => "Llamadas y visitas del equipo cuya fecha ya pasó." },
   { id: "reservasPorVencer", nombre: "Reservas por vencer", color: "border-sky-400", ayuda: () => "Reservas que vencen en las próximas 48 horas: decide si se extienden." },
   { id: "tasacionesSinTomar", nombre: "Tasaciones sin tomar", color: "border-teal-400", ayuda: (c) => `Solicitudes de tasación que llevan ${c.horas_tasacion} h o más en la cola sin que un Tasador las tome.` },
+  { id: "inspeccionesSinTomar", nombre: "Inspecciones sin tomar", color: "border-indigo-400", ayuda: (c) => `Solicitudes de inspección que llevan ${c.horas_inspeccion} h o más en la cola, o cuya fecha es dentro de menos de 24 h, sin que un Inspector las tome. Asígnalas desde la pestaña Inspecciones.` },
 ];
 
 function Alertas({ api, abrirLead, version, onCambio }) {
@@ -164,6 +165,7 @@ function Alertas({ api, abrirLead, version, onCambio }) {
               {esLeads && <><th className="py-3 px-3">Cliente</th><th className="py-3 px-3">Ejecutivo</th><th className="py-3 px-3">Etapa</th><th className="py-3 px-3">{tipo === "detenidos" ? "Sin actividad" : "Llegó"}</th><th className="py-3 px-3"></th></>}
               {tipo === "tareasVencidas" && <><th className="py-3 px-3">Tarea</th><th className="py-3 px-3">Cliente</th><th className="py-3 px-3">Ejecutivo</th><th className="py-3 px-3">Venció</th><th className="py-3 px-3"></th></>}
               {tipo === "tasacionesSinTomar" && <><th className="py-3 px-3">Tasación</th><th className="py-3 px-3">Vehículo</th><th className="py-3 px-3">Cliente</th><th className="py-3 px-3">Pidió</th><th className="py-3 px-3">Espera</th></>}
+              {tipo === "inspeccionesSinTomar" && <><th className="py-3 px-3">Inspección</th><th className="py-3 px-3">Vehículo</th><th className="py-3 px-3">Dónde y cuándo</th><th className="py-3 px-3">Pidió</th><th className="py-3 px-3">Espera</th></>}
               {tipo === "reservasPorVencer" && <><th className="py-3 px-3">Vehículo</th><th className="py-3 px-3">Cliente</th><th className="py-3 px-3">Ejecutivo</th><th className="py-3 px-3">Reserva</th><th className="py-3 px-3"></th></>}
             </tr>
           </thead>
@@ -193,6 +195,13 @@ function Alertas({ api, abrirLead, version, onCambio }) {
               <tr key={t.id} className="border-b border-stone-100">
                 <td className="py-2.5 px-3 font-mono text-xs text-stone-500">{t.folio}</td><td className="py-2.5 px-3 text-stone-900">{t.vehiculo}</td><td className="py-2.5 px-3 text-stone-700">{t.cliente}</td>
                 <td className="py-2.5 px-3 text-stone-700">{t.solicitante}</td><td className="py-2.5 px-3 text-rose-700 whitespace-nowrap">{edadTexto(t.solicitada_en)}</td>
+              </tr>
+            ))}
+            {tipo === "inspeccionesSinTomar" && lista.map((x) => (
+              <tr key={x.id} className="border-b border-stone-100">
+                <td className="py-2.5 px-3 font-mono text-xs text-stone-500">{x.folio}</td><td className="py-2.5 px-3 text-stone-900">{x.vehiculo}</td>
+                <td className="py-2.5 px-3 text-stone-700">{x.direccion}<div className="text-xs text-rose-700">{fechaHora(x.agendada_para)}</div></td>
+                <td className="py-2.5 px-3 text-stone-700">{x.solicitante}</td><td className="py-2.5 px-3 text-rose-700 whitespace-nowrap">{edadTexto(x.solicitada_en)}</td>
               </tr>
             ))}
             {tipo === "reservasPorVencer" && lista.map((r) => (

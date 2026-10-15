@@ -391,6 +391,33 @@ Hasta que se ejecute el SQL el resto sigue funcionando; pedir o tasar avisa que 
 
 Código: reglas en `supabase/functions/api/tasaciones-core.js`; servidor en `ventas.ts` (`tasaciones.*`); pantallas en `src/crm-tasaciones.jsx`; el estimador (`TasacionCompra` en `src/App.jsx`) ahora acepta `inicial` y `onResultado`. Pruebas: `tests/tasaciones-core.test.mjs` y `tests/tasaciones-api.test.mjs` (la función real contra una base falsa).
 
+## CRM · Entrega 5: perfil del Inspector
+
+**Instalar (una sola vez, después de `supabase-crm-tasaciones.sql`):**
+1. Supabase → *SQL Editor* → pegar `supabase-crm-inspecciones.sql` → *Run*. Crea la tabla `inspecciones` (RLS activado, sin políticas). Se puede repetir sin riesgo.
+2. Redesplegar la función: `node scripts/deploy-api.mjs`.
+Hasta que se ejecute el SQL el resto sigue funcionando; pedir o registrar inspecciones avisa que faltan las tablas.
+
+**Permisos nuevos** (pestaña *Permisos*): `inspecciones.pedir` (Ejecutivo, Jefe Local y Tasador) e `inspecciones.realizar` (Inspector). *Si antes personalizaste los permisos de esos roles, los nuevos no se agregan solos: actívalos ahí.* El Jefe Local gestiona todo lo del local con su permiso de supervisor.
+
+**Dos formas de inspeccionar:**
+- **Con solicitud** (cola y agenda): un Ejecutivo, Tasador o supervisor pide la inspección desde la **ficha del lead**, el **detalle de una tasación** o la **ficha del vehículo del inventario**, indicando **fecha, hora, dirección**, con quién coordinar en el lugar y una nota. Queda en la cola *Por tomar*. El primer Inspector que la toma se la queda (otro recibe "ya la tomó"); si le queda otra a menos de 90 minutos, se le avisa del posible choque. El supervisor puede **asignarla**, **reasignarla**, **devolverla a la cola**, **reprogramarla** o **cancelarla**; quien la pidió puede reprogramarla y, mientras está sin tomar, cancelarla. Una misma patente no puede tener dos inspecciones abiertas.
+- **Espontánea**: el Inspector usa su checklist de siempre (con PDF del CAV, borradores y PDF) sin que nadie se la haya pedido. Se registra sola al guardar.
+
+**Estación del Inspector** (tarjeta *Inspecciones y tasaciones*): primero **Solicitudes y agenda** (*Mi agenda* agrupada por día con las atrasadas marcadas, *Por tomar*, *Mis inspecciones*, *Todas del local*, *Resumen y comisión*) y luego la pestaña *Inspección* con su checklist. Al pulsar *Realizar la inspección* en una solicitud agendada, el checklist se abre con la patente, marca, modelo y año ya cargados y un aviso de que responde a esa solicitud. Si la ficha se edita o se elimina, la solicitud se actualiza: al eliminar, la pedida vuelve a *Agendada* para rehacerla y la espontánea desaparece.
+
+**Privacidad (lo hace cumplir el servidor):** los demás perfiles ven el **resultado** (*Sin observaciones / Con observaciones / Con fallas*, cuántos ítems están bien, regulares o malos), las **observaciones destacadas** y las **fotos**. **Nunca** ven el nombre ni el RUN del propietario del padrón: no se guardan en la tabla del CRM (el resumen se arma con una lista cerrada de campos y descarta todo lo demás) y la ficha completa (`inspeccion::<persona>::<id>`) solo la abre su Inspector. Las fotos para el equipo (hasta 12, reducidas en el dispositivo) se suben desde el checklist como `ifoto::<ficha>::<id>`: las sube quien inspecciona y las ven quienes piden inspecciones, miran los leads o tasan.
+
+**Comisión del Inspector:** por tramos según las **inspecciones realizadas en el mes** (pedidas y espontáneas, las dos cuentan), con la misma regla de los demás módulos: se aplica el monto del tramo en que cae la cantidad a **todas** las del mes. Estándar: **$35.000 c/u** (tramo 1–10); el administrador define tramos propios por persona en *Usuarios → Editar → Comisiones por tramos → Inspecciones*. La pestaña *Resumen y comisión* muestra, por Inspector, realizadas, pedidas/espontáneas, con fallas, tiempo medio de respuesta (desde que se pidió hasta que se realizó), agendadas, tramo y comisión; cada Inspector ve solo lo suyo y el supervisor, a todos los del local.
+
+**Alerta en el panel de gestión:** *Inspecciones sin tomar* — solicitudes que llevan **8 horas** o más en la cola, o cuya fecha es dentro de menos de 24 horas, sin Inspector (se cambia en *Configuración → Alertas del panel de gestión*). Cada paso importante queda en el historial del lead y en la bitácora.
+
+**Dónde se usa:** el Inspector, en su estación; el Ejecutivo, en la ficha del lead (y en la pestaña *Inspecciones* de Ventas, *Mis solicitudes*); el Tasador, en el detalle de la tasación; el supervisor y la cuenta maestra, en la pestaña **Inspecciones** dentro de Ventas.
+
+**Límites conocidos:** los Inspectores que ingresan con el código del panel antiguo siguen funcionando como antes, pero no participan de solicitudes ni comisión (para eso se ingresa con RUT). Si se guarda una ficha con una patente inválida, la inspección se guarda pero no se registra en el CRM hasta corregirla y volver a guardar (la pantalla lo avisa). Las fotos de una ficha descartada sin guardar se borran al descartar; si se cierra la pestaña a la mitad, pueden quedar fotos sueltas sin uso.
+
+Código: reglas en `supabase/functions/api/inspecciones-core.js`; servidor en `ventas.ts` (`inspecciones.*`); pantallas en `src/crm-inspecciones.jsx` (y el enganche con el checklist en `InspectorDashboard`, `src/App.jsx`). Pruebas: `tests/inspecciones-core.test.mjs` y `tests/inspecciones-api.test.mjs` (la función real contra una base falsa).
+
 ## Desplegar en un hosting público
 
 Las opciones más simples (tienen plan gratuito y se conectan directo a

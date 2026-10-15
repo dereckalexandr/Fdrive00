@@ -19,6 +19,9 @@ import { buildPatenteBookmarkletHref } from "./patente-bookmarklet.js";
 import { AdminCrmPanel, PESTANAS_CRM } from "./crm-admin.jsx";
 import { ModuloVentas } from "./crm-ventas.jsx";
 import { ModuloTasaciones } from "./crm-tasaciones.jsx";
+import { ModuloInspecciones, Miniatura as MiniaturaEquipo, fotoKeyInspeccion, guardarCacheFoto } from "./crm-inspecciones.jsx";
+import { resumirInspeccion, MAX_FOTOS_INSPECCION } from "../supabase/functions/api/inspecciones-core.js";
+import { mensajeError as mensajeCrm } from "./crm-ui.jsx";
 import { LoginPersonal, CambioClaveObligatorio, EstacionTrabajo } from "./crm-estacion.jsx";
 import { photoKey, photoPrefix, makePhotoId, compressImage, collectPhotoIds, diffIds, MAX_PHOTOS_PER_ITEM, MAX_PHOTOS_PER_TASACION } from "./photos.js";
 
@@ -661,6 +664,7 @@ function emptyInspeccion() {
     propietarioNombre: "",
     propietarioRun: "",
     checklist: {},
+    fotosEquipo: [],
   };
 }
 
@@ -2230,8 +2234,14 @@ function ActionLink({ onClick, danger = false, children }) {
   );
 }
 
-function InspectorDashboard({ inspector, onExit }) {
-  const [tab, setTab] = useState("inspeccion");
+function InspectorDashboard({ inspector, onExit, crm }) {
+  // Personas del CRM (ingresan con RUT): sus inspecciones además se registran en el CRM (solicitudes, resultado y comisión).
+  const crmRealiza = !!(crm && Array.isArray(crm.permisos) && (crm.permisos.includes("inspecciones.realizar") || crm.permisos.includes("*")));
+  const crmApi = (op, params) => window.auth.ventas(op, params);
+  const [tab, setTab] = useState(crmRealiza ? "solicitudes" : "inspeccion");
+  const [nuevoId, setNuevoId] = useState(() => `${Date.now()}`);
+  const [fotosBusy, setFotosBusy] = useState(false);
+  const [fotosError, setFotosError] = useState("");
 
   // Borradores: se restauran una sola vez, antes del primer render, para que
   // el autoguardado no pise el borrador con un formulario vacío.
@@ -2316,7 +2326,64 @@ function InspectorDashboard({ inspector, onExit }) {
   const resetInspeccion = () => {
     baselineRef.current.ins = emptyInspeccion();
     setRecord(emptyInspeccion()); setEditingId(null); setRestoredAt(null); setDraftNote("");
+    setNuevoId(`${Date.now()}`); setFotosError("");
     clearDraft(inspector.id, "inspeccion");
+  };
+
+  /* ---------- CRM: solicitudes, fotos para el equipo y registro del resultado ---------- */
+  const fichaId = editingId || nuevoId;
+  const fotosGuardadas = () => { const h = historial.find((x) => recordIdFromKey(x.id) === editingId); return h ? (h.data.fotosEquipo || []) : []; };
+  const borrarFotosEquipo = (ids) => ids.forEach((id) => { try { window.storage.delete(fotoKeyInspeccion(fichaId, id), true); } catch (e) { /* se limpia luego */ } });
+  const borrarFotosNoGuardadas = () => borrarFotosEquipo((record.fotosEquipo || []).filter((id) => !fotosGuardadas().includes(id)));
+  const descartarInspeccion = () => { borrarFotosNoGuardadas(); resetInspeccion(); };
+  const agregarFotosEquipo = async (ev) => {
+    const archivos = Array.from(ev.target.files || []);
+    ev.target.value = "";
+    setFotosError(""); setFotosBusy(true);
+    let actuales = [...(record.fotosEquipo || [])];
+    for (const a of archivos) {
+      if (actuales.length >= MAX_FOTOS_INSPECCION) { setFotosError(`Máximo ${MAX_FOTOS_INSPECCION} fotos por inspección.`); break; }
+      try {
+        const dataUrl = await compressImage(a);
+        const pid = makePhotoId();
+        const ok = await window.storage.set(fotoKeyInspeccion(fichaId, pid), dataUrl, true);
+        if (!ok) throw new Error("no_guardada");
+        guardarCacheFoto(pid, dataUrl);
+        actuales = [...actuales, pid];
+        setRecord((prev) => ({ ...prev, fotosEquipo: actuales }));
+      } catch (e) { setFotosError("No se pudo subir una de las fotos. Revisa tu conexión e inténtalo de nuevo."); }
+    }
+    setFotosBusy(false);
+  };
+  const quitarFotoEquipo = (pid) => {
+    setRecord((prev) => ({ ...prev, fotosEquipo: (prev.fotosEquipo || []).filter((x) => x !== pid) }));
+    if (!fotosGuardadas().includes(pid)) borrarFotosEquipo([pid]);
+  };
+  // Pasa a la inspección con los datos del vehículo de la solicitud.
+  const iniciarDesdeSolicitud = (x) => {
+    if (isMeaningful(record, baselineRef.current.ins) && !window.confirm("Tienes una inspección sin guardar. ¿Reemplazarla por la de la solicitud?")) return;
+    borrarFotosNoGuardadas();
+    const v = x.vehiculo || {};
+    const rec = { ...emptyInspeccion(), inscripcion: v.patente || "", marca: v.marca || "", modelo: v.modelo || "", anio: v.anio ? String(v.anio) : "", solicitudId: x.id, solicitudFolio: x.folio };
+    baselineRef.current.ins = rec;
+    setRecord(rec); setEditingId(null); setRestoredAt(null); setViewing(null); setNuevoId(`${Date.now()}`); setFotosError("");
+    setTab("inspeccion");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+  const abrirFichaDeSolicitud = (x) => {
+    const h = historial.find((i) => i.id === x.fichaKey);
+    if (h) { setViewing(h); setTab("inspeccion"); }
+  };
+  // Avisa al CRM: deja el resultado visible para el equipo (sin datos del propietario) y suma a la comisión.
+  const registrarEnCrm = async (id, data) => {
+    const patente = String(data.inscripcion || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
+    try {
+      await crmApi("inspecciones.registrar", {
+        key: `inspeccion::${inspector.id}::${id}`, solicitudId: data.solicitudId || undefined, fecha: data.fecha,
+        vehiculo: { patente, marca: data.marca, modelo: data.modelo, anio: data.anio }, resumen: resumirInspeccion(data.checklist, CHECKLIST_SECTIONS), fotos: data.fotosEquipo || [],
+      });
+      return "";
+    } catch (e) { return mensajeCrm(e); }
   };
   /* ---------- Fotos de la tasación ---------- */
   // Cada foto es un registro aparte (foto::<inspector>::<id>); la tasación solo guarda sus ids.
@@ -2349,13 +2416,16 @@ function InspectorDashboard({ inspector, onExit }) {
 
   /* ---------- Inspección: guardar / editar / eliminar / PDF ---------- */
   const handleSave = async () => {
-    const id = editingId || `${Date.now()}`;
+    const id = editingId || nuevoId;
     const now = new Date().toISOString();
     const toSave = { ...record, inspectorId: inspector.id, inspectorNombre: inspector.nombre, guardadoEl: editingId ? (record.guardadoEl || now) : now };
     if (editingId) toSave.editadoEl = now;
     const ok = await saveInspeccion(inspector.id, id, toSave);
     if (ok) {
-      flash(setSaveMsg, editingId ? "Cambios guardados ✓" : "Inspección guardada ✓", 2500);
+      const errCrm = crmRealiza ? await registrarEnCrm(id, toSave) : "";
+      // Las fotos que se quitaron de una inspección ya guardada se borran recién ahora.
+      if (crmRealiza && editingId) borrarFotosEquipo(fotosGuardadas().filter((p) => !(toSave.fotosEquipo || []).includes(p)));
+      flash(setSaveMsg, errCrm ? `Inspección guardada, pero NO se registró en el CRM: ${errCrm} Corrígela y vuelve a guardar (Editar → Guardar cambios).` : editingId ? "Cambios guardados ✓" : crmRealiza ? "Inspección guardada y registrada ✓" : "Inspección guardada ✓", errCrm ? 15000 : 2500);
       resetInspeccion();
       refreshHistorial();
     } else {
@@ -2371,7 +2441,12 @@ function InspectorDashboard({ inspector, onExit }) {
   };
   const handleDeleteInspeccion = async (h) => {
     if (!window.confirm("¿Eliminar esta inspección? No se puede deshacer.")) return;
+    if (crmRealiza) {
+      try { await crmApi("inspecciones.eliminar", { key: h.id }); }
+      catch (e) { flash(setSaveMsg, "No se pudo eliminar: " + mensajeCrm(e)); return; }
+    }
     const res = await deleteInspeccion(h.id);
+    if (res && crmRealiza) (h.data.fotosEquipo || []).forEach((p) => { try { window.storage.delete(fotoKeyInspeccion(recordIdFromKey(h.id), p), true); } catch (e) { /* se limpia luego */ } });
     if (!res) { flash(setSaveMsg, "No se pudo eliminar. Intenta de nuevo."); return; }
     if (editingId && editingId === recordIdFromKey(h.id)) resetInspeccion();
     setViewing(null);
@@ -2527,12 +2602,16 @@ function InspectorDashboard({ inspector, onExit }) {
           <button onClick={onExit} className="self-start md:self-auto border border-stone-700 px-3 py-2 text-sm text-stone-300 hover:bg-stone-800">Salir</button>
         </div>
         <div className="max-w-5xl mx-auto px-4 md:px-6 flex gap-2 border-t border-stone-800 overflow-x-auto">
+          {crmRealiza && tabBtn("solicitudes", "Solicitudes y agenda")}
           {tabBtn("inspeccion", "Inspección")}
           {tabBtn("tasaciones", "Tasaciones")}
         </div>
       </div>
 
       <div className="max-w-5xl mx-auto px-4 md:px-6 mt-6 md:mt-8 flex flex-col gap-6">
+        {tab === "solicitudes" && crmRealiza && (
+          <ModuloInspecciones permisos={crm.permisos} onRealizar={iniciarDesdeSolicitud} onVerFicha={abrirFichaDeSolicitud} onNueva={() => { setTab("inspeccion"); window.scrollTo({ top: 0, behavior: "smooth" }); }} />
+        )}
         {tab === "inspeccion" && (
           viewing ? (
             <>
@@ -2551,17 +2630,41 @@ function InspectorDashboard({ inspector, onExit }) {
               {editingId && (
                 <div className="bg-amber-50 border border-amber-300 px-4 py-3 text-sm text-stone-700 flex flex-wrap items-center justify-between gap-2">
                   <span>Editando una inspección ya guardada{record.fecha ? ` (${record.fecha})` : ""}.</span>
-                  <button onClick={() => { if (!hayInspeccionSinGuardar() || window.confirm("¿Cancelar la edición y descartar los cambios?")) resetInspeccion(); }} className="text-amber-800 hover:underline py-1">Cancelar edición</button>
+                  <button onClick={() => { if (!hayInspeccionSinGuardar() || window.confirm("¿Cancelar la edición y descartar los cambios?")) descartarInspeccion(); }} className="text-amber-800 hover:underline py-1">Cancelar edición</button>
                 </div>
               )}
               {restoredAt && !editingId && (
                 <div className="bg-sky-50 border border-sky-200 px-4 py-3 text-sm text-stone-700 flex flex-wrap items-center justify-between gap-2">
                   <span>Se recuperó el borrador guardado el {fechaHoraCorta(restoredAt)}</span>
-                  <button onClick={() => { if (window.confirm("¿Descartar el borrador y empezar de cero?")) resetInspeccion(); }} className="text-sky-800 hover:underline py-1">Descartar borrador</button>
+                  <button onClick={() => { if (window.confirm("¿Descartar el borrador y empezar de cero?")) descartarInspeccion(); }} className="text-sky-800 hover:underline py-1">Descartar borrador</button>
+                </div>
+              )}
+
+              {crmRealiza && record.solicitudId && (
+                <div className="bg-emerald-50 border border-emerald-300 px-4 py-3 text-sm text-stone-700 flex flex-wrap items-center justify-between gap-2">
+                  <span>Esta inspección responde a la solicitud <strong>{record.solicitudFolio || ""}</strong>. Al guardarla, quien la pidió verá el resultado (sin los datos del propietario).</span>
+                  {!editingId && <button onClick={() => updateField("solicitudId", "")} className="text-emerald-800 hover:underline py-1">Desvincular</button>}
                 </div>
               )}
 
               <InspeccionForm key={editingId || "nuevo"} record={record} onFieldChange={updateField} onChecklistChange={updateChecklist} />
+
+              {crmRealiza && (
+                <div className="bg-white border border-stone-200 p-4 md:p-5">
+                  <h3 className="font-serif text-lg text-stone-900">Fotos para el equipo ({(record.fotosEquipo || []).length}/{MAX_FOTOS_INSPECCION})</h3>
+                  <p className="text-xs text-stone-500 mt-1 mb-3">Quienes pidieron la inspección verán estas fotos junto al resultado. No subas fotos del padrón ni de documentos del propietario.</p>
+                  <div className="flex flex-wrap gap-3">
+                    {(record.fotosEquipo || []).map((pid) => <MiniaturaEquipo key={pid} fichaId={fichaId} fotoId={pid} onQuitar={() => quitarFotoEquipo(pid)} />)}
+                    {(record.fotosEquipo || []).length < MAX_FOTOS_INSPECCION && (
+                      <label className="w-24 h-24 border-2 border-dashed border-stone-300 flex flex-col items-center justify-center text-stone-500 text-xs cursor-pointer hover:border-amber-500 text-center">
+                        <span className="text-xl">{fotosBusy ? "…" : "＋"}</span>{fotosBusy ? "Subiendo" : "Agregar foto"}
+                        <input type="file" accept="image/*" multiple className="hidden" disabled={fotosBusy} onChange={agregarFotosEquipo} />
+                      </label>
+                    )}
+                  </div>
+                  {fotosError && <p className="text-xs text-rose-600 mt-2">{fotosError}</p>}
+                </div>
+              )}
 
               <div className={barClass}>
                 <div className="flex flex-col md:flex-row md:items-center md:justify-end gap-2 md:gap-3">
@@ -2593,6 +2696,7 @@ function InspectorDashboard({ inspector, onExit }) {
                           {h.data.fecha}
                           {h.data.editadoEl ? " · editada" : ""}
                           {tasadas.has(h.id) ? " · con tasación" : ""}
+                          {h.data.solicitudFolio ? ` · solicitud ${h.data.solicitudFolio}` : ""}
                         </div>
                         <RecordActions>
                           <ActionLink onClick={() => setViewing(h)}>Ver</ActionLink>
@@ -4349,7 +4453,7 @@ function AppRoutes() {
   }
 
   if (me && screen === "inspectorPersonal") {
-    return <InspectorDashboard inspector={{ id: me.id, nombre: me.nombre }} onExit={() => setScreen("estacion")} />;
+    return <InspectorDashboard inspector={{ id: me.id, nombre: me.nombre }} crm={{ permisos: me.permisos }} onExit={() => setScreen("estacion")} />;
   }
 
   if (me && screen === "ventasPersonal") {
