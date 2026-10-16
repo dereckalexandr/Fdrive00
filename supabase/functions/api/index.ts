@@ -626,7 +626,14 @@ Deno.serve(async (req) => {
         user = { id: s.id, nombre: vivo.nombre, localId: vivo.localId, permisos: vivo.permisos };
       }
       const actor: Actor = s.role === "admin" ? adminActor(s) : { tipo: "usuario", id: s.id, nombre: user!.nombre };
-      return await ventasOp({ sb, json, audit, isMissingTable, rolePermOverrides, esAdmin: s.role === "admin", actor, user }, body);
+      try {
+        return await ventasOp({ sb, json, audit, isMissingTable, rolePermOverrides, esAdmin: s.role === "admin", actor, user }, body);
+      } catch (e) {
+        // Quien llega aquí ya inició sesión: se le muestra el motivo técnico para poder corregirlo (nunca claves ni datos).
+        console.error("ventas error:", body?.op, e);
+        const detalle = String((e as any)?.message ?? e).slice(0, 300);
+        return json({ error: "server_error", detalle: `${String(body?.op ?? "")}: ${detalle}` }, 500);
+      }
     }
 
     /* ----- almacenamiento ----- */

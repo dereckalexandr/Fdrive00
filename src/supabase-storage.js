@@ -32,6 +32,7 @@ async function call(payload) {
   if (!res.ok) {
     const err = new Error((data && data.error) || `http_${res.status}`);
     err.status = res.status;
+    if (data && data.detalle) err.detalle = data.detalle;
     throw err;
   }
   return data;
