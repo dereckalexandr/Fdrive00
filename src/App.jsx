@@ -20,6 +20,7 @@ import { AdminCrmPanel, PESTANAS_CRM } from "./crm-admin.jsx";
 import { ModuloVentas } from "./crm-ventas.jsx";
 import { ModuloTasaciones } from "./crm-tasaciones.jsx";
 import { ModuloValidaciones } from "./crm-validaciones.jsx";
+import { ModuloAnuncios } from "./crm-anuncios.jsx";
 import { ModuloInspecciones, Miniatura as MiniaturaEquipo, fotoKeyInspeccion, guardarCacheFoto } from "./crm-inspecciones.jsx";
 import { resumirInspeccion, MAX_FOTOS_INSPECCION } from "../supabase/functions/api/inspecciones-core.js";
 import { mensajeError as mensajeCrm } from "./crm-ui.jsx";
@@ -4450,7 +4451,7 @@ function AppRoutes() {
   }
 
   if (me && screen === "estacion") {
-    return <EstacionTrabajo me={me} onAbrir={(modulo) => setScreen(modulo === "compra" ? "compraPersonal" : modulo === "ventas" ? "ventasPersonal" : modulo === "tasaciones" ? "tasacionesPersonal" : modulo === "validacion" ? "validacionPersonal" : "inspectorPersonal")} onSalir={exitToLanding} />;
+    return <EstacionTrabajo me={me} onAbrir={(modulo) => setScreen(modulo === "compra" ? "compraPersonal" : modulo === "ventas" ? "ventasPersonal" : modulo === "tasaciones" ? "tasacionesPersonal" : modulo === "validacion" ? "validacionPersonal" : modulo === "anuncios" ? "anunciosPersonal" : "inspectorPersonal")} onSalir={exitToLanding} />;
   }
 
   if (me && screen === "inspectorPersonal") {
@@ -4470,6 +4471,23 @@ function AppRoutes() {
           </div>
         </div>
         <div className="max-w-6xl mx-auto px-6 mt-6"><ModuloVentas permisos={me.permisos} renderEstimador={(p) => <TasacionCompra {...p} />} /></div>
+      </div>
+    );
+  }
+
+  if (me && screen === "anunciosPersonal") {
+    return (
+      <div className="min-h-screen bg-stone-100 pb-16">
+        <div className="bg-stone-900 text-stone-100">
+          <div className="max-w-6xl mx-auto px-6 py-6 flex items-center justify-between gap-4">
+            <div>
+              <p className="text-xs uppercase tracking-widest text-stone-400 mb-1">{me.nombre}{me.local ? ` · ${me.local.nombre}` : ""}</p>
+              <h1 className="font-serif text-2xl md:text-3xl">Avisos</h1>
+            </div>
+            <button onClick={() => setScreen("estacion")} className="border border-stone-700 px-3 py-1.5 text-sm text-stone-300 hover:bg-stone-800">Volver</button>
+          </div>
+        </div>
+        <div className="max-w-6xl mx-auto px-6 mt-6"><ModuloAnuncios permisos={me.permisos} /></div>
       </div>
     );
   }

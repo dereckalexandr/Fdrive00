@@ -19,6 +19,7 @@ import { Gestion, AvisosDelSupervisor, FranjaAlertas } from "./crm-gestion.jsx";
 import { SeccionTasacion, MisTasaciones, ModuloTasaciones } from "./crm-tasaciones.jsx";
 import { SeccionInspeccion, ModuloInspecciones } from "./crm-inspecciones.jsx";
 import { SeccionValidacion, ModuloValidaciones } from "./crm-validaciones.jsx";
+import { ModuloAnuncios } from "./crm-anuncios.jsx";
 import {
   INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, useCarga, mensajeError,
 } from "./crm-ui.jsx";
@@ -666,7 +667,7 @@ export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador }
   if (catalogos.puedeComision) opciones.push(["ventas", "Ventas"]);
   if (puedeAprobar) opciones.push(["gestion", "Gestión"], ["tasaciones", "Tasaciones"], ["aprobaciones", "Aprobaciones", pend.datos || 0]);
   if (catalogos.puedeInspecciones) opciones.push(["inspecciones", "Inspecciones"]);
-  if (puedeAprobar) opciones.push(["validaciones", "Validaciones"]);
+  if (puedeAprobar) opciones.push(["validaciones", "Validaciones"], ["anuncios", "Avisos"]);
   opciones.push(["inventario", "Inventario"]);
   if (usaLeads) opciones.push(["clientes", "Clientes"]);
 
@@ -681,6 +682,7 @@ export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador }
       {tab === "inicio" && <Inicio api={api} catalogos={catalogos} abrirLead={setLeadAbierto} irA={setTab} version={version} onCambio={subir} />}
       {tab === "leads" && <Leads api={api} catalogos={catalogos} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
       {tab === "tasaciones" && <ModuloTasaciones api={api} permisos={permisos} esAdmin={esAdmin} renderEstimador={renderEstimador} />}
+      {tab === "anuncios" && <ModuloAnuncios api={api} permisos={permisos} esAdmin={esAdmin} />}
       {tab === "validaciones" && <ModuloValidaciones api={api} permisos={permisos} esAdmin={esAdmin} />}
       {tab === "inspecciones" && <ModuloInspecciones api={api} permisos={permisos} esAdmin={esAdmin} />}
       {tab === "gestion" && <Gestion api={api} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}

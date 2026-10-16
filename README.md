@@ -446,6 +446,33 @@ Hasta que se ejecute el SQL el resto sigue funcionando y las ventas se aprueban 
 
 Código: reglas en `supabase/functions/api/validaciones-core.js`; servidor en `ventas.ts` (`validacion.*` y los enganches en `inventario.save`, `tasaciones.completar`, `cierres.crear` y `cierres.aprobar`); pantallas en `src/crm-validaciones.jsx`. Pruebas: `tests/validaciones-core.test.mjs` y `tests/validaciones-api.test.mjs` (la función real contra una base falsa).
 
+## CRM · Entrega 7: perfil del Anunciante
+
+**Instalar (una sola vez, después de `supabase-crm-validaciones.sql`):**
+1. Supabase → *SQL Editor* → pegar `supabase-crm-anuncios.sql` → *Run*. Crea las tablas `anuncios` y `anuncio_portales` (RLS activado, sin políticas). Se puede repetir sin riesgo.
+2. Redesplegar la función: `node scripts/deploy-api.mjs`.
+
+**Permiso:** `anuncios.gestionar` (ahora disponible; el rol Anunciante lo trae por defecto). *Si antes personalizaste los permisos de ese rol, actívalo en la pestaña Permisos.* Solo el Anunciante publica: el Jefe Local y la cuenta maestra **ven** todo (pestaña *Avisos* dentro de Ventas) pero no modifican avisos.
+
+**Flujo:**
+- **Por publicar** (cola): los vehículos *Disponibles* del local que aún no tienen aviso (no entran los de *En preparación*, reservados ni vendidos). **Crear aviso** arma el título y la descripción sugeridos con los datos del inventario (marca, modelo, versión, año, km, transmisión, combustible, color y precio de lista). Un vehículo tiene un solo aviso activo; al darlo de baja puede tener uno nuevo.
+- **Detalle del aviso:** texto editable con botones *Copiar título* y *Copiar descripción*; las **fotos del inventario** (toca una para descargarla y subirla al portal); y una fila por portal: **Chileautos, Yapo, Facebook Marketplace, Sitio web propio, Instagram, TikTok y Otro**. En cada una se marca *publicado* (con el enlace https del aviso, salvo el sitio propio) y su **fecha de vencimiento**, y se puede **pausar**, **reactivar** o **bajar** de ese portal. El estado del aviso sale de sus portales (publicado si alguno lo está; pausado; dado de baja cuando todos están dados de baja). *Dar de baja el aviso completo* lo baja de todos los portales.
+- Al publicar o confirmar con **"Ya lo actualicé"**, el aviso guarda el **precio de lista de ese momento**.
+
+**Alertas de avisos desactualizados** (calculadas al abrir; sin tareas programadas): por cada portal con el aviso publicado o pausado se avisa si
+- el precio de lista del inventario es **distinto al publicado** (hay que corregir el aviso y pulsar *Ya lo actualicé*);
+- el vehículo está **reservado** (pausar) o **vendido / archivado** (dar de baja);
+- el aviso **venció** o vence en **3 días o menos** (renovar).
+Aparecen en *Resumen y alertas* del Anunciante y como alerta **Avisos desactualizados** en el panel de gestión del Jefe Local. No se puede marcar *publicado* un vehículo que no está disponible.
+
+**Solo con documentos validados:** si el local tiene al menos un Validador, un vehículo entra a publicarse recién cuando su validación de documentos está **aprobada**; antes aparece como *Esperando validación*. Los vehículos anteriores a las validaciones reciben la suya la primera vez que aparecen en la cola. Sin Validadores en el local, no se bloquea nada.
+
+**Consultas por aviso:** cada aviso muestra los leads de ese vehículo de los últimos 30 días, por portal **según la fuente del lead**. Para que cuente, la fuente debe llamarse igual que el portal (Chileautos, Yapo, Facebook Marketplace, Sitio web, Instagram, TikTok): el administrador las agrega en *Configuración → Fuentes de leads* (las fuentes que ya existen no se modifican solas). El resumen muestra además los avisos con más consultas.
+
+**Límites conocidos:** el sistema **no publica solo** en los portales (cada uno tiene sus reglas y accesos): el Anunciante publica a mano y registra aquí el enlace. Las alertas se calculan cuando alguien abre el módulo o el panel de gestión (no hay avisos automáticos por correo o WhatsApp). El sitio web público se conectará a estos avisos cuando se construya.
+
+Código: reglas en `supabase/functions/api/anuncios-core.js`; servidor en `ventas.ts` (`anuncios.*`); pantallas en `src/crm-anuncios.jsx`. Pruebas: `tests/anuncios-core.test.mjs` y `tests/anuncios-api.test.mjs` (la función real contra una base falsa).
+
 ## Desplegar en un hosting público
 
 Las opciones más simples (tienen plan gratuito y se conectan directo a

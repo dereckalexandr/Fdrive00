@@ -23,6 +23,9 @@ import {
 } from "./tasaciones-core.js";
 
 import {
+  folioAnuncio, sugerirAviso, validarTextoAnuncio, validarPortal, elegibleParaAviso, estadoDeAnuncio, alertasAnuncio, consultasDeVehiculo, resumenAvisos,
+} from "./anuncios-core.js";
+import {
   folioValidacion, validarRevision, validarArchivo, MAX_ARCHIVOS_DOC, checklistPara, estadoDeValidacion, progreso, docsReutilizables,
   colaValidaciones, metricasValidador, validarTransicionValidacion, ESTADOS_ABIERTOS,
 } from "./validaciones-core.js";
@@ -164,6 +167,22 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     } catch (e) { console.error("crearValidacion:", (e as any)?.message ?? e); return null; }
   }
   const sujetoDeVehiculo = (v: any, extra: Record<string, unknown> = {}) => ({ patente: v.patente, marca: v.marca, modelo: v.modelo, anio: v.anio, ...extra });
+
+
+  /** Avisos publicados o pausados con algo que corregir (precio distinto, vehículo vendido o reservado, vencimiento). */
+  async function avisosConAlertas() {
+    const aq = await scoped(sb.from("anuncios").select("*"));
+    if (aq.error) return [];
+    const activos: any[] = (aq.data ?? []).filter((a: any) => a.estado === "publicado" || a.estado === "pausado");
+    if (activos.length === 0) return [];
+    const vehs = await porIds("vehiculos", activos.map((a) => a.vehiculo_id));
+    const portales = await enLotes("anuncio_portales", "anuncio_id", activos.map((a) => a.id));
+    const ahora = new Date();
+    return activos.map((a) => {
+      const v = vehs.find((x: any) => x.id === a.vehiculo_id) || {};
+      return { id: a.id, folio: folioAnuncio(a.numero), vehiculo: `${v.marca ?? ""} ${v.modelo ?? ""} ${v.anio ?? ""} · ${v.patente ?? ""}`.trim(), alertas: alertasAnuncio(portales.filter((p: any) => p.anuncio_id === a.id), v, ahora) };
+    }).filter((x) => x.alertas.length > 0);
+  }
 
   const usaLeads = can("leads.propios") || can("leads.local") || can("leads.asignar");
 
@@ -561,6 +580,190 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       const tasadores = ids.map((id) => ({ id, nombre: (usuarios.find((u: any) => u.id === id) || {}).nombre ?? "", ...metricasTasador(todas, id, mes) }));
       const cola = colaTasaciones(todas, new Date(), cfg.horas_tasacion);
       return json({ mes, nombreMes: nombreMes(mes), tasadores, cola: { pendientes: cola.pendientes, masAntiguaHoras: cola.masAntiguaHoras, atrasadas: cola.atrasadas.length }, horasLimite: cfg.horas_tasacion });
+    }
+
+    return err("unknown_op");
+  }
+
+  /* ---------- avisos (Anunciante: publicaciones en portales, redes y sitio web) ---------- */
+  if (op.startsWith("anuncios.")) {
+    const gestiona = !ctx.esAdmin && can("anuncios.gestionar");
+    if (!gestiona && !esSupervisor && !can("anuncios.gestionar")) return err("forbidden", 403);
+    const fallar = (e: any) => fallo(e);
+    const sinCostoV = ({ costo, ...v }: any) => v;
+
+    async function cargarAnuncio(id: string) {
+      const { data, error } = await scoped(sb.from("anuncios").select("*").eq("id", id)).maybeSingle();
+      if (error) throw error;
+      return data;
+    }
+    const portalesDe = async (ids: string[]) => (await enLotes("anuncio_portales", "anuncio_id", ids)).sort((a: any, b: any) => String(a.creado_en).localeCompare(String(b.creado_en)));
+    /** Datos de un aviso listos para mostrar. */
+    async function armar(filas: any[]) {
+      const vehs = await porIds("vehiculos", filas.map((a) => a.vehiculo_id));
+      const portales = await portalesDe(filas.map((a) => a.id));
+      const usuarios = await porIds("usuarios", filas.map((a) => a.anunciante_id));
+      const ahora = new Date();
+      return filas.map((a) => {
+        const v = vehs.find((x: any) => x.id === a.vehiculo_id) || {};
+        const ps = portales.filter((p: any) => p.anuncio_id === a.id);
+        return { ...a, folio: folioAnuncio(a.numero), vehiculo: sinCostoV(v), portales: ps, alertas: alertasAnuncio(ps, v, ahora), anunciante: (usuarios.find((u: any) => u.id === a.anunciante_id) || {}).nombre ?? "" };
+      });
+    }
+    async function consultas(vehiculoIds: string[], dias = 30) {
+      const { data } = await scoped(sb.from("leads").select("vehiculo_id, fuente, creado_en"));
+      const desde = new Date(Date.now() - dias * 86_400_000).toISOString();
+      const out: Record<string, any> = {};
+      for (const id of vehiculoIds) out[id] = consultasDeVehiculo(data ?? [], id, desde);
+      return out;
+    }
+    const fotosDe = (v: any) => (Array.isArray(v.fotos) ? v.fotos : []);
+    const detalle = async (a: any) => {
+      const [fila] = await armar([a]);
+      const c = (await consultas([a.vehiculo_id]))[a.vehiculo_id];
+      return { anuncio: fila, sugerencia: sugerirAviso(fila.vehiculo), consultas: c, puedeGestionar: gestiona };
+    };
+
+    // Vehículos que esperan su aviso: disponibles, sin aviso activo. Con Validadores, solo con documentos aprobados.
+    if (op === "anuncios.cola") {
+      const vq = await scoped(sb.from("vehiculos").select("*").eq("activo", true).eq("estado", "disponible"));
+      if (vq.error) return fallar(vq.error);
+      const aq = await scoped(sb.from("anuncios").select("vehiculo_id, estado"));
+      if (aq.error) return fallar(aq.error);
+      const conAviso = new Set((aq.data ?? []).filter((a: any) => a.estado !== "baja").map((a: any) => a.vehiculo_id));
+      const libres: any[] = (vq.data ?? []).filter((v: any) => !conAviso.has(v.id));
+      const exigeLocal: Record<string, boolean> = {};
+      for (const v of libres) if (!(v.local_id in exigeLocal)) exigeLocal[v.local_id] = await hayValidadores(v.local_id);
+      let vals: any[] = [];
+      if (libres.some((v) => exigeLocal[v.local_id])) {
+        const r = await sb.from("validaciones").select("id").limit(1);
+        if (!r.error) vals = (await enLotes("validaciones", "vehiculo_id", libres.map((v) => v.id))).filter((x: any) => x.tipo === "vehiculo" && x.estado !== "cancelada");
+      }
+      const filas = [];
+      let creadas = 0;
+      for (const v of libres) {
+        const exige = !!exigeLocal[v.local_id];
+        const propias = vals.filter((x: any) => x.vehiculo_id === v.id);
+        let val = propias.find((x: any) => x.estado === "aprobada") || propias[0];
+        // Vehículos anteriores a las validaciones: se les crea la suya al aparecer en la cola.
+        if (exige && !val && creadas < 30) { val = await crearValidacion({ tipo: "vehiculo", local_id: v.local_id, vehiculo_id: v.id, sujeto: sujetoDeVehiculo(v) }); creadas++; }
+        const el = elegibleParaAviso(v, { exigeValidacion: exige && !!val, validacionEstado: val ? val.estado : null });
+        filas.push({ vehiculo: sinCostoV(v), validacion: val ? { id: val.id, estado: val.estado } : null, bloqueado: !el.ok, motivo: el.ok ? null : el.error });
+      }
+      filas.sort((a, b) => Number(a.bloqueado) - Number(b.bloqueado));
+      return json({ porCrear: filas.slice(0, 200), puedeGestionar: gestiona });
+    }
+
+    if (op === "anuncios.list") {
+      const estado = String(body.estado ?? "");
+      const { data, error } = await scoped(sb.from("anuncios").select("*").order("actualizado_en", { ascending: false }));
+      if (error) return fallar(error);
+      let filas: any[] = data ?? [];
+      filas = estado ? filas.filter((a) => a.estado === estado) : filas.filter((a) => a.estado !== "baja");
+      const armados = await armar(filas.slice(0, 200));
+      const c = await consultas(armados.map((a: any) => a.vehiculo_id));
+      return json({ anuncios: armados.map((a: any) => ({ ...a, consultas: c[a.vehiculo_id] })), puedeGestionar: gestiona });
+    }
+
+    if (op === "anuncios.get") {
+      const a = await cargarAnuncio(String(body.id ?? ""));
+      if (!a) return err("no_existe", 404);
+      return json(await detalle(a));
+    }
+
+    if (op === "anuncios.crear") {
+      if (!gestiona) return err("forbidden", 403);
+      const { data: v, error: ve } = await scoped(sb.from("vehiculos").select("*").eq("id", String(body.vehiculoId ?? ""))).maybeSingle();
+      if (ve) return fallar(ve);
+      if (!v) return err("no_existe", 404);
+      const exige = await hayValidadores(v.local_id);
+      let val: any = null;
+      if (exige) {
+        const r = await sb.from("validaciones").select("*").eq("vehiculo_id", v.id);
+        if (!r.error) { const l = (r.data ?? []).filter((x: any) => x.tipo === "vehiculo" && x.estado !== "cancelada"); val = l.find((x: any) => x.estado === "aprobada") || l[0] || null; }
+      }
+      const el = elegibleParaAviso(v, { exigeValidacion: exige && !!val, validacionEstado: val ? val.estado : null });
+      if (!el.ok) return err(el.error!, 409);
+      const previo = await sb.from("anuncios").select("id, estado").eq("vehiculo_id", v.id);
+      if (previo.error) return fallar(previo.error);
+      if ((previo.data ?? []).some((a: any) => a.estado !== "baja")) return err("aviso_existente", 409);
+      const s = sugerirAviso(v);
+      const ins = await sb.from("anuncios").insert({ local_id: v.local_id, vehiculo_id: v.id, titulo: s.titulo, descripcion: s.descripcion, anunciante_id: userId, creado_por: userName }).select().single();
+      if (ins.error) return ins.error.code === "23505" ? err("aviso_existente", 409) : fallar(ins.error);
+      await audit(ctx.actor, "aviso.crear", "anuncio", ins.data.id, { numero: ins.data.numero, patente: v.patente });
+      return json(await detalle(ins.data));
+    }
+
+    if (op === "anuncios.guardar") {
+      if (!gestiona) return err("forbidden", 403);
+      const a = await cargarAnuncio(String(body.id ?? ""));
+      if (!a) return err("no_existe", 404);
+      if (a.estado === "baja") return err("aviso_baja");
+      const v = validarTextoAnuncio(body.datos);
+      if (!v.ok) return err(v.error!);
+      const { data, error } = await sb.from("anuncios").update({ ...v.value, actualizado_en: new Date().toISOString() }).eq("id", a.id).select().single();
+      if (error) return fallar(error);
+      await audit(ctx.actor, "aviso.editar", "anuncio", a.id, { numero: a.numero });
+      return json(await detalle(data));
+    }
+
+    // Publicar, pausar, dar de baja o actualizar el aviso en un portal.
+    if (op === "anuncios.portal") {
+      if (!gestiona) return err("forbidden", 403);
+      const a = await cargarAnuncio(String(body.id ?? ""));
+      if (!a) return err("no_existe", 404);
+      if (a.estado === "baja") return err("aviso_baja");
+      const p = validarPortal(body.datos);
+      if (!p.ok) return err(p.error!);
+      const { data: v } = await sb.from("vehiculos").select("*").eq("id", a.vehiculo_id).maybeSingle();
+      if (!v) return err("no_existe", 404);
+      if (p.value.estado === "publicado" && (v.estado !== "disponible" || v.activo === false)) return err("vehiculo_no_disponible", 409);
+      const previo = (await portalesDe([a.id])).find((x: any) => x.portal === p.value.portal);
+      const ahora = new Date().toISOString();
+      const patch: Record<string, unknown> = { estado: p.value.estado, url: p.value.url, vence_en: p.value.venceEn, actualizado_por: userName, actualizado_en: ahora };
+      // Al publicar o confirmar que se actualizó, el aviso queda con el precio de lista de hoy.
+      if (p.value.estado === "publicado") { patch.precio_publicado = v.precio_lista ?? null; if (!previo || previo.estado !== "publicado") patch.publicado_en = ahora; }
+      let fila;
+      if (previo) { const r = await sb.from("anuncio_portales").update(patch).eq("id", previo.id).select().single(); if (r.error) return fallar(r.error); fila = r.data; }
+      else { const r = await sb.from("anuncio_portales").insert({ anuncio_id: a.id, portal: p.value.portal, ...patch }).select().single(); if (r.error) return fallar(r.error); fila = r.data; }
+      const nuevo = estadoDeAnuncio((await portalesDe([a.id])));
+      const up = await sb.from("anuncios").update({ estado: nuevo, actualizado_en: ahora, baja_en: nuevo === "baja" ? ahora : null }).eq("id", a.id).select().single();
+      if (up.error) return fallar(up.error);
+      await audit(ctx.actor, "aviso.portal", "anuncio", a.id, { numero: a.numero, portal: p.value.portal, estado: p.value.estado });
+      return json(await detalle(up.data));
+    }
+
+    // Da de baja el aviso completo (por ejemplo, al venderse el vehículo).
+    if (op === "anuncios.baja") {
+      if (!gestiona) return err("forbidden", 403);
+      const a = await cargarAnuncio(String(body.id ?? ""));
+      if (!a) return err("no_existe", 404);
+      if (a.estado === "baja") return err("aviso_baja");
+      const ahora = new Date().toISOString();
+      const ub = await sb.from("anuncio_portales").update({ estado: "baja", actualizado_por: userName, actualizado_en: ahora }).eq("anuncio_id", a.id);
+      if (ub.error) return fallar(ub.error);
+      const up = await sb.from("anuncios").update({ estado: "baja", baja_en: ahora, actualizado_en: ahora }).eq("id", a.id).select().single();
+      if (up.error) return fallar(up.error);
+      await audit(ctx.actor, "aviso.baja", "anuncio", a.id, { numero: a.numero });
+      return json(await detalle(up.data));
+    }
+
+    if (op === "anuncios.resumen") {
+      const { data, error } = await scoped(sb.from("anuncios").select("*"));
+      if (error) return fallar(error);
+      const todos: any[] = data ?? [];
+      const activos = todos.filter((a) => a.estado !== "baja");
+      const armados = await armar(activos);
+      const portales = armados.flatMap((a: any) => a.portales);
+      const alertas = armados.flatMap((a: any) => a.alertas.map((x: any) => ({ ...x, anuncio_id: a.id, folio: a.folio, vehiculo: `${a.vehiculo.marca ?? ""} ${a.vehiculo.modelo ?? ""} ${a.vehiculo.anio ?? ""} · ${a.vehiculo.patente ?? ""}`.trim() })));
+      alertas.sort((x: any, y: any) => Number(y.grave) - Number(x.grave));
+      const c = await consultas(armados.map((a: any) => a.vehiculo_id));
+      const porPortal: Record<string, number> = {};
+      let otras = 0;
+      for (const id of Object.keys(c)) { for (const [p, n] of Object.entries(c[id].porPortal)) porPortal[p] = (porPortal[p] ?? 0) + (n as number); otras += c[id].otras; }
+      const top = armados.map((a: any) => ({ id: a.id, folio: a.folio, vehiculo: `${a.vehiculo.marca ?? ""} ${a.vehiculo.modelo ?? ""} ${a.vehiculo.anio ?? ""} · ${a.vehiculo.patente ?? ""}`.trim(), consultas: c[a.vehiculo_id].total }))
+        .sort((x: any, y: any) => y.consultas - x.consultas).slice(0, 10);
+      return json({ ...resumenAvisos(todos, portales), alertas: alertas.slice(0, 100), consultas: { porPortal, otras, top }, dias: 30 });
     }
 
     return err("unknown_op");
@@ -1880,6 +2083,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       const cv = await porIds("cierres", valSinTomar.map((x) => x.cierre_id));
       valSinTomar = valSinTomar.filter((x) => x.tipo !== "venta" || !x.cierre_id || ["pendiente", "aprobada"].includes((cv.find((c: any) => c.id === x.cierre_id) || {}).estado));
     }
+    const avisosMalos = esSupervisor ? await avisosConAlertas() : [];
     const sinAtender = abiertos.filter((l) => esSinAtender(l, ahora, cfg.horas_sin_contacto));
     const detenidos = abiertos.filter((l) => esDetenido(l, ahora, cfg.dias_detenido));
     const sinAsignar = abiertos.filter((l) => !l.asignado_a);
@@ -1906,7 +2110,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
 
     return json({
       config: { horas_sin_contacto: cfg.horas_sin_contacto, dias_detenido: cfg.dias_detenido, horas_tasacion: cfg.horas_tasacion, horas_inspeccion: cfg.horas_inspeccion, horas_validacion: cfg.horas_validacion },
-      conteos: { abiertos: abiertos.length, sinAtender: sinAtender.length, detenidos: detenidos.length, sinAsignar: sinAsignar.length, tareasVencidas: tareasVencidas.length, reservasPorVencer: porVencer.length, tasacionesSinTomar: tasSinTomar.length, inspeccionesSinTomar: inspSinTomar.length, validacionesSinTomar: valSinTomar.length },
+      conteos: { abiertos: abiertos.length, sinAtender: sinAtender.length, detenidos: detenidos.length, sinAsignar: sinAsignar.length, tareasVencidas: tareasVencidas.length, reservasPorVencer: porVencer.length, tasacionesSinTomar: tasSinTomar.length, inspeccionesSinTomar: inspSinTomar.length, validacionesSinTomar: valSinTomar.length, avisosDesactualizados: avisosMalos.length },
       sinAtender: tope(sinAtender).map(fila),
       detenidos: tope(detenidos).map(fila),
       sinAsignar: tope(sinAsignar).map(fila),
@@ -1924,6 +2128,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
         const vh = t.vehiculo || {};
         return { id: t.id, lead_id: t.lead_id, folio: folioTasacion(t.numero), vehiculo: `${vh.marca ?? ""} ${vh.modelo ?? ""} ${vh.anio ?? ""} · ${vh.patente ?? ""}`.trim(), cliente: l ? clienteDe(l.cliente_id) : (t.contacto && t.contacto.nombre) || "", solicitante: nombreDe(t.solicitante_id), solicitada_en: t.solicitada_en };
       }),
+      avisosDesactualizados: tope(avisosMalos).map((x: any) => ({ id: x.id, folio: x.folio, vehiculo: x.vehiculo, alertas: x.alertas.map((a: any) => a.texto) })),
       validacionesSinTomar: tope(valSinTomar).map((x) => {
         const s = x.sujeto || {};
         return { id: x.id, lead_id: x.lead_id, folio: folioValidacion(x.numero), tipo: x.tipo, vehiculo: `${s.marca ?? ""} ${s.modelo ?? ""} ${s.anio ?? ""} · ${s.patente ?? ""}`.trim(), solicitada_en: x.solicitada_en };

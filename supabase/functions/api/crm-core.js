@@ -67,7 +67,7 @@ export const PERMISOS = [
   { id: "tasaciones.realizar", grupo: "Operación", nombre: "Tomar y realizar tasaciones de vehículos", disponible: true },
   { id: "validacion.usar", grupo: "Operación", nombre: "Módulo de validación de documentos", disponible: true },
   { id: "validacion.realizar", grupo: "Operación", nombre: "Tomar y revisar documentos (aprobar, observar o rechazar)", disponible: true },
-  { id: "anuncios.gestionar", grupo: "Operación", nombre: "Publicar y mantener avisos", disponible: false },
+  { id: "anuncios.gestionar", grupo: "Operación", nombre: "Publicar y mantener avisos", disponible: true },
   { id: "marketing.gestionar", grupo: "Operación", nombre: "Campañas y redes sociales", disponible: false },
 ];
 export const PERMISO_IDS = PERMISOS.map((p) => p.id);

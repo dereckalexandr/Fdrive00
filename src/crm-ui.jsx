@@ -116,6 +116,14 @@ const MENSAJES = {
   validacion_estado_invalido: "Esa acción ya no corresponde al estado de la validación.",
   validacion_ya_tomada: "Otro Validador ya tomó esa validación.",
   validacion_pendiente: "Los documentos de esta venta aún no están validados. Un Validador debe aprobarlos antes de aprobar la venta.",
+  titulo_aviso_invalido: "El título del aviso debe tener al menos 5 letras.",
+  descripcion_invalida: "La descripción del aviso debe tener al menos 10 letras.",
+  portal_invalido: "Ese portal no es válido.",
+  estado_portal_invalido: "Ese estado no es válido para el portal.",
+  url_invalida: "El enlace del aviso debe empezar con https:// y ser válido.",
+  aviso_existente: "Ese vehículo ya tiene un aviso activo.",
+  aviso_baja: "Ese aviso ya está dado de baja.",
+  vehiculo_sin_validar: "Los documentos de este vehículo aún no están aprobados por un Validador.",
   tramos_invalidos: "Los tramos no son válidos: no pueden superponerse y solo el último puede quedar sin tope.",
 };
 export const mensajeError = (e) => MENSAJES[e && e.message] || "No se pudo completar la operación. Inténtalo de nuevo.";

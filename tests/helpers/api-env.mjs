@@ -14,6 +14,7 @@ let contadorCierres = 0;
 let contadorTasaciones = 0;
 let contadorInspecciones = 0;
 let contadorValidaciones = 0;
+let contadorAnuncios = 0;
 const DEFAULTS = {
   usuarios: () => ({ id: randomUUID(), comision: {}, activo: true, debe_cambiar_clave: true, roles: [], permisos_extra: { otorgar: [], quitar: [] },
     email: null, telefono: null, local_id: null, ultimo_acceso: null, creado_en: new Date().toISOString() }),
@@ -27,6 +28,8 @@ const DEFAULTS = {
   inspecciones: () => ({ id: randomUUID(), numero: ++contadorInspecciones, estado: "pendiente", origen: "lead", inspector_id: null, inspeccion_key: null, resultado: {}, fotos: [], vehiculo: {}, solicitada_en: new Date().toISOString(), tomada_en: null, completada_en: null, cancelada_en: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
   validaciones: () => ({ id: randomUUID(), numero: ++contadorValidaciones, estado: "pendiente", validador_id: null, sujeto: {}, solicitada_en: new Date().toISOString(), tomada_en: null, resuelta_en: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
   validacion_docs: () => ({ id: randomUUID(), estado: "pendiente", comentario: null, archivos: [], requerido: true, grupo: "vehiculo", revisado_por: null, revisado_en: null, orden: 0, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
+  anuncios: () => ({ id: randomUUID(), numero: ++contadorAnuncios, estado: "por_publicar", baja_en: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
+  anuncio_portales: () => ({ id: randomUUID(), estado: "pendiente", url: null, precio_publicado: null, publicado_en: null, vence_en: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
   avisos: () => ({ id: randomUUID(), leido_en: null, creado_en: new Date().toISOString() }),
   cierres: () => ({ id: randomUUID(), numero: ++contadorCierres, estado: "pendiente", mes: null, aprobado_por: null, aprobado_en: null, motivo_rechazo: null, anulado_por: null, anulado_en: null, motivo_anulacion: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
   reservas: () => ({ id: randomUUID(), estado: "activa", motivo: null, cerrado_en: null, creado_en: new Date().toISOString() }),
@@ -51,7 +54,7 @@ function patronARegex(patron, insensible) {
 }
 
 export function crearBaseFalsa() {
-  const tablas = { usuarios: [], locales: [], roles_permisos: [], bitacora: [], config_negocio: [], kv_store: [], vehiculos: [], clientes: [], leads: [], lead_eventos: [], tareas: [], cotizaciones: [], reservas: [], cierres: [], avisos: [], tasaciones: [], inspecciones: [], validaciones: [], validacion_docs: [] };
+  const tablas = { usuarios: [], locales: [], roles_permisos: [], bitacora: [], config_negocio: [], kv_store: [], vehiculos: [], clientes: [], leads: [], lead_eventos: [], tareas: [], cotizaciones: [], reservas: [], cierres: [], avisos: [], tasaciones: [], inspecciones: [], validaciones: [], validacion_docs: [], anuncios: [], anuncio_portales: [] };
   const consultas = [];
 
   function builder(nombre) {
