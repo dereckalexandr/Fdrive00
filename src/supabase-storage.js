@@ -152,7 +152,16 @@ const supabaseAuth = {
   // Módulo comercial (inventario, clientes, leads, tareas). Cuenta maestra o persona del CRM.
   async ventas(op, params = {}) {
     try {
-      return await call({ action: "ventas", token: sessionToken, op, ...params });
+      // Las consultas de solo lectura se reintentan si la conexión se corta (por ejemplo, cuando la función se está reiniciando).
+      const esLectura = /(^|\.)(list|get|cola|resumen|equipo|pendientes|mios|catalogos|mias)$/.test(op);
+      for (let intento = 0; ; intento++) {
+        try { return await call({ action: "ventas", token: sessionToken, op, ...params }); }
+        catch (e) {
+          const sinRespuesta = e && !e.status && /failed to fetch|load failed|networkerror/i.test(String(e.message));
+          if (!(esLectura && sinRespuesta && intento < 2)) throw e;
+          await new Promise((r) => setTimeout(r, 700 * (intento + 1)));
+        }
+      }
     } catch (e) {
       if (e.status === 401) window.dispatchEvent(new Event("df-session-expired"));
       throw e;
