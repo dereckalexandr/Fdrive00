@@ -126,7 +126,7 @@ const MENSAJES = {
   vehiculo_sin_validar: "Los documentos de este vehículo aún no están aprobados por un Validador.",
   tramos_invalidos: "Los tramos no son válidos: no pueden superponerse y solo el último puede quedar sin tope.",
 };
-export const mensajeError = (e) => MENSAJES[e && e.message] || `No se pudo completar la operación. Inténtalo de nuevo.${e && e.detalle ? ` (Detalle técnico: ${e.detalle})` : ""}`;
+export const mensajeError = (e) => MENSAJES[e && e.message] || `No se pudo completar la operación. Inténtalo de nuevo.${e && e.detalle ? ` (Detalle técnico: ${e.detalle})` : e && e.message ? ` (código: ${e.message}${e.status ? `, ${e.status}` : ""})` : ""}`;
 
 export function Aviso({ tipo = "error", children }) {
   const estilos = tipo === "error" ? "bg-rose-50 border-rose-200 text-rose-800" : tipo === "ok" ? "bg-emerald-50 border-emerald-200 text-emerald-800" : "bg-amber-50 border-amber-200 text-stone-800";
