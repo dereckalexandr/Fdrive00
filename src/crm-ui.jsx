@@ -1,7 +1,7 @@
 /**
  * Piezas de interfaz compartidas por los módulos del CRM (comercial, inventario…).
  */
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { TRANSMISIONES, COMBUSTIBLES } from "../supabase/functions/api/ventas-core.js";
 
 export const INPUT = "border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-amber-500 w-full";
@@ -141,6 +141,8 @@ const MENSAJES = {
   publicacion_no_eliminable: "Solo se eliminan las ideas y las publicaciones canceladas.",
   tipo_material_invalido: "Elige el tipo de material.",
   estado_material_invalido: "Ese estado de material no es válido.",
+  timeout: "El servidor tardó demasiado en responder. Inténtalo de nuevo en unos segundos.",
+  "Failed to fetch": "No se pudo conectar con el servidor. Revisa tu conexión e inténtalo de nuevo.",
   tramos_invalidos: "Los tramos no son válidos: no pueden superponerse y solo el último puede quedar sin tope.",
 };
 export const mensajeError = (e) => MENSAJES[e && e.message] || `No se pudo completar la operación. Inténtalo de nuevo.${e && e.detalle ? ` (Detalle técnico: ${e.detalle})` : e && e.message ? ` (código: ${e.message}${e.status ? `, ${e.status}` : ""})` : ""}`;
@@ -201,10 +203,19 @@ export function Modal({ titulo, onCerrar, children, ancho = "max-w-2xl" }) {
 /** Carga de datos con estado de espera y error. `recargar()` vuelve a pedirlos. */
 export function useCarga(fn, deps) {
   const [estado, setEstado] = useState({ cargando: true, error: "", datos: null });
+  const ultima = useRef(0);
+  const montado = useRef(true);
+  useEffect(() => { montado.current = true; return () => { montado.current = false; }; }, []);
   const recargar = useCallback(async () => {
+    const mia = ++ultima.current;
     setEstado((e) => ({ ...e, cargando: true, error: "" }));
-    try { setEstado({ cargando: false, error: "", datos: await fn() }); }
-    catch (e) { setEstado((p) => ({ cargando: false, error: mensajeError(e), datos: p.datos })); }
+    try {
+      const datos = await fn();
+      // Si ya se pidió otra cosa (o la pantalla se cerró), esta respuesta se descarta.
+      if (mia === ultima.current && montado.current) setEstado({ cargando: false, error: "", datos });
+    } catch (e) {
+      if (mia === ultima.current && montado.current) setEstado((p) => ({ cargando: false, error: mensajeError(e), datos: p.datos }));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
   useEffect(() => { recargar(); }, [recargar]);

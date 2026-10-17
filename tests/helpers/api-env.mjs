@@ -81,7 +81,12 @@ export function crearBaseFalsa() {
       range(a, z) { st.rango = [a, z]; return b; },
       maybeSingle() { st.uno = "maybe"; return b; },
       single() { st.uno = "single"; return b; },
-      then(res, rej) { return Promise.resolve(ejecutar()).then(res, rej); },
+      // LATENCIA_MS (opcional) simula el viaje de ida y vuelta a la base real, para medir tiempos de las pantallas.
+      then(res, rej) {
+        const ms = Number(process.env.LATENCIA_MS || 0);
+        const p = ms > 0 ? new Promise((r) => setTimeout(r, ms)).then(() => ejecutar()) : Promise.resolve(ejecutar());
+        return p.then(res, rej);
+      },
     };
     const coincide = (f) => st.filtros.every(([c, v]) => (typeof v === "function" ? v(f[c]) : f[c] === v));
     function ejecutar() {

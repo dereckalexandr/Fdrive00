@@ -21,12 +21,25 @@ export function hasSupabaseConfig() {
 
 let sessionToken = null;
 
+const TIEMPO_MAX_MS = 45_000;
+
 async function call(payload) {
-  const res = await fetch(`${supabaseUrl}/functions/v1/api`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", apikey: supabaseAnonKey },
-    body: JSON.stringify(payload),
-  });
+  // Si el servidor no responde en 45 s se corta (antes la pantalla podía quedar esperando para siempre).
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), TIEMPO_MAX_MS);
+  let res;
+  try {
+    res = await fetch(`${supabaseUrl}/functions/v1/api`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: supabaseAnonKey },
+      body: JSON.stringify(payload),
+      signal: ctl.signal,
+    });
+  } catch (e) {
+    throw e && e.name === "AbortError" ? new Error("timeout") : e;
+  } finally {
+    clearTimeout(timer);
+  }
   let data = null;
   try { data = await res.json(); } catch (e) { /* respuesta sin cuerpo */ }
   if (!res.ok) {
@@ -157,7 +170,7 @@ const supabaseAuth = {
       for (let intento = 0; ; intento++) {
         try { return await call({ action: "ventas", token: sessionToken, op, ...params }); }
         catch (e) {
-          const sinRespuesta = e && !e.status && /failed to fetch|load failed|networkerror/i.test(String(e.message));
+          const sinRespuesta = e && !e.status && /failed to fetch|load failed|networkerror|timeout/i.test(String(e.message));
           if (!(esLectura && sinRespuesta && intento < 2)) throw e;
           await new Promise((r) => setTimeout(r, 700 * (intento + 1)));
         }

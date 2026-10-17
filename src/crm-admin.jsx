@@ -6,8 +6,9 @@
  * registra cada cambio en la bitácora. Aquí solo se dibuja y se pide.
  * ----------------------------------------------------------------
  */
-import React, { useState, useEffect, useMemo, useCallback } from "react";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import React, { useState, useEffect, useMemo, useCallback, lazy, Suspense } from "react";
+// La gráfica pesa mucho: se carga recién cuando se abre el resumen.
+const GraficoActividad = lazy(() => import("./charts.jsx").then((m) => ({ default: m.GraficoActividad })));
 import { ModuloVentas } from "./crm-ventas.jsx";
 import { TramosEditor } from "./crm-tramos.jsx";
 import { tramosAUi, uiAComision, errorDeTramos } from "../supabase/functions/api/comisiones-core.js";
@@ -720,19 +721,7 @@ function ReportesTab() {
       </div>
 
       <Tarjeta titulo="Actividad de los últimos 6 meses" ayuda="Inspecciones y tasaciones guardadas por todo el equipo.">
-        <div style={{ width: "100%", height: 260 }}>
-          <ResponsiveContainer>
-            <BarChart data={resumen.grafico} margin={{ top: 4, right: 12, left: -16, bottom: 4 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#E7E5E4" vertical={false} />
-              <XAxis dataKey="mes" tick={{ fontSize: 11, fill: "#78716C" }} />
-              <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "#78716C" }} />
-              <Tooltip contentStyle={{ border: "1px solid #E7E5E4", fontSize: 13 }} />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
-              <Bar dataKey="Inspecciones" fill="#0284C7" />
-              <Bar dataKey="Tasaciones" fill="#D97706" />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+        <Suspense fallback={<p className="text-sm text-stone-500">Cargando gráfico…</p>}><GraficoActividad data={resumen.grafico} /></Suspense>
       </Tarjeta>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

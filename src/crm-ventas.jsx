@@ -21,6 +21,7 @@ import { SeccionInspeccion, ModuloInspecciones } from "./crm-inspecciones.jsx";
 import { SeccionValidacion, ModuloValidaciones } from "./crm-validaciones.jsx";
 import { ModuloAnuncios } from "./crm-anuncios.jsx";
 import { ModuloMarketing } from "./crm-marketing.jsx";
+import { ErrorBoundary } from "./error-boundary.jsx";
 import {
   INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, useCarga, mensajeError,
 } from "./crm-ui.jsx";
@@ -689,6 +690,7 @@ export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador }
         </div>
       )}
       <Pestanas valor={tab} onCambio={setTab} opciones={opciones} />
+      <ErrorBoundary clave={tab}>
       {tab === "inicio" && <Inicio api={api} catalogos={catalogos} abrirLead={setLeadAbierto} irA={setTab} version={version} onCambio={subir} />}
       {tab === "leads" && <Leads api={api} catalogos={catalogos} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
       {tab === "tasaciones" && <ModuloTasaciones api={api} permisos={permisos} esAdmin={esAdmin} renderEstimador={renderEstimador} />}
@@ -702,6 +704,7 @@ export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador }
       {tab === "agenda" && <Agenda api={api} catalogos={catalogos} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
       {tab === "inventario" && <Inventario api={api} onCambio={subir} />}
       {tab === "clientes" && <Clientes api={api} />}
+      </ErrorBoundary>
 
       {leadAbierto && !leadEditando && (
         <LeadFicha api={api} leadId={leadAbierto} catalogos={catalogos} onCerrar={() => setLeadAbierto(null)} onCambio={subir}

@@ -503,6 +503,21 @@ Código: reglas en `supabase/functions/api/anuncios-core.js`; servidor en `venta
 
 Código: reglas en `supabase/functions/api/marketing-core.js`; servidor en `ventas.ts` (`marketing.*`, el campo `campaniaId` de los leads y las campañas del catálogo); pantallas en `src/crm-marketing.jsx`. Pruebas: `tests/marketing-core.test.mjs` y `tests/marketing-api.test.mjs` (la función real contra una base falsa).
 
+## Rendimiento y estabilidad (revisión posterior a la entrega 8)
+
+Se midió desde dentro cuánto tarda cada pantalla (la función real contra una base falsa con 40 vehículos y 120 leads, simulando 35 ms de viaje a la base por consulta) y se encontraron cuatro causas de lentitud o pantalla en blanco; todas corregidas:
+
+- **Pantalla en blanco:** el sitio no tenía ninguna protección contra errores de dibujo, así que un dato inesperado en una sola pantalla dejaba TODO en blanco. Ahora hay una *red de seguridad* (`src/error-boundary.jsx`): solo esa parte muestra «Esta pantalla tuvo un problema» con *Reintentar* y *Recargar*; el resto sigue funcionando. Al cambiar de pestaña se reintenta sola. Si el error es porque se publicó una versión nueva mientras la pestaña estaba abierta, avisa que hay que recargar.
+- **Consultas en fila:** varias pantallas esperaban a la base 10 a 17 veces seguidas. Ahora las consultas que no dependen unas de otras se piden juntas (lista de leads, ficha del lead, panel de gestión, embudo, comisiones, reservas, cola de avisos), y las listas largas se consultan en lotes en paralelo. Además, el chequeo de reservas vencidas, que corría en casi cada pantalla, ahora le pide a la base solo las ya vencidas (normalmente ninguna) en vez de traerlas todas.
+- **Sitio pesado:** el paquete principal pasó de 1,4 MB a 0,66 MB. Las gráficas (recharts) y el lector de PDF del CAV (pdf.js) se cargan recién cuando se usan.
+- **Esperas infinitas y respuestas cruzadas:** las llamadas al servidor se cortan a los 45 s con un aviso claro (las de lectura se reintentan solas), y una respuesta lenta de una pantalla anterior ya no pisa a la actual.
+
+**Qué más puede hacer lenta la plataforma (no depende del código):**
+- *Arranque en frío:* la primera acción después de un rato sin uso tarda más (la función se reinicia).
+- *Distancia entre la función y la base:* si la región donde corre la función es distinta a la de la base de datos, cada consulta cruza continentes. Se ve en el panel de Supabase (Project Settings → General → Region) y en *Edge Functions → api → Metrics*.
+
+Para repetir la medición: `node scripts/medir-rendimiento.mjs` (muestra cuántas consultas y cuánto tarda cada pantalla con 35 ms de latencia simulada a la base).
+
 ## Desplegar en un hosting público
 
 Las opciones más simples (tienen plan gratuito y se conectan directo a

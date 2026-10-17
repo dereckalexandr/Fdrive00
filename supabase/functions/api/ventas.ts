@@ -84,9 +84,11 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
   /** Filas cuya `columna` está en `ids`, consultadas en lotes (una lista larga haría una dirección demasiado extensa). */
   async function enLotes(tabla: string, columna: string, ids: string[]) {
     const unicos = Array.from(new Set(ids.filter(Boolean)));
+    const lotes: string[][] = [];
+    for (let i = 0; i < unicos.length; i += 80) lotes.push(unicos.slice(i, i + 80));
+    const resp = await Promise.all(lotes.map((l) => sb.from(tabla).select("*").in(columna, l)));
     const out: any[] = [];
-    for (let i = 0; i < unicos.length; i += 80) {
-      const { data, error } = await sb.from(tabla).select("*").in(columna, unicos.slice(i, i + 80));
+    for (const { data, error } of resp) {
       if (error) throw error;
       out.push(...(data ?? []));
     }
@@ -246,8 +248,9 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
 
   /** Libera las reservas cuyo plazo ya pasó. Se ejecuta al abrir inventario, leads, cotizaciones o reservas. */
   async function liberarVencidas() {
-    const { data, error } = await scoped(sb.from("reservas").select("*").eq("estado", "activa"));
+    const { data, error } = await scoped(sb.from("reservas").select("*").eq("estado", "activa").lt("vence_en", new Date().toISOString()));
     if (error) { if (ctx.isMissingTable(error)) return; throw error; }
+    if ((data ?? []).length === 0) return;
     // Una reserva con un cierre de venta esperando aprobación no se libera sola: decide el supervisor.
     const enCierre = new Set<string>();
     const cp = await scoped(sb.from("cierres").select("reserva_id").eq("estado", "pendiente"));
@@ -911,14 +914,16 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
 
     // Vehículos que esperan su aviso: disponibles, sin aviso activo. Con Validadores, solo con documentos aprobados.
     if (op === "anuncios.cola") {
-      const vq = await scoped(sb.from("vehiculos").select("*").eq("activo", true).eq("estado", "disponible"));
+      const [vq, aq] = await Promise.all([
+        scoped(sb.from("vehiculos").select("*").eq("activo", true).eq("estado", "disponible")),
+        scoped(sb.from("anuncios").select("vehiculo_id, estado")),
+      ]);
       if (vq.error) return fallar(vq.error);
-      const aq = await scoped(sb.from("anuncios").select("vehiculo_id, estado"));
       if (aq.error) return fallar(aq.error);
       const conAviso = new Set((aq.data ?? []).filter((a: any) => a.estado !== "baja").map((a: any) => a.vehiculo_id));
       const libres: any[] = (vq.data ?? []).filter((v: any) => !conAviso.has(v.id));
       const exigeLocal: Record<string, boolean> = {};
-      for (const v of libres) if (!(v.local_id in exigeLocal)) exigeLocal[v.local_id] = await hayValidadores(v.local_id);
+      await Promise.all(Array.from(new Set(libres.map((v) => v.local_id))).map(async (lid) => { exigeLocal[lid] = await hayValidadores(lid); }));
       let vals: any[] = [];
       if (libres.some((v) => exigeLocal[v.local_id])) {
         const r = await sb.from("validaciones").select("id").limit(1);
@@ -1600,17 +1605,19 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     let leads: any[] = (data ?? []).filter((l: any) => !((l.etapa === "perdido" || l.etapa === "ganado") && Date.parse(l.actualizado_en) < hace30));
     if (!todos) leads = leads.filter((l) => l.asignado_a === userId);
     leads = leads.slice(0, MAX_LISTA);
-    const clientes = await porIds("clientes", leads.map((l) => l.cliente_id));
-    const vehiculos = await porIds("vehiculos", leads.map((l) => l.vehiculo_id));
-    const usuarios = await porIds("usuarios", leads.map((l) => l.asignado_a));
+    const [clientes, vehiculos, usuarios, cp, ci, rs] = await Promise.all([
+      porIds("clientes", leads.map((l) => l.cliente_id)),
+      porIds("vehiculos", leads.map((l) => l.vehiculo_id)),
+      porIds("usuarios", leads.map((l) => l.asignado_a)),
+      scoped(sb.from("cotizaciones").select("lead_id, estado").eq("estado", "pendiente")),
+      scoped(sb.from("cierres").select("lead_id").eq("estado", "pendiente")),
+      scoped(sb.from("reservas").select("lead_id, vence_en").eq("estado", "activa")),
+    ]);
     const puedeCosto = can("inventario.editar");
     // Marcas para las tarjetas del embudo: descuento esperando aprobación y reserva en curso.
     const marcas: Record<string, { pendiente?: boolean; reserva_vence_en?: string; cierre_pendiente?: boolean }> = {};
-    const cp = await scoped(sb.from("cotizaciones").select("lead_id, estado").eq("estado", "pendiente"));
     if (!cp.error) for (const c of cp.data ?? []) marcas[c.lead_id] = { ...marcas[c.lead_id], pendiente: true };
-    const ci = await scoped(sb.from("cierres").select("lead_id").eq("estado", "pendiente"));
     if (!ci.error) for (const c of ci.data ?? []) marcas[c.lead_id] = { ...marcas[c.lead_id], cierre_pendiente: true };
-    const rs = await scoped(sb.from("reservas").select("lead_id, vence_en").eq("estado", "activa"));
     if (!rs.error) for (const r of rs.data ?? []) marcas[r.lead_id] = { ...marcas[r.lead_id], reserva_vence_en: r.vence_en };
     return json({
       leads, marcas,
@@ -1632,20 +1639,20 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
   if (op === "leads.get") {
     const lead = await cargarLead(String(body.id ?? ""));
     if (!lead || !puedeVer(lead)) return err("no_existe", 404);
-    const [cliente] = await porIds("clientes", [lead.cliente_id]);
-    const [vehiculo] = await porIds("vehiculos", [lead.vehiculo_id]);
-    const [asignado] = await porIds("usuarios", [lead.asignado_a]);
-    const ev = await sb.from("lead_eventos").select("*").eq("lead_id", lead.id).order("creado_en", { ascending: false }).limit(100);
-    const ta = await sb.from("tareas").select("*").eq("lead_id", lead.id).order("vence_en");
-    // Cotizaciones y reservas del lead (si las tablas de la entrega 2B aún no existen, se omiten).
-    const cot = await sb.from("cotizaciones").select("*").eq("lead_id", lead.id).order("creado_en", { ascending: false });
-    const res = await sb.from("reservas").select("*").eq("lead_id", lead.id).order("creado_en", { ascending: false });
-    const cie = await sb.from("cierres").select("*").eq("lead_id", lead.id).order("creado_en", { ascending: false });
-    const tas = await sb.from("tasaciones").select("*").eq("lead_id", lead.id).order("creado_en", { ascending: false });
+    // Cotizaciones y reservas del lead (si las tablas de la entrega 2B aún no existen, se omiten). Todo se pide a la vez.
+    const [[cliente], [vehiculo], [asignado], ev, ta, cot, res, cie, tas, loc, camp] = await Promise.all([
+      porIds("clientes", [lead.cliente_id]), porIds("vehiculos", [lead.vehiculo_id]), porIds("usuarios", [lead.asignado_a]),
+      sb.from("lead_eventos").select("*").eq("lead_id", lead.id).order("creado_en", { ascending: false }).limit(100),
+      sb.from("tareas").select("*").eq("lead_id", lead.id).order("vence_en"),
+      sb.from("cotizaciones").select("*").eq("lead_id", lead.id).order("creado_en", { ascending: false }),
+      sb.from("reservas").select("*").eq("lead_id", lead.id).order("creado_en", { ascending: false }),
+      sb.from("cierres").select("*").eq("lead_id", lead.id).order("creado_en", { ascending: false }),
+      sb.from("tasaciones").select("*").eq("lead_id", lead.id).order("creado_en", { ascending: false }),
+      lead.local_id ? sb.from("locales").select("nombre").eq("id", lead.local_id).maybeSingle() : Promise.resolve({ data: null }),
+      lead.campania_id ? sb.from("campanias").select("id, nombre, canal").eq("id", lead.campania_id).maybeSingle() : Promise.resolve({ data: null }),
+    ]);
     const puedeCosto = can("inventario.editar");
     const tasUsuarios = tas.error ? [] : await porIds("usuarios", (tas.data ?? []).map((t: any) => t.tasador_id));
-    const loc = lead.local_id ? await sb.from("locales").select("nombre").eq("id", lead.local_id).maybeSingle() : { data: null };
-    const camp = lead.campania_id ? await sb.from("campanias").select("id, nombre, canal").eq("id", lead.campania_id).maybeSingle() : { data: null };
     return json({
       campania: camp.data ?? null,
       lead, cliente: cliente ?? null, vehiculo: vehiculo ? ocultarCosto(vehiculo, can("inventario.editar")) : null,
@@ -2008,10 +2015,10 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     const { data, error } = await scoped(sb.from("reservas").select("*").eq("estado", "activa").order("vence_en"));
     if (error) return fallo(error);
     let lista: any[] = data ?? [];
-    const leads = await porIds("leads", lista.map((r) => r.lead_id));
+    const [leads, vehiculos, clientes] = await Promise.all([
+      porIds("leads", lista.map((r) => r.lead_id)), porIds("vehiculos", lista.map((r) => r.vehiculo_id)), porIds("clientes", lista.map((r) => r.cliente_id)),
+    ]);
     if (!veTodoElLocal) lista = lista.filter((r) => (leads.find((l: any) => l.id === r.lead_id) || {}).asignado_a === userId);
-    const vehiculos = await porIds("vehiculos", lista.map((r) => r.vehiculo_id));
-    const clientes = await porIds("clientes", lista.map((r) => r.cliente_id));
     return json({
       reservas: lista.map((r) => {
         const veh = vehiculos.find((x: any) => x.id === r.vehiculo_id) || {};
@@ -2266,18 +2273,20 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     const mes = body.mes === undefined ? mesChile() : String(body.mes);
     if (!esMes(mes)) return err("mes_invalido");
 
-    const { data, error } = await scoped(sb.from("cierres").select("*").eq("estado", "aprobada"));
+    const [{ data, error }, pend, equipoElegible] = await Promise.all([
+      scoped(sb.from("cierres").select("*").eq("estado", "aprobada")),
+      scoped(sb.from("cierres").select("ejecutivo_id").eq("estado", "pendiente")),
+      verTodos && localId ? elegibles(localId) : Promise.resolve([] as any[]),
+    ]);
     if (error) return fallo(error);
     const delMes = (data ?? []).filter((c: any) => c.mes === mes);
-    const pend = await scoped(sb.from("cierres").select("ejecutivo_id").eq("estado", "pendiente"));
     const pendientesPor: Record<string, number> = {};
     for (const c of pend.data ?? []) pendientesPor[c.ejecutivo_id] = (pendientesPor[c.ejecutivo_id] ?? 0) + 1;
 
     // A quién se muestra: solo a sí misma, o a todo el equipo habilitado del local más quien tenga ventas ese mes.
     const ids = new Set<string>();
     if (verTodos) {
-      const local = localId;
-      if (local) for (const e of await elegibles(local)) ids.add(e.id);
+      for (const e of equipoElegible) ids.add(e.id);
       for (const c of delMes) if (c.ejecutivo_id) ids.add(c.ejecutivo_id);
     } else if (!ctx.esAdmin) ids.add(userId);
     const usuarios = await porIds("usuarios", Array.from(ids));
@@ -2359,38 +2368,48 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
   if (op === "gestion.resumen") {
     if (!esSupervisor) return err("forbidden", 403);
     let cfg;
-    try { cfg = await configNegocio(); } catch (e) { return fallo(e); }
     const ahora = new Date();
-    const lr = await scoped(sb.from("leads").select("*").in("etapa", ETAPAS_ABIERTAS));
+    // Todo lo que no depende de otra consulta se pide a la vez (antes eran ~12 viajes seguidos a la base).
+    const [cfgR, lr, tr, rr, tsr, isr, vsr, cpr0, avisosMalos0, equipoBase0] = await Promise.all([
+      configNegocio().then((c) => ({ c }), (e) => ({ e })),
+      scoped(sb.from("leads").select("*").in("etapa", ETAPAS_ABIERTAS)),
+      scoped(sb.from("tareas").select("*").eq("hecha", false)),
+      scoped(sb.from("reservas").select("*").eq("estado", "activa")),
+      scoped(sb.from("tasaciones").select("*").eq("estado", "pendiente")),
+      scoped(sb.from("inspecciones").select("*").eq("estado", "pendiente")),
+      scoped(sb.from("validaciones").select("*").eq("estado", "pendiente")),
+      esSupervisor ? scoped(sb.from("campanias").select("*").eq("estado", "pendiente")) : Promise.resolve({ data: [], error: null }),
+      esSupervisor ? avisosConAlertas() : Promise.resolve([] as any[]),
+      localId ? elegibles(localId) : Promise.resolve([] as any[]),
+    ]);
+    if ((cfgR as any).e) return fallo((cfgR as any).e);
+    cfg = (cfgR as any).c;
     if (lr.error) return fallo(lr.error);
     const abiertos: any[] = lr.data ?? [];
-    const tr = await scoped(sb.from("tareas").select("*").eq("hecha", false));
-    const rr = await scoped(sb.from("reservas").select("*").eq("estado", "activa"));
     const tareasVencidas: any[] = (tr.data ?? []).filter((t: any) => claseTarea(t.vence_en, ahora) === "vencida");
     const porVencer: any[] = (rr.data ?? []).filter((r: any) => Date.parse(r.vence_en) - ahora.getTime() <= 48 * 3_600_000);
 
-    const tsr = await scoped(sb.from("tasaciones").select("*").eq("estado", "pendiente"));
     const tasSinTomar: any[] = tsr.error ? [] : (tsr.data ?? []).filter((t: any) => horasDesde(t.solicitada_en, ahora) >= cfg.horas_tasacion);
-    const isr = await scoped(sb.from("inspecciones").select("*").eq("estado", "pendiente"));
     const inspSinTomar: any[] = isr.error ? [] : colaInspecciones(isr.data ?? [], ahora, cfg.horas_inspeccion).atrasadas;
-    const vsr = await scoped(sb.from("validaciones").select("*").eq("estado", "pendiente"));
     let valSinTomar: any[] = vsr.error ? [] : colaValidaciones(vsr.data ?? [], ahora, cfg.horas_validacion).atrasadas;
     if (valSinTomar.length > 0) {
       const cv = await porIds("cierres", valSinTomar.map((x) => x.cierre_id));
       valSinTomar = valSinTomar.filter((x) => x.tipo !== "venta" || !x.cierre_id || ["pendiente", "aprobada"].includes((cv.find((c: any) => c.id === x.cierre_id) || {}).estado));
     }
-    const avisosMalos = esSupervisor ? await avisosConAlertas() : [];
-    const cpr = esSupervisor ? await scoped(sb.from("campanias").select("*").eq("estado", "pendiente")) : { data: [], error: null };
+    const avisosMalos = avisosMalos0;
+    const cpr = cpr0;
     const campPend: any[] = cpr.error ? [] : cpr.data ?? [];
     const sinAtender = abiertos.filter((l) => esSinAtender(l, ahora, cfg.horas_sin_contacto));
     const detenidos = abiertos.filter((l) => esDetenido(l, ahora, cfg.dias_detenido));
     const sinAsignar = abiertos.filter((l) => !l.asignado_a);
 
     const leadsDeTareas = await porIds("leads", [...tareasVencidas, ...porVencer, ...tasSinTomar].map((x) => x.lead_id));
-    const clientes = await porIds("clientes", [...abiertos, ...leadsDeTareas].map((l: any) => l.cliente_id));
-    const vehiculos = await porIds("vehiculos", porVencer.map((r) => r.vehiculo_id));
-    const equipoBase = localId ? await elegibles(localId) : [];
-    const usuarios = await porIds("usuarios", [...abiertos.map((l) => l.asignado_a), ...tareasVencidas.map((t) => t.asignado_a), ...equipoBase.map((e: any) => e.id), ...tasSinTomar.map((t) => t.solicitante_id), ...inspSinTomar.map((x) => x.solicitante_id)]);
+    const equipoBase = equipoBase0;
+    const [clientes, vehiculos, usuarios] = await Promise.all([
+      porIds("clientes", [...abiertos, ...leadsDeTareas].map((l: any) => l.cliente_id)),
+      porIds("vehiculos", porVencer.map((r) => r.vehiculo_id)),
+      porIds("usuarios", [...abiertos.map((l) => l.asignado_a), ...tareasVencidas.map((t) => t.asignado_a), ...equipoBase.map((e: any) => e.id), ...tasSinTomar.map((t) => t.solicitante_id), ...inspSinTomar.map((x) => x.solicitante_id)]),
+    ]);
     const nombreDe = (id: string) => (usuarios.find((u: any) => u.id === id) || {}).nombre ?? "";
     const clienteDe = (id: string) => (clientes.find((c: any) => c.id === id) || {}).nombre ?? "";
     const fila = (l: any) => ({ id: l.id, cliente: clienteDe(l.cliente_id), ejecutivo: l.asignado_a ? nombreDe(l.asignado_a) : "", asignado_a: l.asignado_a, etapa: l.etapa, fuente: l.fuente, creado_en: l.creado_en, ultima_actividad: ultimaActividad(l) });
@@ -2449,14 +2468,24 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     const desde = new Date(Date.UTC(y, m - 1, 1) - 86_400_000).toISOString();
     const hasta = new Date(Date.UTC(y, m, 1) + 86_400_000).toISOString();
 
-    const lr = await scoped(sb.from("leads").select("*").gte("creado_en", desde).lt("creado_en", hasta));
+    // Primera tanda: lo que no depende de los leads del mes.
+    const [lr, pr, equipoBase, cr, rs, tc, cv] = await Promise.all([
+      scoped(sb.from("leads").select("*").gte("creado_en", desde).lt("creado_en", hasta)),
+      scoped(sb.from("leads").select("*").eq("etapa", "perdido").gte("actualizado_en", desde).lt("actualizado_en", hasta)),
+      localId ? elegibles(localId) : Promise.resolve([] as any[]),
+      scoped(sb.from("cotizaciones").select("creado_por, creado_en").gte("creado_en", desde).lt("creado_en", hasta)),
+      scoped(sb.from("reservas").select("creado_por, creado_en").gte("creado_en", desde).lt("creado_en", hasta)),
+      scoped(sb.from("tareas").select("asignado_a, hecha_en").eq("hecha", true).gte("hecha_en", desde).lt("hecha_en", hasta)),
+      scoped(sb.from("cierres").select("ejecutivo_id, mes").eq("estado", "aprobada").eq("mes", mes)),
+    ]);
     if (lr.error) return fallo(lr.error);
     const cohorte: any[] = (lr.data ?? []).filter((l: any) => mesChile(l.creado_en) === mes);
     const idsCohorte = cohorte.map((l) => l.id);
 
-    const cotizaciones = (await enLotes("cotizaciones", "lead_id", idsCohorte)).filter((c: any) => c.estado !== "anulada");
-    const reservas = await enLotes("reservas", "lead_id", idsCohorte);
-    const cierres = (await enLotes("cierres", "lead_id", idsCohorte)).filter((c: any) => c.estado === "aprobada");
+    // Segunda tanda: lo que sí depende de los leads del mes.
+    const [cotAll, reservas, cierresAll] = await Promise.all([enLotes("cotizaciones", "lead_id", idsCohorte), enLotes("reservas", "lead_id", idsCohorte), enLotes("cierres", "lead_id", idsCohorte)]);
+    const cotizaciones = cotAll.filter((c: any) => c.estado !== "anulada");
+    const cierres = cierresAll.filter((c: any) => c.estado === "aprobada");
     const puedeCosto = can("inventario.editar");
     const conjuntos = { cotizados: new Set<string>(cotizaciones.map((c: any) => c.lead_id)), reservados: new Set<string>(reservas.map((r: any) => r.lead_id)), vendidos: new Set<string>(cierres.map((c: any) => c.lead_id)) };
     const ventas = new Map<string, { monto: number; margen: number | null }>(cierres.map((c: any) => [c.lead_id, { monto: Number(c.precio_final), margen: puedeCosto && c.margen != null ? Number(c.margen) : null }]));
@@ -2464,22 +2493,18 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     const embudo = embudoCohorte(cohorte, conjuntos);
 
     // Motivos: leads perdidos EN este mes (sin importar cuándo llegaron).
-    const pr = await scoped(sb.from("leads").select("*").eq("etapa", "perdido").gte("actualizado_en", desde).lt("actualizado_en", hasta));
     const motivos = motivosDePerdida((pr.data ?? []).filter((l: any) => mesChile(l.actualizado_en) === mes));
 
     // Actividad por ejecutivo en el mes.
-    const equipoBase = localId ? await elegibles(localId) : [];
     const idsEjec = Array.from(new Set<string>([...equipoBase.map((e: any) => e.id), ...cohorte.map((l) => l.asignado_a).filter(Boolean)]));
-    const usuarios = await porIds("usuarios", idsEjec);
-    const ev = idsEjec.length
-      ? await sb.from("lead_eventos").select("usuario_id, tipo, creado_en").in("usuario_id", idsEjec).gte("creado_en", desde).lt("creado_en", hasta)
-      : { data: [], error: null };
+    const [usuarios, ev] = await Promise.all([
+      porIds("usuarios", idsEjec),
+      idsEjec.length
+        ? sb.from("lead_eventos").select("usuario_id, tipo, creado_en").in("usuario_id", idsEjec).gte("creado_en", desde).lt("creado_en", hasta)
+        : Promise.resolve({ data: [], error: null }),
+    ]);
     if (ev.error) return fallo(ev.error);
     const eventos = (ev.data ?? []).filter((e: any) => mesChile(e.creado_en) === mes);
-    const cr = await scoped(sb.from("cotizaciones").select("creado_por, creado_en").gte("creado_en", desde).lt("creado_en", hasta));
-    const rs = await scoped(sb.from("reservas").select("creado_por, creado_en").gte("creado_en", desde).lt("creado_en", hasta));
-    const tc = await scoped(sb.from("tareas").select("asignado_a, hecha_en").eq("hecha", true).gte("hecha_en", desde).lt("hecha_en", hasta));
-    const cv = await scoped(sb.from("cierres").select("ejecutivo_id, mes").eq("estado", "aprobada").eq("mes", mes));
     const delMes = (arr: any[] | null, campo: string) => (arr ?? []).filter((x) => mesChile(x[campo]) === mes);
 
     const equipo = idsEjec.map((id) => {

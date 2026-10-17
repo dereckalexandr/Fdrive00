@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App.jsx";
+import { ErrorBoundary } from "./error-boundary.jsx";
 import { installStorageShim } from "./storage-shim.js";
 import { installSupabaseStorage, hasSupabaseConfig } from "./supabase-storage.js";
 import "./index.css";
@@ -22,6 +23,8 @@ if (hasSupabaseConfig()) {
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </React.StrictMode>
 );

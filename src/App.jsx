@@ -1,15 +1,8 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-} from "recharts";
-import { extractPdfText, parseCavFields } from "./cav-parser.js";
+import React, { useState, useEffect, useMemo, useRef, lazy, Suspense } from "react";
+// Las gráficas y el lector de PDF pesan mucho: se cargan recién cuando se usan, para que el sitio abra más rápido.
+const GraficoProduccion = lazy(() => import("./charts.jsx").then((m) => ({ default: m.GraficoProduccion })));
+const GraficoRanking = lazy(() => import("./charts.jsx").then((m) => ({ default: m.GraficoRanking })));
+const cargarLectorCav = () => import("./cav-parser.js");
 import { buildInspeccionPdf, buildTasacionPdf, pdfFileName } from "./pdf-report.js";
 import { saveDraft, loadDraft, clearDraft, isMeaningful } from "./drafts.js";
 import { computeTasacionTotals, computeValorFinal } from "./tasacion-totals.js";
@@ -1014,6 +1007,7 @@ function InspeccionForm({ record, onFieldChange, onChecklistChange, readOnly = f
     setAutoFillMsg("");
     setAutoFilling(true);
     try {
+      const { extractPdfText, parseCavFields } = await cargarLectorCav();
       const text = await extractPdfText(data);
       const fields = parseCavFields(text);
       const filledKeys = Object.keys(fields).filter((key) => fields[key] && !record[key]);
@@ -2152,19 +2146,7 @@ function AnnualView({ vendor, year, onYearChange, afpList = [], ufValor = DEFAUL
 
       <div className="bg-white border border-stone-200 p-5">
         <h4 className="font-serif text-base text-stone-900 mb-4">Producción y líquido a pago por mes</h4>
-        <div style={{ width: "100%", height: 280 }}>
-          <ResponsiveContainer>
-            <BarChart data={chartData} margin={{ top: 8, right: 8, left: 8, bottom: 8 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#E7E5E4" />
-              <XAxis dataKey="mes" tick={{ fontSize: 12, fill: "#78716C" }} />
-              <YAxis tick={{ fontSize: 11, fill: "#78716C" }} tickFormatter={(v) => `${Math.round(v / 1000)}k`} width={45} />
-              <Tooltip formatter={(v) => clp(v)} labelStyle={{ color: "#1C1917" }} contentStyle={{ border: "1px solid #E7E5E4", fontSize: 13 }} />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
-              <Bar dataKey="Producción" fill="#D97706" />
-              <Bar dataKey="Líquido a pago" fill="#059669" />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+        <Suspense fallback={<p className="text-sm text-stone-500">Cargando gráfico…</p>}><GraficoProduccion data={chartData} /></Suspense>
       </div>
 
       <div className="bg-white border border-stone-200">
@@ -3252,6 +3234,7 @@ function TasacionCompra({ inicial, onResultado } = {}) {
     setCavMsg("");
     setLeyendo(true);
     try {
+      const { extractPdfText, parseCavFields } = await cargarLectorCav();
       const fields = parseCavFields(await extractPdfText(data));
       const mv = splitModeloVersion(fields.modelo);
       const llenados = [];
@@ -3796,17 +3779,7 @@ function AdminDashboard({ vendors, setVendors, inspectors, setInspectors, onExit
               <>
                 <div className="bg-white border border-stone-200 p-5">
                   <h3 className="font-serif text-lg text-stone-900 mb-4">Ranking del mes</h3>
-                  <div style={{ width: "100%", height: Math.max(180, chartData.length * 46) }}>
-                    <ResponsiveContainer>
-                      <BarChart data={chartData} layout="vertical" margin={{ top: 4, right: 24, left: 4, bottom: 4 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#E7E5E4" horizontal={false} />
-                        <XAxis type="number" tick={{ fontSize: 11, fill: "#78716C" }} tickFormatter={(v) => `${Math.round(v / 1000)}k`} />
-                        <YAxis type="category" dataKey="nombre" width={90} tick={{ fontSize: 12, fill: "#1C1917" }} />
-                        <Tooltip formatter={(v) => clp(v)} contentStyle={{ border: "1px solid #E7E5E4", fontSize: 13 }} />
-                        <Bar dataKey="Producción" fill="#D97706" barSize={22} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
+                  <Suspense fallback={<p className="text-sm text-stone-500">Cargando gráfico…</p>}><GraficoRanking data={chartData} /></Suspense>
                 </div>
 
                 <div className="bg-white border border-stone-200">
