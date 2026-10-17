@@ -82,7 +82,7 @@ test("Alertas: sin atender, detenidos, sin asignar, con los plazos por defecto (
   assert.deepEqual(ids(r.sinAtender), ids([U.A, U.H]));
   assert.deepEqual(ids(r.detenidos), ids([U.D, U.F]));
   assert.deepEqual(ids(r.sinAsignar), [U.H.id]);
-  assert.deepEqual(r.conteos, { abiertos: 8, sinAtender: 2, detenidos: 2, sinAsignar: 1, tareasVencidas: 0, reservasPorVencer: 0, tasacionesSinTomar: 0, inspeccionesSinTomar: 0, validacionesSinTomar: 0, avisosDesactualizados: 0 });
+  assert.deepEqual(r.conteos, { abiertos: 8, sinAtender: 2, detenidos: 2, sinAsignar: 1, tareasVencidas: 0, reservasPorVencer: 0, tasacionesSinTomar: 0, inspeccionesSinTomar: 0, validacionesSinTomar: 0, avisosDesactualizados: 0, campaniasPorAprobar: 0 });
   const a = r.sinAtender.find((x) => x.id === U.A.id);
   assert.equal(a.ejecutivo, "Eva Uno");
   assert.equal(a.etapa, "nuevo");

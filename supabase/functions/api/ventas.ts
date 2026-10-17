@@ -23,6 +23,10 @@ import {
 } from "./tasaciones-core.js";
 
 import {
+  folioCampania, folioPublicacion, validarCampania, validarResultadosCampania, estadoTrasGuardar, validarTransicionCampania, metricasCampania,
+  validarPublicacion, publicacionesAtrasadas, resumenPublicaciones, validarMaterial,
+} from "./marketing-core.js";
+import {
   folioAnuncio, sugerirAviso, validarTextoAnuncio, validarPortal, elegibleParaAviso, estadoDeAnuncio, alertasAnuncio, consultasDeVehiculo, resumenAvisos,
 } from "./anuncios-core.js";
 import {
@@ -184,6 +188,17 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     }).filter((x) => x.alertas.length > 0);
   }
 
+
+  /** Campaña elegida para un lead: debe ser del local y estar aprobada (o ser la que el lead ya tiene). */
+  async function resolverCampania(raw: unknown, local: string, actual: string | null = null): Promise<{ ok: boolean; id: string | null }> {
+    const id = raw ? String(raw) : null;
+    if (!id) return { ok: true, id: null };
+    if (id === actual) return { ok: true, id };
+    const { data, error } = await sb.from("campanias").select("id, local_id, estado").eq("id", id).maybeSingle();
+    if (error || !data || data.local_id !== local || data.estado !== "aprobada") return { ok: false, id: null };
+    return { ok: true, id };
+  }
+
   const usaLeads = can("leads.propios") || can("leads.local") || can("leads.asignar");
 
   async function configNegocio() {
@@ -250,7 +265,11 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       const l = await sb.from("locales").select("id, nombre, activo").order("creado_en");
       locales = l.data ?? [];
     }
+    let campanias: unknown[] = [];
+    const cq = await scoped(sb.from("campanias").select("id, nombre, canal, estado").eq("estado", "aprobada"));
+    if (!cq.error) campanias = (cq.data ?? []).map((x: any) => ({ id: x.id, nombre: x.nombre, canal: x.canal }));
     return json({
+      campanias,
       fuentes_lead: c.fuentes_lead, motivos_perdida: c.motivos_perdida, meta_mensual_unidades: c.meta_mensual_unidades,
       financieras: FINANCIERAS, locales, etapas: ETAPAS,
       dias_reserva: c.dias_reserva, vigencia_cotizacion_dias: c.vigencia_cotizacion_dias, condiciones_cotizacion: c.condiciones_cotizacion,
@@ -580,6 +599,272 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       const tasadores = ids.map((id) => ({ id, nombre: (usuarios.find((u: any) => u.id === id) || {}).nombre ?? "", ...metricasTasador(todas, id, mes) }));
       const cola = colaTasaciones(todas, new Date(), cfg.horas_tasacion);
       return json({ mes, nombreMes: nombreMes(mes), tasadores, cola: { pendientes: cola.pendientes, masAntiguaHoras: cola.masAntiguaHoras, atrasadas: cola.atrasadas.length }, horasLimite: cfg.horas_tasacion });
+    }
+
+    return err("unknown_op");
+  }
+
+  /* ---------- marketing y RRSS (calendario, campañas, material y resultados) ---------- */
+  if (op.startsWith("marketing.")) {
+    const gestiona = !ctx.esAdmin && can("marketing.gestionar");
+    if (!gestiona && !esSupervisor && !can("marketing.gestionar")) return err("forbidden", 403);
+    const fallar = (e: any) => fallo(e);
+
+    /** Leads con campaña y las ventas aprobadas de esos leads (para medir cada campaña). */
+    async function leadsConCampania() {
+      const { data, error } = await scoped(sb.from("leads").select("id, campania_id, etapa, fuente, creado_en"));
+      if (error) throw error;
+      const leads = (data ?? []).filter((l: any) => l.campania_id);
+      const cierres = (await enLotes("cierres", "lead_id", leads.map((l: any) => l.id))).filter((c: any) => c.estado === "aprobada");
+      const ventas = new Map<string, { monto: number }>(cierres.map((c: any) => [c.lead_id, { monto: Number(c.precio_final) }]));
+      return { leads, ventas };
+    }
+    const conMetricas = (camps: any[], base: { leads: any[]; ventas: Map<string, any> }) => camps.map((c) => ({ ...c, folio: folioCampania(c.numero), metricas: metricasCampania(c, base.leads, base.ventas) }));
+    async function cargarCampania(id: string) {
+      const { data, error } = await scoped(sb.from("campanias").select("*").eq("id", id)).maybeSingle();
+      if (error) throw error;
+      return data;
+    }
+    const campaniaDetalle = async (c: any) => ({ campania: conMetricas([c], await leadsConCampania())[0], puedeGestionar: gestiona, puedeAprobar: esSupervisor });
+    const parteDeLocal = async (tabla: string, id: string | null, local: string) => {
+      if (!id) return true;
+      const { data } = await sb.from(tabla).select("id, local_id").eq("id", id).maybeSingle();
+      return !!data && data.local_id === local;
+    };
+
+    /* ----- campañas ----- */
+    if (op === "marketing.campanias.list") {
+      const { data, error } = await scoped(sb.from("campanias").select("*").order("creado_en", { ascending: false }));
+      if (error) return fallar(error);
+      let filas: any[] = data ?? [];
+      if (body.estado) filas = filas.filter((c) => c.estado === String(body.estado));
+      const hace90 = Date.now() - 90 * 86_400_000;
+      if (!body.estado) filas = filas.filter((c) => !(c.estado === "cancelada" && Date.parse(c.actualizado_en) < hace90));
+      return json({ campanias: conMetricas(filas.slice(0, 200), await leadsConCampania()), puedeGestionar: gestiona, puedeAprobar: esSupervisor });
+    }
+    if (op === "marketing.campanias.get") {
+      const c = await cargarCampania(String(body.id ?? ""));
+      if (!c) return err("no_existe", 404);
+      return json(await campaniaDetalle(c));
+    }
+    if (op === "marketing.campanias.save") {
+      if (!gestiona) return err("forbidden", 403);
+      const v = validarCampania(body.datos);
+      if (!v.ok) return err(v.error!);
+      if (!body.id) {
+        const local = await localParaCrear();
+        if (!local) return err("sin_local");
+        const ins = await sb.from("campanias").insert({ ...v.value, local_id: local, creado_por: userName }).select().single();
+        if (ins.error) return fallar(ins.error);
+        await audit(ctx.actor, "campania.crear", "campania", ins.data.id, { numero: ins.data.numero, nombre: ins.data.nombre, presupuesto: ins.data.presupuesto });
+        return json(await campaniaDetalle(ins.data));
+      }
+      const c = await cargarCampania(String(body.id));
+      if (!c) return err("no_existe", 404);
+      const tr = validarTransicionCampania(c.estado, "editar");
+      if (!tr.ok) return err(tr.error!);
+      if (v.value.presupuesto < Number(c.gasto)) return err("presupuesto_menor_que_gasto");
+      const estado = estadoTrasGuardar(c, v.value);
+      const { data, error } = await sb.from("campanias").update({ ...v.value, estado, ...(estado === "pendiente" && c.estado === "aprobada" ? { aprobado_por: null, aprobado_en: null } : {}), actualizado_en: new Date().toISOString() }).eq("id", c.id).select().single();
+      if (error) return fallar(error);
+      await audit(ctx.actor, "campania.editar", "campania", c.id, { numero: c.numero, estado, presupuesto: v.value.presupuesto });
+      return json(await campaniaDetalle(data));
+    }
+    // Sin presupuesto sale sola (campaña orgánica); con presupuesto espera la aprobación del Jefe Local.
+    if (op === "marketing.campanias.enviar") {
+      if (!gestiona) return err("forbidden", 403);
+      const c = await cargarCampania(String(body.id ?? ""));
+      if (!c) return err("no_existe", 404);
+      const tr = validarTransicionCampania(c.estado, "enviar");
+      if (!tr.ok) return err(tr.error!);
+      const ahora = new Date().toISOString();
+      const libre = Number(c.presupuesto) === 0;
+      const patch = libre
+        ? { estado: "aprobada", presupuesto_aprobado: 0, aprobado_por: "Sin presupuesto: no requiere aprobación", aprobado_en: ahora, motivo_rechazo: null, actualizado_en: ahora }
+        : { estado: "pendiente", motivo_rechazo: null, actualizado_en: ahora };
+      const { data, error } = await sb.from("campanias").update(patch).eq("id", c.id).select().single();
+      if (error) return fallar(error);
+      await audit(ctx.actor, libre ? "campania.activar" : "campania.enviar", "campania", c.id, { numero: c.numero, presupuesto: c.presupuesto });
+      return json(await campaniaDetalle(data));
+    }
+    if (op === "marketing.campanias.aprobar" || op === "marketing.campanias.rechazar") {
+      if (!esSupervisor) return err("forbidden", 403);
+      const c = await cargarCampania(String(body.id ?? ""));
+      if (!c) return err("no_existe", 404);
+      const aprobar = op === "marketing.campanias.aprobar";
+      const tr = validarTransicionCampania(c.estado, aprobar ? "aprobar" : "rechazar");
+      if (!tr.ok) return err(tr.error!);
+      const ahora = new Date().toISOString();
+      let patch: Record<string, unknown>;
+      if (aprobar) patch = { estado: "aprobada", presupuesto_aprobado: c.presupuesto, aprobado_por: userName, aprobado_en: ahora, motivo_rechazo: null, actualizado_en: ahora };
+      else {
+        const motivo = String(body.motivo ?? "").trim().slice(0, 200);
+        if (motivo.length < 3) return err("motivo_requerido");
+        patch = { estado: "rechazada", motivo_rechazo: motivo, actualizado_en: ahora };
+      }
+      const { data, error } = await sb.from("campanias").update(patch).eq("id", c.id).select().single();
+      if (error) return fallar(error);
+      await audit(ctx.actor, aprobar ? "campania.aprobar" : "campania.rechazar", "campania", c.id, { numero: c.numero, presupuesto: c.presupuesto, motivo: patch.motivo_rechazo ?? null });
+      return json(await campaniaDetalle(data));
+    }
+    if (op === "marketing.campanias.resultados") {
+      if (!gestiona) return err("forbidden", 403);
+      const c = await cargarCampania(String(body.id ?? ""));
+      if (!c) return err("no_existe", 404);
+      const tr = validarTransicionCampania(c.estado, "resultados");
+      if (!tr.ok) return err(tr.error!);
+      const r = validarResultadosCampania(body.datos, c.presupuesto_aprobado);
+      if (!r.ok) return err(r.error!);
+      const { data, error } = await sb.from("campanias").update({ ...r.value, actualizado_en: new Date().toISOString() }).eq("id", c.id).select().single();
+      if (error) return fallar(error);
+      await audit(ctx.actor, "campania.resultados", "campania", c.id, { numero: c.numero, ...r.value });
+      return json(await campaniaDetalle(data));
+    }
+    if (op === "marketing.campanias.finalizar" || op === "marketing.campanias.cancelar") {
+      const fin = op === "marketing.campanias.finalizar";
+      if (!(gestiona || (!fin && esSupervisor))) return err("forbidden", 403);
+      const c = await cargarCampania(String(body.id ?? ""));
+      if (!c) return err("no_existe", 404);
+      const tr = validarTransicionCampania(c.estado, fin ? "finalizar" : "cancelar");
+      if (!tr.ok) return err(tr.error!);
+      const { data, error } = await sb.from("campanias").update({ estado: fin ? "finalizada" : "cancelada", actualizado_en: new Date().toISOString() }).eq("id", c.id).select().single();
+      if (error) return fallar(error);
+      await audit(ctx.actor, fin ? "campania.finalizar" : "campania.cancelar", "campania", c.id, { numero: c.numero });
+      return json(await campaniaDetalle(data));
+    }
+
+    /* ----- calendario de contenido ----- */
+    if (op === "marketing.publicaciones.list") {
+      const mes = body.mes === undefined ? mesChile() : String(body.mes);
+      if (!esMes(mes)) return err("mes_invalido");
+      const { data, error } = await scoped(sb.from("publicaciones_rrss").select("*").order("fecha_programada", { ascending: true }));
+      if (error) return fallar(error);
+      const todas: any[] = data ?? [];
+      // Las del mes (por su fecha) y las que aún no tienen fecha ni terminaron.
+      const delMes = todas.filter((p) => (p.fecha_programada ? mesChile(p.fecha_programada) === mes : p.estado === "idea" || p.estado === "produccion"));
+      const vehs = await porIds("vehiculos", delMes.map((p) => p.vehiculo_id));
+      const camps = await porIds("campanias", delMes.map((p) => p.campania_id));
+      const filas = delMes.map((p) => {
+        const v = vehs.find((x: any) => x.id === p.vehiculo_id);
+        const c = camps.find((x: any) => x.id === p.campania_id);
+        return { ...p, folio: folioPublicacion(p.numero), vehiculo: v ? `${v.marca} ${v.modelo} ${v.anio} · ${v.patente}` : "", campania: c ? c.nombre : "" };
+      });
+      return json({ mes, nombreMes: nombreMes(mes), publicaciones: filas, atrasadas: publicacionesAtrasadas(todas).length, resumen: resumenPublicaciones(delMes), puedeGestionar: gestiona });
+    }
+    if (op === "marketing.publicaciones.save") {
+      if (!gestiona) return err("forbidden", 403);
+      const v = validarPublicacion(body.datos);
+      if (!v.ok) return err(v.error!);
+      let local = localId;
+      let antes: any = null;
+      if (body.id) {
+        const q = await scoped(sb.from("publicaciones_rrss").select("*").eq("id", String(body.id))).maybeSingle();
+        if (q.error) return fallar(q.error);
+        antes = q.data;
+        if (!antes) return err("no_existe", 404);
+        local = antes.local_id;
+      } else { local = await localParaCrear(); if (!local) return err("sin_local"); }
+      if (!(await parteDeLocal("campanias", v.value.campania_id, local!))) return err("campania_invalida");
+      if (!(await parteDeLocal("vehiculos", v.value.vehiculo_id, local!))) return err("vehiculo_invalido");
+      const ahora = new Date().toISOString();
+      const r = antes
+        ? await sb.from("publicaciones_rrss").update({ ...v.value, actualizado_en: ahora }).eq("id", antes.id).select().single()
+        : await sb.from("publicaciones_rrss").insert({ ...v.value, local_id: local, responsable_id: userId, creado_por: userName }).select().single();
+      if (r.error) return fallar(r.error);
+      await audit(ctx.actor, antes ? "publicacion.editar" : "publicacion.crear", "publicacion", r.data.id, { numero: r.data.numero, red: r.data.red, estado: r.data.estado });
+      return json({ publicacion: { ...r.data, folio: folioPublicacion(r.data.numero) } });
+    }
+    if (op === "marketing.publicaciones.estado") {
+      if (!gestiona) return err("forbidden", 403);
+      const q = await scoped(sb.from("publicaciones_rrss").select("*").eq("id", String(body.id ?? ""))).maybeSingle();
+      if (q.error) return fallar(q.error);
+      if (!q.data) return err("no_existe", 404);
+      const v = validarPublicacion({ titulo: q.data.titulo, red: q.data.red, tipo: q.data.tipo, texto: q.data.texto, campaniaId: q.data.campania_id, vehiculoId: q.data.vehiculo_id, fechaProgramada: q.data.fecha_programada, url: body.url ?? q.data.url, estado: body.estado });
+      if (!v.ok) return err(v.error!);
+      const { data, error } = await sb.from("publicaciones_rrss").update({ estado: v.value.estado, url: v.value.url, actualizado_en: new Date().toISOString() }).eq("id", q.data.id).select().single();
+      if (error) return fallar(error);
+      await audit(ctx.actor, "publicacion.estado", "publicacion", q.data.id, { numero: q.data.numero, estado: v.value.estado });
+      return json({ publicacion: { ...data, folio: folioPublicacion(data.numero) } });
+    }
+    if (op === "marketing.publicaciones.eliminar") {
+      if (!gestiona) return err("forbidden", 403);
+      const q = await scoped(sb.from("publicaciones_rrss").select("*").eq("id", String(body.id ?? ""))).maybeSingle();
+      if (q.error) return fallar(q.error);
+      if (!q.data) return err("no_existe", 404);
+      if (q.data.estado !== "idea" && q.data.estado !== "cancelada") return err("publicacion_no_eliminable");
+      const d = await sb.from("publicaciones_rrss").delete().eq("id", q.data.id);
+      if (d.error) return fallar(d.error);
+      await audit(ctx.actor, "publicacion.eliminar", "publicacion", q.data.id, { numero: q.data.numero });
+      return json({ ok: true });
+    }
+
+    /* ----- material por vehículo ----- */
+    if (op === "marketing.material.list") {
+      const { data, error } = await scoped(sb.from("material_vehiculo").select("*").order("actualizado_en", { ascending: false }));
+      if (error) return fallar(error);
+      const filas: any[] = data ?? [];
+      const vehs = await porIds("vehiculos", filas.map((m) => m.vehiculo_id));
+      return json({
+        material: filas.slice(0, 300).map((m) => { const v = vehs.find((x: any) => x.id === m.vehiculo_id) || {}; return { ...m, vehiculo: `${v.marca ?? ""} ${v.modelo ?? ""} ${v.anio ?? ""} · ${v.patente ?? ""}`.trim(), vehiculo_estado: v.estado ?? null }; }),
+        puedeGestionar: gestiona || esSupervisor,
+      });
+    }
+    if (op === "marketing.material.save") {
+      if (!gestiona && !esSupervisor) return err("forbidden", 403);
+      const v = validarMaterial(body.datos);
+      if (!v.ok) return err(v.error!);
+      const { data: veh, error: ve } = await scoped(sb.from("vehiculos").select("id, local_id").eq("id", v.value.vehiculo_id)).maybeSingle();
+      if (ve) return fallar(ve);
+      if (!veh) return err("vehiculo_invalido");
+      const prev = await sb.from("material_vehiculo").select("*").eq("vehiculo_id", veh.id).eq("tipo", v.value.tipo).maybeSingle();
+      if (prev.error) return fallar(prev.error);
+      const ahora = new Date().toISOString();
+      const r = prev.data
+        ? await sb.from("material_vehiculo").update({ ...v.value, actualizado_en: ahora }).eq("id", prev.data.id).select().single()
+        : await sb.from("material_vehiculo").insert({ ...v.value, local_id: veh.local_id, creado_por: userName }).select().single();
+      if (r.error) return fallar(r.error);
+      await audit(ctx.actor, "material.guardar", "material", r.data.id, { vehiculo_id: veh.id, tipo: v.value.tipo, estado: v.value.estado });
+      return json({ material: r.data });
+    }
+    if (op === "marketing.material.eliminar") {
+      if (!gestiona && !esSupervisor) return err("forbidden", 403);
+      const q = await scoped(sb.from("material_vehiculo").select("id").eq("id", String(body.id ?? ""))).maybeSingle();
+      if (q.error) return fallar(q.error);
+      if (!q.data) return err("no_existe", 404);
+      const d = await sb.from("material_vehiculo").delete().eq("id", q.data.id);
+      if (d.error) return fallar(d.error);
+      return json({ ok: true });
+    }
+
+    /* ----- resultados: rendimiento por fuente y por campaña ----- */
+    if (op === "marketing.resultados") {
+      const mes = body.mes === undefined ? mesChile() : String(body.mes);
+      if (!esMes(mes)) return err("mes_invalido");
+      const [y, m] = mes.split("-").map(Number);
+      const desde = new Date(Date.UTC(y, m - 1, 1) - 86_400_000).toISOString();
+      const hasta = new Date(Date.UTC(y, m, 1) + 86_400_000).toISOString();
+      const lr = await scoped(sb.from("leads").select("*").gte("creado_en", desde).lt("creado_en", hasta));
+      if (lr.error) return fallar(lr.error);
+      const cohorte: any[] = (lr.data ?? []).filter((l: any) => mesChile(l.creado_en) === mes);
+      const ids = cohorte.map((l) => l.id);
+      const cot = (await enLotes("cotizaciones", "lead_id", ids)).filter((c: any) => c.estado !== "anulada");
+      const res = await enLotes("reservas", "lead_id", ids);
+      const cie = (await enLotes("cierres", "lead_id", ids)).filter((c: any) => c.estado === "aprobada");
+      const conjuntos = { cotizados: new Set<string>(cot.map((c: any) => c.lead_id)), reservados: new Set<string>(res.map((r: any) => r.lead_id)), vendidos: new Set<string>(cie.map((c: any) => c.lead_id)) };
+      const ventasMap = new Map<string, { monto: number; margen: number | null }>(cie.map((c: any) => [c.lead_id, { monto: Number(c.precio_final), margen: null }]));
+      const fuentes = rendimientoPorFuente(cohorte, conjuntos, ventasMap).map(({ margen, margenCompleto, ...f }: any) => f);
+
+      const cq = await scoped(sb.from("campanias").select("*"));
+      if (cq.error) return fallar(cq.error);
+      const camps = conMetricas((cq.data ?? []).filter((c: any) => c.estado === "aprobada" || c.estado === "finalizada"), await leadsConCampania())
+        .sort((a: any, b: any) => b.metricas.leads - a.metricas.leads || b.gasto - a.gasto);
+      const pq = await scoped(sb.from("publicaciones_rrss").select("*"));
+      const pubs: any[] = pq.error ? [] : (pq.data ?? []).filter((p: any) => p.fecha_programada && mesChile(p.fecha_programada) === mes);
+      return json({
+        mes, nombreMes: nombreMes(mes), fuentes, campanias: camps.slice(0, 50),
+        totales: { gasto: camps.reduce((a: number, c: any) => a + Number(c.gasto || 0), 0), leadsDeCampanias: camps.reduce((a: number, c: any) => a + c.metricas.leads, 0), ventasDeCampanias: camps.reduce((a: number, c: any) => a + c.metricas.ventas, 0) },
+        publicaciones: resumenPublicaciones(pubs),
+      });
     }
 
     return err("unknown_op");
@@ -1360,7 +1645,9 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     const puedeCosto = can("inventario.editar");
     const tasUsuarios = tas.error ? [] : await porIds("usuarios", (tas.data ?? []).map((t: any) => t.tasador_id));
     const loc = lead.local_id ? await sb.from("locales").select("nombre").eq("id", lead.local_id).maybeSingle() : { data: null };
+    const camp = lead.campania_id ? await sb.from("campanias").select("id, nombre, canal").eq("id", lead.campania_id).maybeSingle() : { data: null };
     return json({
+      campania: camp.data ?? null,
       lead, cliente: cliente ?? null, vehiculo: vehiculo ? ocultarCosto(vehiculo, can("inventario.editar")) : null,
       asignado: asignado ? { id: asignado.id, nombre: asignado.nombre } : null, eventos: ev.data ?? [], tareas: ta.data ?? [], puedeEditar: puedeTocar(lead),
       cotizaciones: cot.error ? [] : cot.data ?? [], reservas: res.error ? [] : res.data ?? [], localNombre: loc.data ? loc.data.nombre : "",
@@ -1380,6 +1667,8 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       const { data: v } = await sb.from("vehiculos").select("id, local_id").eq("id", datosLead.value.vehiculo_id).maybeSingle();
       if (!v || v.local_id !== local) return err("vehiculo_invalido");
     }
+    const camp = await resolverCampania(body.lead?.campaniaId, local);
+    if (!camp.ok) return err("campania_invalida");
 
     // Cliente: uno existente del mismo local, o uno nuevo (si trae RUT que ya existe, se reutiliza).
     let cliente: any = null;
@@ -1415,7 +1704,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     }
 
     const { data: lead, error } = await sb.from("leads").insert({
-      ...datosLead.value, tipo: "venta", etapa: "nuevo", local_id: local, cliente_id: cliente.id,
+      ...datosLead.value, ...(camp.id ? { campania_id: camp.id } : {}), tipo: "venta", etapa: "nuevo", local_id: local, cliente_id: cliente.id,
       asignado_a: asignado ? asignado.id : null, creado_por: ctx.esAdmin ? null : userId,
     }).select().single();
     if (error) return fallo(error);
@@ -1434,11 +1723,18 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       const { data: veh } = await sb.from("vehiculos").select("id, local_id").eq("id", v.value.vehiculo_id).maybeSingle();
       if (!veh || veh.local_id !== lead.local_id) return err("vehiculo_invalido");
     }
+    // La campaña solo se cambia si la pantalla la envía.
+    let campPatch: Record<string, unknown> = {};
+    if (body.lead && Object.prototype.hasOwnProperty.call(body.lead, "campaniaId")) {
+      const camp = await resolverCampania(body.lead.campaniaId, lead.local_id, lead.campania_id ?? null);
+      if (!camp.ok) return err("campania_invalida");
+      campPatch = { campania_id: camp.id };
+    }
     // El valor del vehículo en parte de pago no puede superar lo tasado, y el vínculo con la tasación se conserva.
     const tope = verificarTopeParteDePago(v.value.parte_pago, await topeDeLead(lead));
     if (!tope.ok) return err(tope.error!);
     v.value.parte_pago = fusionarParteDePago(lead.parte_pago, v.value.parte_pago);
-    const { data, error } = await sb.from("leads").update({ ...v.value, actualizado_en: new Date().toISOString() }).eq("id", lead.id).select().single();
+    const { data, error } = await sb.from("leads").update({ ...v.value, ...campPatch, actualizado_en: new Date().toISOString() }).eq("id", lead.id).select().single();
     if (error) return fallo(error);
     await evento(lead.id, "nota", "Se actualizaron los datos del lead");
     return json({ lead: data });
@@ -2084,6 +2380,8 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       valSinTomar = valSinTomar.filter((x) => x.tipo !== "venta" || !x.cierre_id || ["pendiente", "aprobada"].includes((cv.find((c: any) => c.id === x.cierre_id) || {}).estado));
     }
     const avisosMalos = esSupervisor ? await avisosConAlertas() : [];
+    const cpr = esSupervisor ? await scoped(sb.from("campanias").select("*").eq("estado", "pendiente")) : { data: [], error: null };
+    const campPend: any[] = cpr.error ? [] : cpr.data ?? [];
     const sinAtender = abiertos.filter((l) => esSinAtender(l, ahora, cfg.horas_sin_contacto));
     const detenidos = abiertos.filter((l) => esDetenido(l, ahora, cfg.dias_detenido));
     const sinAsignar = abiertos.filter((l) => !l.asignado_a);
@@ -2110,7 +2408,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
 
     return json({
       config: { horas_sin_contacto: cfg.horas_sin_contacto, dias_detenido: cfg.dias_detenido, horas_tasacion: cfg.horas_tasacion, horas_inspeccion: cfg.horas_inspeccion, horas_validacion: cfg.horas_validacion },
-      conteos: { abiertos: abiertos.length, sinAtender: sinAtender.length, detenidos: detenidos.length, sinAsignar: sinAsignar.length, tareasVencidas: tareasVencidas.length, reservasPorVencer: porVencer.length, tasacionesSinTomar: tasSinTomar.length, inspeccionesSinTomar: inspSinTomar.length, validacionesSinTomar: valSinTomar.length, avisosDesactualizados: avisosMalos.length },
+      conteos: { abiertos: abiertos.length, sinAtender: sinAtender.length, detenidos: detenidos.length, sinAsignar: sinAsignar.length, tareasVencidas: tareasVencidas.length, reservasPorVencer: porVencer.length, tasacionesSinTomar: tasSinTomar.length, inspeccionesSinTomar: inspSinTomar.length, validacionesSinTomar: valSinTomar.length, avisosDesactualizados: avisosMalos.length, campaniasPorAprobar: campPend.length },
       sinAtender: tope(sinAtender).map(fila),
       detenidos: tope(detenidos).map(fila),
       sinAsignar: tope(sinAsignar).map(fila),
@@ -2128,6 +2426,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
         const vh = t.vehiculo || {};
         return { id: t.id, lead_id: t.lead_id, folio: folioTasacion(t.numero), vehiculo: `${vh.marca ?? ""} ${vh.modelo ?? ""} ${vh.anio ?? ""} · ${vh.patente ?? ""}`.trim(), cliente: l ? clienteDe(l.cliente_id) : (t.contacto && t.contacto.nombre) || "", solicitante: nombreDe(t.solicitante_id), solicitada_en: t.solicitada_en };
       }),
+      campaniasPorAprobar: tope(campPend).map((c: any) => ({ id: c.id, folio: folioCampania(c.numero), nombre: c.nombre, canal: c.canal, presupuesto: c.presupuesto, desde: c.desde, hasta: c.hasta, creado_por: c.creado_por })),
       avisosDesactualizados: tope(avisosMalos).map((x: any) => ({ id: x.id, folio: x.folio, vehiculo: x.vehiculo, alertas: x.alertas.map((a: any) => a.texto) })),
       validacionesSinTomar: tope(valSinTomar).map((x) => {
         const s = x.sujeto || {};

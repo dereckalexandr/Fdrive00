@@ -20,6 +20,7 @@ import { SeccionTasacion, MisTasaciones, ModuloTasaciones } from "./crm-tasacion
 import { SeccionInspeccion, ModuloInspecciones } from "./crm-inspecciones.jsx";
 import { SeccionValidacion, ModuloValidaciones } from "./crm-validaciones.jsx";
 import { ModuloAnuncios } from "./crm-anuncios.jsx";
+import { ModuloMarketing } from "./crm-marketing.jsx";
 import {
   INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, useCarga, mensajeError,
 } from "./crm-ui.jsx";
@@ -115,6 +116,7 @@ function LeadFicha({ api, leadId, catalogos, onCerrar, onCambio, onEditar }) {
           {lead.motivo_perdida && <span className="text-xs text-stone-500">Motivo: {lead.motivo_perdida}</span>}
           <span className="text-xs text-stone-500">· Asignado a {asignado ? asignado.nombre : "nadie"}</span>
           {lead.fuente && <span className="text-xs text-stone-500">· Fuente: {lead.fuente}</span>}
+          {datos.campania && <span className="text-xs text-stone-500">· Campaña: {datos.campania.nombre}</span>}
           {puedeEditar && <button onClick={onEditar} className={`${BTN} ml-auto`}>Editar datos</button>}
         </div>
         {cliente && (
@@ -229,7 +231,7 @@ function LeadFicha({ api, leadId, catalogos, onCerrar, onCambio, onEditar }) {
 /* =========================================================
    NUEVO LEAD / EDITAR LEAD
 ========================================================= */
-const LEAD_VACIO = { vehiculoId: "", vehiculoInteres: "", fuente: "", notas: "", tienePP: false, pp: { patente: "", marca: "", modelo: "", anio: "", km: "", valor: "" }, quiereFin: false, fin: { pie: "", banco: "", estado: "por_evaluar" } };
+const LEAD_VACIO = { vehiculoId: "", vehiculoInteres: "", fuente: "", campaniaId: "", notas: "", tienePP: false, pp: { patente: "", marca: "", modelo: "", anio: "", km: "", valor: "" }, quiereFin: false, fin: { pie: "", banco: "", estado: "por_evaluar" } };
 
 function FormLead({ api, catalogos, lead, onCerrar, onGuardado }) {
   const editando = !!lead;
@@ -244,7 +246,7 @@ function FormLead({ api, catalogos, lead, onCerrar, onGuardado }) {
     if (!lead) return LEAD_VACIO;
     const pp = lead.parte_pago || {}; const fin = lead.financiamiento || {};
     return {
-      vehiculoId: lead.vehiculo_id || "", vehiculoInteres: lead.vehiculo_interes || "", fuente: lead.fuente || "", notas: lead.notas || "",
+      vehiculoId: lead.vehiculo_id || "", vehiculoInteres: lead.vehiculo_interes || "", fuente: lead.fuente || "", campaniaId: lead.campania_id || "", notas: lead.notas || "",
       tienePP: !!pp.tiene, pp: { patente: pp.patente || "", marca: pp.marca || "", modelo: pp.modelo || "", anio: pp.anio ?? "", km: pp.km ?? "", valor: pp.valor ?? "" },
       quiereFin: !!fin.quiere, fin: { pie: fin.pie ?? "", banco: fin.banco || "", estado: fin.estado || "por_evaluar" },
     };
@@ -261,7 +263,7 @@ function FormLead({ api, catalogos, lead, onCerrar, onGuardado }) {
   }, [api, buscar, editando]);
 
   const datosLead = () => ({
-    vehiculoId: f.vehiculoId || null, vehiculoInteres: f.vehiculoId ? "" : f.vehiculoInteres, fuente: f.fuente, notas: f.notas,
+    vehiculoId: f.vehiculoId || null, vehiculoInteres: f.vehiculoId ? "" : f.vehiculoInteres, fuente: f.fuente, campaniaId: f.campaniaId || "", notas: f.notas,
     parteDePago: f.tienePP ? { tiene: true, ...f.pp } : { tiene: false },
     financiamiento: f.quiereFin ? { quiere: true, ...f.fin } : { quiere: false },
   });
@@ -330,6 +332,14 @@ function FormLead({ api, catalogos, lead, onCerrar, onGuardado }) {
               <option value="">—</option>{catalogos.fuentes_lead.map((x) => <option key={x}>{x}</option>)}
             </select>
           </Campo>
+          {(catalogos.campanias || []).length > 0 && (
+            <Campo etiqueta="Campaña (opcional)" ayuda="Si el cliente llegó por una campaña de Marketing.">
+              <select value={f.campaniaId} onChange={(e) => set("campaniaId", e.target.value)} className={INPUT}>
+                <option value="">—</option>{catalogos.campanias.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                {f.campaniaId && !catalogos.campanias.some((c) => c.id === f.campaniaId) && <option value={f.campaniaId}>(campaña ya asignada)</option>}
+              </select>
+            </Campo>
+          )}
           {!editando && catalogos.puedeAsignar && (
             <Campo etiqueta="Asignar a">
               <select value={asignarA} onChange={(e) => setAsignarA(e.target.value)} className={INPUT}>
@@ -667,7 +677,7 @@ export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador }
   if (catalogos.puedeComision) opciones.push(["ventas", "Ventas"]);
   if (puedeAprobar) opciones.push(["gestion", "Gestión"], ["tasaciones", "Tasaciones"], ["aprobaciones", "Aprobaciones", pend.datos || 0]);
   if (catalogos.puedeInspecciones) opciones.push(["inspecciones", "Inspecciones"]);
-  if (puedeAprobar) opciones.push(["validaciones", "Validaciones"], ["anuncios", "Avisos"]);
+  if (puedeAprobar) opciones.push(["validaciones", "Validaciones"], ["anuncios", "Avisos"], ["marketing", "Marketing"]);
   opciones.push(["inventario", "Inventario"]);
   if (usaLeads) opciones.push(["clientes", "Clientes"]);
 
@@ -682,6 +692,7 @@ export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador }
       {tab === "inicio" && <Inicio api={api} catalogos={catalogos} abrirLead={setLeadAbierto} irA={setTab} version={version} onCambio={subir} />}
       {tab === "leads" && <Leads api={api} catalogos={catalogos} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
       {tab === "tasaciones" && <ModuloTasaciones api={api} permisos={permisos} esAdmin={esAdmin} renderEstimador={renderEstimador} />}
+      {tab === "marketing" && <ModuloMarketing api={api} permisos={permisos} esAdmin={esAdmin} />}
       {tab === "anuncios" && <ModuloAnuncios api={api} permisos={permisos} esAdmin={esAdmin} />}
       {tab === "validaciones" && <ModuloValidaciones api={api} permisos={permisos} esAdmin={esAdmin} />}
       {tab === "inspecciones" && <ModuloInspecciones api={api} permisos={permisos} esAdmin={esAdmin} />}

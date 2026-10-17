@@ -473,6 +473,36 @@ Aparecen en *Resumen y alertas* del Anunciante y como alerta **Avisos desactuali
 
 Código: reglas en `supabase/functions/api/anuncios-core.js`; servidor en `ventas.ts` (`anuncios.*`); pantallas en `src/crm-anuncios.jsx`. Pruebas: `tests/anuncios-core.test.mjs` y `tests/anuncios-api.test.mjs` (la función real contra una base falsa).
 
+## CRM · Entrega 8: perfil de Marketing y RRSS
+
+**Instalar (una sola vez, después de `supabase-crm-anuncios.sql`):**
+1. Supabase → *SQL Editor* → pegar `supabase-crm-marketing.sql` → *Run*. Crea las tablas `campanias`, `publicaciones_rrss` y `material_vehiculo`, y agrega la columna `campania_id` a `leads` (RLS activado, sin políticas). Se puede repetir sin riesgo.
+2. Redesplegar la función: `node scripts/deploy-api.mjs`.
+
+**Permiso:** `marketing.gestionar` (ahora disponible; el rol Marketing lo trae por defecto, junto con `leads.local`). *Si antes personalizaste los permisos de ese rol, actívalo en la pestaña Permisos.* El Jefe Local y la cuenta maestra **ven** todo (pestaña *Marketing* dentro de Ventas); el Jefe Local además **aprueba o rechaza campañas** y puede pedir material.
+
+**Calendario de contenido:** una fila por publicación con red (Instagram, Facebook, TikTok, YouTube, Google, Chileautos, Yapo, WhatsApp u otra), formato (post, reel, historia, video, carrusel), texto, fecha y hora, campaña y vehículo (opcionales). Estados: *Idea → En producción → Programada → Publicada* (o Cancelada); una publicada guarda el enlace. Una *Programada* cuya hora ya pasó se marca como **atrasada**. Se filtra por mes y por red. Solo se eliminan las ideas y las canceladas.
+
+**Campañas con presupuesto y aprobación:**
+- Se crean en *Borrador* (nombre, canal, fechas, objetivo y presupuesto).
+- **Con presupuesto**: *Enviar a aprobación* → el **Jefe Local la aprueba o rechaza** (con motivo; al rechazarla Marketing la corrige y la reenvía). Al aprobar queda fijado el **presupuesto aprobado**.
+- **Sin presupuesto (0)**: *Activar* la deja aprobada sola (campaña orgánica).
+- Si una campaña aprobada **sube su presupuesto** por sobre lo aprobado, vuelve a pedir aprobación; no puede bajarse bajo lo ya gastado.
+- Marketing anota a mano **gasto real, alcance, impresiones y clics**. El **gasto no puede superar el presupuesto aprobado**. Luego puede *Finalizar* la campaña; Marketing o el Jefe Local pueden *Cancelarla*.
+- Alerta **Campañas por aprobar** en el panel de gestión del Jefe Local.
+
+**Leads por campaña:** el formulario del lead tiene el campo opcional **Campaña** (solo ofrece las campañas aprobadas del local). La ficha del lead muestra su campaña. Editar el lead sin tocar el campo la conserva. Cada campaña muestra **leads, ventas aprobadas, monto vendido, conversión, costo por lead (gasto ÷ leads) y costo por venta (gasto ÷ ventas)** y cuánto del presupuesto lleva consumido.
+
+**Material por vehículo:** se pide *fotos profesionales, video, reel o historias* de un vehículo (Marketing o el Jefe Local), con una nota; Marketing lo pasa a *En proceso* y a *Listo* dejando el **enlace** a la carpeta (por ejemplo, Google Drive). Un pedido por vehículo y tipo.
+
+**Resultados:** por mes, los **leads por fuente** (cuántos se cotizaron, reservaron y vendieron, conversión y monto vendido) y el desempeño de cada campaña. **Marketing no ve costos ni márgenes** de los vehículos, solo montos vendidos.
+
+**Privacidad:** el rol Marketing ya tenía `leads.local`, que le permite ver los leads del local (con los datos de contacto de los clientes). Si no quieres que los vea, quita ese permiso del rol en *Permisos*: el módulo de Marketing funciona igual, porque sus cifras salen del servidor.
+
+**Límites conocidos:** los resultados (gasto, alcance, clics) se **anotan a mano**: no hay conexión automática con Meta, TikTok ni Google. Las publicaciones del calendario no se publican solas en las redes. Para que un portal aparezca en *Leads por fuente*, la fuente debe existir en *Configuración → Fuentes de leads*.
+
+Código: reglas en `supabase/functions/api/marketing-core.js`; servidor en `ventas.ts` (`marketing.*`, el campo `campaniaId` de los leads y las campañas del catálogo); pantallas en `src/crm-marketing.jsx`. Pruebas: `tests/marketing-core.test.mjs` y `tests/marketing-api.test.mjs` (la función real contra una base falsa).
+
 ## Desplegar en un hosting público
 
 Las opciones más simples (tienen plan gratuito y se conectan directo a

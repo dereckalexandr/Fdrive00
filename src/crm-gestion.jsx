@@ -76,7 +76,7 @@ export function FranjaAlertas({ resumen, onVer }) {
   const c = resumen.conteos;
   const partes = [
     [c.sinAtender, "sin atender"], [c.detenidos, "detenidos"], [c.sinAsignar, "sin asignar"],
-    [c.tareasVencidas, "tareas vencidas del equipo"], [c.reservasPorVencer, "reservas por vencer"], [c.tasacionesSinTomar, "tasaciones sin tomar"], [c.inspeccionesSinTomar, "inspecciones sin tomar"], [c.validacionesSinTomar, "validaciones sin tomar"], [c.avisosDesactualizados, "avisos desactualizados"],
+    [c.tareasVencidas, "tareas vencidas del equipo"], [c.reservasPorVencer, "reservas por vencer"], [c.tasacionesSinTomar, "tasaciones sin tomar"], [c.inspeccionesSinTomar, "inspecciones sin tomar"], [c.validacionesSinTomar, "validaciones sin tomar"], [c.avisosDesactualizados, "avisos desactualizados"], [c.campaniasPorAprobar, "campañas por aprobar"],
   ].filter(([n]) => n > 0);
   if (partes.length === 0) return null;
   return (
@@ -96,6 +96,7 @@ const TIPOS = [
   { id: "tareasVencidas", nombre: "Tareas vencidas", color: "border-orange-400", ayuda: () => "Llamadas y visitas del equipo cuya fecha ya pasó." },
   { id: "reservasPorVencer", nombre: "Reservas por vencer", color: "border-sky-400", ayuda: () => "Reservas que vencen en las próximas 48 horas: decide si se extienden." },
   { id: "tasacionesSinTomar", nombre: "Tasaciones sin tomar", color: "border-teal-400", ayuda: (c) => `Solicitudes de tasación que llevan ${c.horas_tasacion} h o más en la cola sin que un Tasador las tome.` },
+  { id: "campaniasPorAprobar", nombre: "Campañas por aprobar", color: "border-cyan-400", ayuda: () => "Campañas de Marketing con presupuesto que esperan tu aprobación. Apruébalas o recházalas desde la pestaña Marketing." },
   { id: "avisosDesactualizados", nombre: "Avisos desactualizados", color: "border-fuchsia-400", ayuda: () => "Avisos publicados con el precio distinto al del inventario, vehículo reservado o vendido, o vencidos. El Anunciante los corrige desde la pestaña Avisos." },
   { id: "validacionesSinTomar", nombre: "Validaciones sin tomar", color: "border-lime-400", ayuda: (c) => `Revisiones de documentos que llevan ${c.horas_validacion} h o más en la cola sin que un Validador las tome. Las ventas no se pueden aprobar sin ellas: asígnalas desde la pestaña Validaciones.` },
   { id: "inspeccionesSinTomar", nombre: "Inspecciones sin tomar", color: "border-indigo-400", ayuda: (c) => `Solicitudes de inspección que llevan ${c.horas_inspeccion} h o más en la cola, o cuya fecha es dentro de menos de 24 h, sin que un Inspector las tome. Asígnalas desde la pestaña Inspecciones.` },
@@ -167,6 +168,7 @@ function Alertas({ api, abrirLead, version, onCambio }) {
               {esLeads && <><th className="py-3 px-3">Cliente</th><th className="py-3 px-3">Ejecutivo</th><th className="py-3 px-3">Etapa</th><th className="py-3 px-3">{tipo === "detenidos" ? "Sin actividad" : "Llegó"}</th><th className="py-3 px-3"></th></>}
               {tipo === "tareasVencidas" && <><th className="py-3 px-3">Tarea</th><th className="py-3 px-3">Cliente</th><th className="py-3 px-3">Ejecutivo</th><th className="py-3 px-3">Venció</th><th className="py-3 px-3"></th></>}
               {tipo === "tasacionesSinTomar" && <><th className="py-3 px-3">Tasación</th><th className="py-3 px-3">Vehículo</th><th className="py-3 px-3">Cliente</th><th className="py-3 px-3">Pidió</th><th className="py-3 px-3">Espera</th></>}
+              {tipo === "campaniasPorAprobar" && <><th className="py-3 px-3">Campaña</th><th className="py-3 px-3">Canal</th><th className="py-3 px-3">Fechas</th><th className="py-3 px-3">Presupuesto</th><th className="py-3 px-3">Pidió</th></>}
               {tipo === "avisosDesactualizados" && <><th className="py-3 px-3">Aviso</th><th className="py-3 px-3">Vehículo</th><th className="py-3 px-3">Qué corregir</th></>}
               {tipo === "validacionesSinTomar" && <><th className="py-3 px-3">Validación</th><th className="py-3 px-3">Tipo</th><th className="py-3 px-3">Vehículo</th><th className="py-3 px-3">Espera</th></>}
               {tipo === "inspeccionesSinTomar" && <><th className="py-3 px-3">Inspección</th><th className="py-3 px-3">Vehículo</th><th className="py-3 px-3">Dónde y cuándo</th><th className="py-3 px-3">Pidió</th><th className="py-3 px-3">Espera</th></>}
@@ -199,6 +201,12 @@ function Alertas({ api, abrirLead, version, onCambio }) {
               <tr key={t.id} className="border-b border-stone-100">
                 <td className="py-2.5 px-3 font-mono text-xs text-stone-500">{t.folio}</td><td className="py-2.5 px-3 text-stone-900">{t.vehiculo}</td><td className="py-2.5 px-3 text-stone-700">{t.cliente}</td>
                 <td className="py-2.5 px-3 text-stone-700">{t.solicitante}</td><td className="py-2.5 px-3 text-rose-700 whitespace-nowrap">{edadTexto(t.solicitada_en)}</td>
+              </tr>
+            ))}
+            {tipo === "campaniasPorAprobar" && lista.map((x) => (
+              <tr key={x.id} className="border-b border-stone-100">
+                <td className="py-2.5 px-3 text-stone-900">{x.nombre}<div className="font-mono text-xs text-stone-500">{x.folio}</div></td><td className="py-2.5 px-3 text-stone-700 capitalize">{x.canal}</td>
+                <td className="py-2.5 px-3 text-xs text-stone-600 whitespace-nowrap">{String(x.desde).slice(0, 10)} → {String(x.hasta).slice(0, 10)}</td><td className="py-2.5 px-3 font-mono">{clp(x.presupuesto)}</td><td className="py-2.5 px-3 text-stone-700">{x.creado_por}</td>
               </tr>
             ))}
             {tipo === "avisosDesactualizados" && lista.map((x) => (

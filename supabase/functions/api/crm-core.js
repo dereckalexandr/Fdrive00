@@ -68,7 +68,7 @@ export const PERMISOS = [
   { id: "validacion.usar", grupo: "Operación", nombre: "Módulo de validación de documentos", disponible: true },
   { id: "validacion.realizar", grupo: "Operación", nombre: "Tomar y revisar documentos (aprobar, observar o rechazar)", disponible: true },
   { id: "anuncios.gestionar", grupo: "Operación", nombre: "Publicar y mantener avisos", disponible: true },
-  { id: "marketing.gestionar", grupo: "Operación", nombre: "Campañas y redes sociales", disponible: false },
+  { id: "marketing.gestionar", grupo: "Operación", nombre: "Campañas, calendario de contenido y material", disponible: true },
 ];
 export const PERMISO_IDS = PERMISOS.map((p) => p.id);
 
