@@ -3537,8 +3537,12 @@ function TasacionCompra({ inicial, onResultado } = {}) {
   );
 }
 
+// Pestañas de la versión anterior (perfiles con código): se mantienen agrupadas mientras compras y consignaciones pasan al CRM.
+const PESTANAS_LEGADO = [["resumen", "Resumen mensual"], ["vendedores", "Ejecutivos (código)"], ["inspectores", "Inspectores (código)"], ["datos", "AFP y comisiones"]];
+const esLegado = (t) => PESTANAS_LEGADO.some(([id]) => id === t);
+
 function AdminDashboard({ vendors, setVendors, inspectors, setInspectors, onExit }) {
-  const [tab, setTab] = useState("resumen");
+  const [tab, setTab] = useState("crm-reportes");
   const [selectedYM, setSelectedYM] = useState(currentYM());
   const [monthlyTotals, setMonthlyTotals] = useState({});
   const [loadingTotals, setLoadingTotals] = useState(true);
@@ -3738,24 +3742,30 @@ function AdminDashboard({ vendors, setVendors, inspectors, setInspectors, onExit
         <div className="max-w-5xl mx-auto px-6 py-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
             <p className="text-xs uppercase tracking-widest text-stone-400 mb-1">Panel administrador</p>
-            <h1 className="font-serif text-2xl md:text-3xl">Producción del equipo</h1>
+            <h1 className="font-serif text-2xl md:text-3xl">Administración de la plataforma</h1>
           </div>
           <button onClick={onExit} className="self-start md:self-auto border border-stone-700 px-3 py-1.5 text-sm text-stone-300 hover:bg-stone-800">Salir</button>
         </div>
         <div className="max-w-5xl mx-auto px-6 flex gap-2 border-t border-stone-800 overflow-x-auto whitespace-nowrap">
-          <button onClick={() => setTab("resumen")} className={`px-4 py-3 text-sm ${tab === "resumen" ? "text-amber-400 border-b-2 border-amber-400" : "text-stone-400"}`}>Resumen mensual</button>
-          <button onClick={() => setTab("vendedores")} className={`px-4 py-3 text-sm ${tab === "vendedores" ? "text-amber-400 border-b-2 border-amber-400" : "text-stone-400"}`}>Ejecutivos</button>
-          <button onClick={() => setTab("inspectores")} className={`px-4 py-3 text-sm ${tab === "inspectores" ? "text-amber-400 border-b-2 border-amber-400" : "text-stone-400"}`}>Inspectores</button>
-          <button onClick={() => setTab("compra")} className={`px-4 py-3 text-sm ${tab === "compra" ? "text-amber-400 border-b-2 border-amber-400" : "text-stone-400"}`}>Tasación de compra</button>
-          <button onClick={() => setTab("datos")} className={`px-4 py-3 text-sm ${tab === "datos" ? "text-amber-400 border-b-2 border-amber-400" : "text-stone-400"}`}>Datos</button>
-          <span className="self-center h-5 border-l border-stone-700 mx-1" aria-hidden="true" />
           {PESTANAS_CRM.map(([id, texto]) => (
             <button key={id} onClick={() => setTab(id)} className={`px-4 py-3 text-sm ${tab === id ? "text-amber-400 border-b-2 border-amber-400" : "text-stone-400"}`}>{texto}</button>
           ))}
+          <span className="self-center h-5 border-l border-stone-700 mx-1" aria-hidden="true" />
+          <button onClick={() => !esLegado(tab) && setTab("resumen")} className={`px-4 py-3 text-sm ${esLegado(tab) ? "text-amber-400 border-b-2 border-amber-400" : "text-stone-500"}`}>Versión anterior</button>
         </div>
       </div>
 
       <div className="max-w-5xl mx-auto px-6 mt-8 flex flex-col gap-6">
+        {esLegado(tab) && (
+          <div className="bg-amber-50 border border-amber-200 p-4 text-sm text-stone-700 flex flex-col gap-3">
+            <p><strong>Versión anterior.</strong> Perfiles que ingresan con código y la producción que registraron a mano (compras, seguros, consignaciones, inspecciones y tasaciones). Se conservan para no perder el historial; las ventas, las inspecciones y las tasaciones nuevas ya se trabajan en las pestañas del CRM. Cuando compras y consignaciones pasen al CRM, esta sección se podrá retirar.</p>
+            <div className="flex flex-wrap gap-2">
+              {PESTANAS_LEGADO.map(([id, texto]) => (
+                <button key={id} onClick={() => setTab(id)} className={`px-3 py-1.5 text-sm border ${tab === id ? "bg-stone-900 text-white border-stone-900" : "bg-white text-stone-700 border-stone-300 hover:bg-stone-50"}`}>{texto}</button>
+              ))}
+            </div>
+          </div>
+        )}
         {tab === "resumen" && (
           <>
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-white border border-stone-200 p-5">
@@ -4192,7 +4202,6 @@ function AdminDashboard({ vendors, setVendors, inspectors, setInspectors, onExit
           </>
         )}
 
-        {tab === "compra" && <TasacionCompra />}
         {tab.startsWith("crm-") && <AdminCrmPanel tab={tab} renderEstimador={(p) => <TasacionCompra {...p} />} />}
 
         {tab === "datos" && (
