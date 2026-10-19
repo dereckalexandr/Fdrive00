@@ -7,6 +7,7 @@ export const TIPOS_VALIDACION = [
   { id: "venta", nombre: "Cierre de venta" },
   { id: "vehiculo", nombre: "Documentos del vehículo" },
   { id: "compra", nombre: "Compra directa" },
+  { id: "consignacion", nombre: "Consignación" },
 ];
 export const tipoValidacionNombre = (id) => (TIPOS_VALIDACION.find((t) => t.id === id) || {}).nombre || id;
 
@@ -54,6 +55,13 @@ export function checklistPara(tipo, opciones = {}) {
       D("cedula_vendedor", "Cédula de identidad del vendedor (ambos lados)", "cliente"),
       D("contrato_compra", "Contrato de compraventa o mandato firmado", "cliente"),
       D("comprobante_pago", "Comprobante de pago al vendedor", "cliente", false),
+    ];
+  }
+  if (tipo === "consignacion") {
+    return [
+      ...DOCS_VEHICULO.map((d) => ({ ...d })),
+      D("cedula_dueno", "Cédula de identidad del dueño (ambos lados)", "cliente"),
+      D("contrato_consignacion", "Contrato de consignación firmado", "cliente"),
     ];
   }
   if (tipo === "venta") {

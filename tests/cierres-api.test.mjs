@@ -256,7 +256,7 @@ test("Comisiones: tramos estándar, y el tramo nuevo se aplica a TODAS las venta
   assert.equal(r3.verTodos, false);
   assert.equal(r3.ejecutivos.length, 1, "solo ve su propia comisión");
   const e = r3.ejecutivos[0];
-  assert.deepEqual(e.datos, { ventasN: 3, segurosN: 1, creditosN: 2, creditosComision: 800000 });
+  assert.deepEqual(e.datos, { ventasN: 3, segurosN: 1, creditosN: 2, creditosComision: 800000, comprasN: 0, consigRows: [] });
   assert.equal(e.produccion.ventas.total, 3 * 75000);
   assert.equal(e.produccion.seguros.total, 1 * 35000);
   assert.equal(e.produccion.creditos.total, 800000 * 0.15);
@@ -290,7 +290,7 @@ test("Comisiones: la supervisora ve a todo el equipo con sus márgenes; otro loc
   assert.equal(r.ejecutivos[0].datos.ventasN >= r.ejecutivos[1].datos.ventasN, true, "ordenados por ventas");
   assert.equal(r.totales.unidades, r.ejecutivos.reduce((a, e) => a + e.datos.ventasN, 0));
   assert.equal(r.totales.produccion, r.ejecutivos.reduce((a, e) => a + e.produccion.total, 0));
-  assert.deepEqual(r.pendientesDeOtrosModulos, ["compras", "consignaciones"]);
+  assert.deepEqual(r.pendientesDeOtrosModulos, []);
   assert.equal((await ve(U.jefeSur.token, "comisiones.resumen")).ejecutivos.length, 0);
   assert.equal((await ve(U.mkt.token, "comisiones.resumen")).status, 403, "Marketing no ve comisiones");
   assert.equal((await ve(U.e1.token, "comisiones.resumen")).ejecutivos.length, 1, "Eva solo ve la suya");

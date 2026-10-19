@@ -557,6 +557,39 @@ Para repetir la medición: `node scripts/medir-rendimiento.mjs` (muestra cuánta
 
 Código: reglas en `supabase/functions/api/publico-core.js`; servidor en `supabase/functions/api/publico.ts` (acción `public`, sin sesión); pantallas en `src/sitio-publico.jsx`; el enrutamiento entre el sitio y el CRM está en `src/main.jsx`. Pruebas: `tests/publico-core.test.mjs` y `tests/publico-api.test.mjs` (la función real contra una base falsa, incluidos los frenos contra spam).
 
+## CRM · Entrega 10: compras y consignaciones
+
+**Instalar (después de `supabase-crm-marketing.sql`):**
+1. Supabase → *SQL Editor* → pegar `supabase-crm-compras.sql` → *Run*. Crea las tablas `compras` y `consignaciones`; agrega a `leads` el vehículo que ofrece el cliente (`vehiculo_ofrecido`), a `vehiculos` el `precio_piso` y el `origen`, y liga las validaciones a compras y consignaciones (RLS activado, sin políticas). Se puede repetir sin riesgo.
+2. Redesplegar la función: `node scripts/deploy-api.mjs`, y subir el código (`git push origin main`).
+
+**Habilitaciones** (en *Usuarios → Editar → Habilitaciones del Ejecutivo*): `compras.operar` y `consignaciones.operar`, igual que ventas. Una persona puede tener las tres. *Los leads se reparten, y solo los trabaja, quien tiene la habilitación de su tipo*: un lead de compra no llega a quien solo vende. Los leads de «Vende o consigna tu auto» del sitio web llegan ya como leads de compra o consignación, con el vehículo cargado.
+
+**Tipo de lead:** al crear un lead, el ejecutivo elige qué quiere el cliente: *comprarnos un vehículo* (venta), *vendernos su vehículo* (compra) o *dejarnos su vehículo en consignación*. En los de compra y consignación se piden patente, marca, modelo, año y kilometraje del vehículo; en el embudo se ven con su etiqueta, y las etapas se muestran con sus nombres (*Oferta hecha → Oferta aceptada → Comprado*; *En validación → Consignado*).
+
+### Compra
+1. **Tasación** (en la ficha del lead): *Pedir tasación* la deja en la cola del Tasador (si el sitio web ya creó una por la misma patente, se usa esa). Una tasación de compra **no toca** la parte de pago del lead.
+2. **Oferta**: con la tasación completada, el ejecutivo ofrece un monto que **nunca puede superar lo tasado**. El lead pasa a *Oferta hecha*. Un lead tiene una sola compra abierta; tras un rechazo se puede hacer otra oferta.
+3. **El cliente responde**: *aceptó* (el lead pasa a *Oferta aceptada* y se crea la validación de documentos: cédula del vendedor, contrato de compraventa y los 5 documentos del vehículo) o *rechazó* (con motivo).
+4. **Pago**: el ejecutivo pide aprobar el pago (monto hasta lo ofertado, medio y fecha). El **Jefe Local** lo aprueba o lo rechaza con motivo. **Con Validadores en el local, no se aprueba hasta que los documentos estén validados.** Si el supervisor registra su propia compra, se aprueba sola salvo que falten documentos.
+5. **Al aprobar**: el vehículo entra al **inventario en preparación**, con el **costo realmente pagado** y como precio de lista el valor de venta esperado de la tasación; sus documentos ya revisados pasan al vehículo nuevo. El lead queda *Comprado* y la compra cuenta para la comisión del mes. Si ya hay un vehículo activo con esa patente, no se aprueba.
+6. **Anular** (solo el supervisor, con motivo): saca la compra de la comisión y archiva el vehículo, siempre que aún no esté reservado ni vendido.
+
+### Consignación
+1. **Contrato** en la ficha del lead: **precio piso** (lo mínimo que quiere el dueño), **precio de publicación** (no menor que el piso) y plazo (por defecto 90 días). Se crea la validación de documentos (cédula del dueño, contrato firmado y los 5 del vehículo).
+2. **El vehículo entra al inventario como disponible cuando los documentos se aprueban** (o de inmediato, si el local no tiene Validadores): con costo = piso y precio de lista = publicación. El lead queda *Consignado*.
+3. **No se vende bajo el piso**: ni al publicar o editar el precio en el inventario, ni al cotizar, ni al cerrar la venta.
+4. **Al venderse** (venta aprobada por el Jefe Local), la consignación queda *Vendida* y el **margen = precio de venta − piso** paga al ejecutivo de la consignación el **25 %**; el ejecutivo que vendió cobra su venta como siempre. Si la venta se anula, la consignación vuelve a estar vigente y la comisión desaparece.
+5. **Plazo**: se puede **extender** (7 a 180 días, también cuando ya venció) y el vehículo se puede **devolver al dueño** (se archiva; no si está reservado o vendido). Las que vencen en 7 días o menos (o ya vencieron) aparecen como alerta del Jefe Local. No hay tareas automáticas: el vencimiento se ve al abrir.
+
+**Comisiones:** compras por tramos de unidades del mes (estándar $100.000 de 1 a 5 y $200.000 desde la 6ª, o los tramos propios de la persona) y consignaciones al 25 % del margen sobre el piso, calculado en el mes de la venta. Aparecen en *Ventas* y en la tarjeta *Mi comisión del mes*.
+
+**Dónde se usa:** pestaña **Compras y consignaciones** dentro de Ventas (cada ejecutivo ve las suyas; el Jefe Local, las del local, con el botón *Aprobar* para los pagos pendientes); en la **ficha del lead** están los pasos de cada compra o consignación. Alertas en el panel del Jefe Local: *Pagos de compra por aprobar* y *Consignaciones por vencer*.
+
+**Límites conocidos:** el pago se **registra** (monto, medio y fecha); el sistema no mueve dinero ni emite el contrato legal (el contrato de compraventa o de consignación se firma aparte y se sube como documento a la validación). Al devolver o anular se archiva el vehículo; no se borra su historial. Las fotos del vehículo comprado o consignado se suben después, desde el inventario.
+
+Código: reglas en `supabase/functions/api/compras-core.js`; servidor en `ventas.ts` (`compras.*`, `consignaciones.*` y los enganches en leads, cotizaciones, cierres, inventario, validaciones, tasaciones, comisiones y gestión); pantallas en `src/crm-compras.jsx` y `src/crm-ventas.jsx`. Pruebas: `tests/compras-core.test.mjs` y `tests/compras-api.test.mjs` (la función real contra una base falsa).
+
 ## Desplegar en un hosting público
 
 Las opciones más simples (tienen plan gratuito y se conectan directo a

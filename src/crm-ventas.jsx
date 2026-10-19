@@ -22,8 +22,10 @@ import { SeccionValidacion, ModuloValidaciones } from "./crm-validaciones.jsx";
 import { ModuloAnuncios } from "./crm-anuncios.jsx";
 import { ModuloMarketing } from "./crm-marketing.jsx";
 import { ErrorBoundary } from "./error-boundary.jsx";
+import { SeccionCompra, SeccionConsignacion, ModuloCompras } from "./crm-compras.jsx";
+import { etapaDeOperacion, tipoLeadNombre, TIPOS_LEAD, validarVehiculoOfrecido } from "../supabase/functions/api/compras-core.js";
 import {
-  INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, useCarga, mensajeError,
+  INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, useCarga, mensajeError, CamposVehiculo, aVehiculoForm,
 } from "./crm-ui.jsx";
 
 const COLOR_ETAPA = {
@@ -97,6 +99,9 @@ function LeadFicha({ api, leadId, catalogos, onCerrar, onCambio, onEditar }) {
   if (error && !datos) return <Modal titulo="Lead" onCerrar={onCerrar}><Aviso>{error}</Aviso></Modal>;
   const { lead, cliente, vehiculo, asignado, eventos, tareas, puedeEditar } = datos;
   const cerrado = lead.etapa === "ganado" || lead.etapa === "perdido";
+  const tipoLead = lead.tipo || "venta";
+  const esVenta = tipoLead === "venta";
+  const ofrecido = lead.vehiculo_ofrecido || {};
 
   const accion = async (fn) => { setMsg(""); try { await fn(); await recargar(); onCambio(); } catch (e) { setMsg(mensajeError(e)); } };
   const mover = (etapa) => {
@@ -113,7 +118,8 @@ function LeadFicha({ api, leadId, catalogos, onCerrar, onCambio, onEditar }) {
 
       <div className="bg-white border border-stone-200 p-4 flex flex-col gap-3">
         <div className="flex flex-wrap items-center gap-2">
-          <span className={`text-xs px-2 py-1 border-t-2 bg-stone-100 ${COLOR_ETAPA[lead.etapa] || ""}`}>{etapaNombre(lead.etapa)}</span>
+          <span className={`text-xs px-2 py-1 border-t-2 bg-stone-100 ${COLOR_ETAPA[lead.etapa] || ""}`}>{etapaDeOperacion(tipoLead, lead.etapa, etapaNombre(lead.etapa))}</span>
+          {!esVenta && <span className="text-xs px-2 py-1 bg-stone-900 text-white">{tipoLeadNombre(tipoLead).split(" (")[0]}</span>}
           {lead.motivo_perdida && <span className="text-xs text-stone-500">Motivo: {lead.motivo_perdida}</span>}
           <span className="text-xs text-stone-500">· Asignado a {asignado ? asignado.nombre : "nadie"}</span>
           {lead.fuente && <span className="text-xs text-stone-500">· Fuente: {lead.fuente}</span>}
@@ -128,7 +134,12 @@ function LeadFicha({ api, leadId, catalogos, onCerrar, onCambio, onEditar }) {
             {cliente.rut && <span className="px-3 py-1.5 text-sm text-stone-500">RUT {cliente.rut}</span>}
           </div>
         )}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+        {!esVenta && (
+          <div className="text-sm"><p className="text-xs uppercase tracking-wide text-stone-400">Vehículo que {tipoLead === "compra" ? "ofrece vender" : "deja en consignación"}</p>
+            <p className="text-stone-800">{ofrecido.marca ? `${ofrecido.marca} ${ofrecido.modelo || ""} ${ofrecido.anio || ""}`.trim() : "Sin datos"}</p>
+            <p className="text-xs text-stone-500">{ofrecido.patente ? `${ofrecido.patente} · ` : ""}{ofrecido.km != null ? `${Number(ofrecido.km).toLocaleString("es-CL")} km` : ""}{ofrecido.transmision ? ` · ${ofrecido.transmision}` : ""}</p></div>
+        )}
+        <div className={`${esVenta ? "" : "hidden"} grid grid-cols-1 md:grid-cols-3 gap-3 text-sm`}>
           <div><p className="text-xs uppercase tracking-wide text-stone-400">Vehículo de interés</p>
             <p className="text-stone-800">{vehiculo ? `${vehiculo.marca} ${vehiculo.modelo} ${vehiculo.anio} · ${vehiculo.patente}` : lead.vehiculo_interes || "—"}</p>
             {vehiculo && <p className="text-xs text-stone-500">Precio de lista {clp(vehiculo.precio_lista)}</p>}</div>
@@ -142,14 +153,16 @@ function LeadFicha({ api, leadId, catalogos, onCerrar, onCambio, onEditar }) {
         {lead.notas && <p className="text-sm text-stone-600 border-t border-stone-100 pt-2">{lead.notas}</p>}
       </div>
 
-      <SeccionCotizaciones api={api} lead={lead} datos={datos} catalogos={catalogos} avisar={setMsg} onCambio={async () => { await recargar(); onCambio(); }} />
-      <SeccionTasacion api={api} lead={lead} datos={datos} catalogos={catalogos} avisar={setMsg} onCambio={async () => { await recargar(); onCambio(); }} />
+      {esVenta && <SeccionCotizaciones api={api} lead={lead} datos={datos} catalogos={catalogos} avisar={setMsg} onCambio={async () => { await recargar(); onCambio(); }} />}
+      {esVenta && <SeccionTasacion api={api} lead={lead} datos={datos} catalogos={catalogos} avisar={setMsg} onCambio={async () => { await recargar(); onCambio(); }} />}
+      {tipoLead === "compra" && <SeccionCompra api={api} lead={lead} datos={datos} avisar={setMsg} onCambio={async () => { await recargar(); onCambio(); }} />}
+      {tipoLead === "consignacion" && <SeccionConsignacion api={api} lead={lead} datos={datos} avisar={setMsg} onCambio={async () => { await recargar(); onCambio(); }} />}
       {(puedeEditar || catalogos.veTodo) && (
         <SeccionInspeccion api={api} origen={{ tipo: "lead", id: lead.id }} cerrado={lead.etapa === "ganado" || lead.etapa === "perdido" || !puedeEditar}
-          vehiculo={pp.tiene && pp.patente ? { patente: pp.patente, marca: pp.marca, modelo: pp.modelo, anio: pp.anio, km: pp.km } : vehiculo ? { patente: vehiculo.patente, marca: vehiculo.marca, modelo: vehiculo.modelo, anio: vehiculo.anio, km: vehiculo.km } : {}} />
+          vehiculo={!esVenta ? ofrecido : pp.tiene && pp.patente ? { patente: pp.patente, marca: pp.marca, modelo: pp.modelo, anio: pp.anio, km: pp.km } : vehiculo ? { patente: vehiculo.patente, marca: vehiculo.marca, modelo: vehiculo.modelo, anio: vehiculo.anio, km: vehiculo.km } : {}} />
       )}
       <SeccionValidacion api={api} origen={{ tipo: "lead", id: lead.id }} titulo="Validación de documentos de la venta" version={datos.cierres.length} />
-      <SeccionCierres api={api} lead={lead} datos={datos} catalogos={catalogos} avisar={setMsg} onCambio={async () => { await recargar(); onCambio(); }} />
+      {esVenta && <SeccionCierres api={api} lead={lead} datos={datos} catalogos={catalogos} avisar={setMsg} onCambio={async () => { await recargar(); onCambio(); }} />}
 
       {puedeEditar && (
         <div className="bg-white border border-stone-200 p-4 flex flex-col gap-3">
@@ -243,6 +256,9 @@ function FormLead({ api, catalogos, lead, onCerrar, onGuardado }) {
   const [coincidencias, setCoincidencias] = useState([]);
   const [cliente, setCliente] = useState({ nombre: "", rut: "", telefono: "", email: "" });
   const [elegido, setElegido] = useState(null);
+  const tiposLead = catalogos.tiposLead && catalogos.tiposLead.length ? catalogos.tiposLead : ["venta"];
+  const [tipo, setTipo] = useState(lead ? lead.tipo || "venta" : tiposLead[0]);
+  const [vo, setVo] = useState(() => aVehiculoForm(lead ? lead.vehiculo_ofrecido : null));
   const [f, setF] = useState(() => {
     if (!lead) return LEAD_VACIO;
     const pp = lead.parte_pago || {}; const fin = lead.financiamiento || {};
@@ -263,8 +279,10 @@ function FormLead({ api, catalogos, lead, onCerrar, onGuardado }) {
     return () => clearTimeout(t);
   }, [api, buscar, editando]);
 
-  const datosLead = () => ({
-    vehiculoId: f.vehiculoId || null, vehiculoInteres: f.vehiculoId ? "" : f.vehiculoInteres, fuente: f.fuente, campaniaId: f.campaniaId || "", notas: f.notas,
+  const datosLead = () => (tipo !== "venta" ? {
+    tipo, vehiculoOfrecido: vo, fuente: f.fuente, campaniaId: f.campaniaId || "", notas: f.notas, parteDePago: { tiene: false }, financiamiento: { quiere: false },
+  } : {
+    tipo: "venta", vehiculoId: f.vehiculoId || null, vehiculoInteres: f.vehiculoId ? "" : f.vehiculoInteres, fuente: f.fuente, campaniaId: f.campaniaId || "", notas: f.notas,
     parteDePago: f.tienePP ? { tiene: true, ...f.pp } : { tiene: false },
     financiamiento: f.quiereFin ? { quiere: true, ...f.fin } : { quiere: false },
   });
@@ -273,6 +291,7 @@ function FormLead({ api, catalogos, lead, onCerrar, onGuardado }) {
     setError("");
     const v = validarLead(datosLead());
     if (!v.ok) { setError(mensajeError({ message: v.error })); return; }
+    if (tipo !== "venta") { const o = validarVehiculoOfrecido(vo); if (!o.ok) { setError(mensajeError({ message: o.error })); return; } }
     if (!editando && !elegido) {
       const c = validarCliente(cliente);
       if (!c.ok) { setError(mensajeError({ message: c.error })); return; }
@@ -289,7 +308,12 @@ function FormLead({ api, catalogos, lead, onCerrar, onGuardado }) {
   const disponibles = inv ? inv.vehiculos.filter((v) => v.estado === "disponible" || v.id === f.vehiculoId) : [];
 
   return (
-    <Modal titulo={editando ? "Editar lead" : "Nuevo lead de venta"} onCerrar={onCerrar} ancho="max-w-3xl">
+    <Modal titulo={editando ? "Editar lead" : `Nuevo lead de ${tipo === "venta" ? "venta" : tipo === "compra" ? "compra" : "consignación"}`} onCerrar={onCerrar} ancho="max-w-3xl">
+      {!editando && tiposLead.length > 1 && (
+        <Campo etiqueta="¿Qué quiere el cliente?">
+          <select value={tipo} onChange={(e) => setTipo(e.target.value)} className={INPUT}>{TIPOS_LEAD.filter((t) => tiposLead.includes(t.id)).map((t) => <option key={t.id} value={t.id}>{{ venta: "Comprarnos un vehículo", compra: "Vendernos su vehículo", consignacion: "Dejarnos su vehículo en consignación" }[t.id]}</option>)}</select>
+        </Campo>
+      )}
       {!editando && (
         <Tarjeta titulo="Cliente">
           {elegido ? (
@@ -321,13 +345,13 @@ function FormLead({ api, catalogos, lead, onCerrar, onGuardado }) {
 
       <Tarjeta titulo="Interés">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <Campo etiqueta="Vehículo del inventario">
+          {tipo === "venta" && <Campo etiqueta="Vehículo del inventario">
             <select value={f.vehiculoId} onChange={(e) => set("vehiculoId", e.target.value)} className={INPUT}>
               <option value="">Ninguno / no está en el inventario</option>
               {disponibles.map((v) => <option key={v.id} value={v.id}>{v.marca} {v.modelo} {v.anio} · {v.patente} · {clp(v.precio_lista)}</option>)}
             </select>
-          </Campo>
-          {!f.vehiculoId && <Campo etiqueta="¿Qué busca? (texto libre)"><input value={f.vehiculoInteres} onChange={(e) => set("vehiculoInteres", e.target.value)} className={INPUT} placeholder="Ej.: SUV automática hasta $12.000.000" /></Campo>}
+          </Campo>}
+          {tipo === "venta" && !f.vehiculoId && <Campo etiqueta="¿Qué busca? (texto libre)"><input value={f.vehiculoInteres} onChange={(e) => set("vehiculoInteres", e.target.value)} className={INPUT} placeholder="Ej.: SUV automática hasta $12.000.000" /></Campo>}
           <Campo etiqueta="Fuente">
             <select value={f.fuente} onChange={(e) => set("fuente", e.target.value)} className={INPUT}>
               <option value="">—</option>{catalogos.fuentes_lead.map((x) => <option key={x}>{x}</option>)}
@@ -351,7 +375,8 @@ function FormLead({ api, catalogos, lead, onCerrar, onGuardado }) {
         </div>
       </Tarjeta>
 
-      <Tarjeta>
+      {tipo !== "venta" && <Tarjeta titulo={tipo === "compra" ? "Vehículo que el cliente quiere vendernos" : "Vehículo que deja en consignación"} ayuda="Patente, marca, modelo, año y kilometraje son obligatorios."><CamposVehiculo v={vo} set={setVo} /></Tarjeta>}
+      {tipo === "venta" && <Tarjeta>
         <label className="flex items-center gap-2 text-sm text-stone-800"><input type="checkbox" checked={f.tienePP} onChange={(e) => set("tienePP", e.target.checked)} /> Entrega un vehículo en parte de pago</label>
         {f.tienePP && (
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-3">
@@ -373,7 +398,7 @@ function FormLead({ api, catalogos, lead, onCerrar, onGuardado }) {
             </Campo>
           </div>
         )}
-      </Tarjeta>
+      </Tarjeta>}
 
       <Campo etiqueta="Notas"><textarea rows={2} value={f.notas} onChange={(e) => set("notas", e.target.value)} className={INPUT} /></Campo>
       {error && <Aviso>{error}</Aviso>}
@@ -394,7 +419,7 @@ function TarjetaLead({ lead, cliente, vehiculo, asignado, marca = {}, mostrarAsi
     <div draggable={puedeMover} onDragStart={(e) => { e.dataTransfer.setData("text/plain", lead.id); e.dataTransfer.effectAllowed = "move"; }}
       className="bg-white border border-stone-200 p-3 text-sm cursor-pointer hover:border-amber-400 shadow-sm" onClick={onAbrir}>
       <p className="font-medium text-stone-900">{cliente ? cliente.nombre : "Cliente"}</p>
-      <p className="text-stone-600 text-xs mt-0.5">{vehiculo ? `${vehiculo.marca} ${vehiculo.modelo} ${vehiculo.anio}` : lead.vehiculo_interes || "Sin vehículo definido"}</p>
+      <p className="text-stone-600 text-xs mt-0.5">{lead.tipo && lead.tipo !== "venta" ? <><span className="bg-stone-900 text-white px-1.5 py-0.5 mr-1">{lead.tipo === "compra" ? "Compra" : "Consignación"}</span>{lead.vehiculo_ofrecido && lead.vehiculo_ofrecido.marca ? `${lead.vehiculo_ofrecido.marca} ${lead.vehiculo_ofrecido.modelo || ""} ${lead.vehiculo_ofrecido.anio || ""}` : "Sin datos del vehículo"}</> : vehiculo ? `${vehiculo.marca} ${vehiculo.modelo} ${vehiculo.anio}` : lead.vehiculo_interes || "Sin vehículo definido"}</p>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-2 text-[11px] text-stone-500">
         {marca.pendiente && <span className="bg-amber-100 text-amber-800 px-1.5 py-0.5">Descuento por aprobar</span>}
         {marca.cierre_pendiente && <span className="bg-emerald-100 text-emerald-800 px-1.5 py-0.5">Venta por aprobar</span>}
@@ -671,12 +696,15 @@ export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador }
     puedeComision: can("comisiones.propias") || can("comisiones.local") || can("leads.asignar"),
     puedePedirTasacion: can("tasaciones.pedir") || can("leads.asignar"),
     puedeInspecciones: can("inspecciones.pedir") || can("leads.asignar"),
+    tiposLead: [(can("ventas.operar") || can("leads.asignar")) && "venta", (can("compras.operar") || can("leads.asignar")) && "compra", (can("consignaciones.operar") || can("leads.asignar")) && "consignacion"].filter(Boolean),
   };
+  const puedeCompras = can("compras.operar") || can("consignaciones.operar") || can("leads.asignar");
   const opciones = [];
   if (usaLeads) opciones.push(["inicio", "Inicio"], ["leads", "Leads"]);
   if (catalogos.puedeAgenda) opciones.push(["agenda", "Agenda"]);
   if (catalogos.puedeComision) opciones.push(["ventas", "Ventas"]);
   if (puedeAprobar) opciones.push(["gestion", "Gestión"], ["tasaciones", "Tasaciones"], ["aprobaciones", "Aprobaciones", pend.datos || 0]);
+  if (usaLeads && puedeCompras) opciones.push(["compras", "Compras y consignaciones"]);
   if (catalogos.puedeInspecciones) opciones.push(["inspecciones", "Inspecciones"]);
   if (puedeAprobar) opciones.push(["validaciones", "Validaciones"], ["anuncios", "Avisos"], ["marketing", "Marketing"]);
   opciones.push(["inventario", "Inventario"]);
@@ -694,6 +722,7 @@ export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador }
       {tab === "inicio" && <Inicio api={api} catalogos={catalogos} abrirLead={setLeadAbierto} irA={setTab} version={version} onCambio={subir} />}
       {tab === "leads" && <Leads api={api} catalogos={catalogos} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
       {tab === "tasaciones" && <ModuloTasaciones api={api} permisos={permisos} esAdmin={esAdmin} renderEstimador={renderEstimador} />}
+      {tab === "compras" && <ModuloCompras api={api} permisos={permisos} esAdmin={esAdmin} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
       {tab === "marketing" && <ModuloMarketing api={api} permisos={permisos} esAdmin={esAdmin} />}
       {tab === "anuncios" && <ModuloAnuncios api={api} permisos={permisos} esAdmin={esAdmin} />}
       {tab === "validaciones" && <ModuloValidaciones api={api} permisos={permisos} esAdmin={esAdmin} />}

@@ -76,7 +76,7 @@ export function FranjaAlertas({ resumen, onVer }) {
   const c = resumen.conteos;
   const partes = [
     [c.sinAtender, "sin atender"], [c.detenidos, "detenidos"], [c.sinAsignar, "sin asignar"],
-    [c.tareasVencidas, "tareas vencidas del equipo"], [c.reservasPorVencer, "reservas por vencer"], [c.tasacionesSinTomar, "tasaciones sin tomar"], [c.inspeccionesSinTomar, "inspecciones sin tomar"], [c.validacionesSinTomar, "validaciones sin tomar"], [c.avisosDesactualizados, "avisos desactualizados"], [c.campaniasPorAprobar, "campañas por aprobar"],
+    [c.tareasVencidas, "tareas vencidas del equipo"], [c.reservasPorVencer, "reservas por vencer"], [c.tasacionesSinTomar, "tasaciones sin tomar"], [c.inspeccionesSinTomar, "inspecciones sin tomar"], [c.validacionesSinTomar, "validaciones sin tomar"], [c.avisosDesactualizados, "avisos desactualizados"], [c.campaniasPorAprobar, "campañas por aprobar"], [c.comprasPorAprobar, "pagos de compra por aprobar"], [c.consignacionesPorVencer, "consignaciones por vencer"],
   ].filter(([n]) => n > 0);
   if (partes.length === 0) return null;
   return (
@@ -96,6 +96,8 @@ const TIPOS = [
   { id: "tareasVencidas", nombre: "Tareas vencidas", color: "border-orange-400", ayuda: () => "Llamadas y visitas del equipo cuya fecha ya pasó." },
   { id: "reservasPorVencer", nombre: "Reservas por vencer", color: "border-sky-400", ayuda: () => "Reservas que vencen en las próximas 48 horas: decide si se extienden." },
   { id: "tasacionesSinTomar", nombre: "Tasaciones sin tomar", color: "border-teal-400", ayuda: (c) => `Solicitudes de tasación que llevan ${c.horas_tasacion} h o más en la cola sin que un Tasador las tome.` },
+  { id: "comprasPorAprobar", nombre: "Pagos de compra por aprobar", color: "border-green-400", ayuda: () => "Compras con el cliente de acuerdo y el pago pedido: apruébalas desde la pestaña Compras y consignaciones (con Validadores, solo se aprueban con los documentos validados)." },
+  { id: "consignacionesPorVencer", nombre: "Consignaciones por vencer", color: "border-yellow-400", ayuda: () => "Vehículos consignados cuyo plazo vence en 7 días o menos (o ya venció). Habla con el dueño: extiende el plazo o devuélvelo." },
   { id: "campaniasPorAprobar", nombre: "Campañas por aprobar", color: "border-cyan-400", ayuda: () => "Campañas de Marketing con presupuesto que esperan tu aprobación. Apruébalas o recházalas desde la pestaña Marketing." },
   { id: "avisosDesactualizados", nombre: "Avisos desactualizados", color: "border-fuchsia-400", ayuda: () => "Avisos publicados con el precio distinto al del inventario, vehículo reservado o vendido, o vencidos. El Anunciante los corrige desde la pestaña Avisos." },
   { id: "validacionesSinTomar", nombre: "Validaciones sin tomar", color: "border-lime-400", ayuda: (c) => `Revisiones de documentos que llevan ${c.horas_validacion} h o más en la cola sin que un Validador las tome. Las ventas no se pueden aprobar sin ellas: asígnalas desde la pestaña Validaciones.` },
@@ -168,6 +170,8 @@ function Alertas({ api, abrirLead, version, onCambio }) {
               {esLeads && <><th className="py-3 px-3">Cliente</th><th className="py-3 px-3">Ejecutivo</th><th className="py-3 px-3">Etapa</th><th className="py-3 px-3">{tipo === "detenidos" ? "Sin actividad" : "Llegó"}</th><th className="py-3 px-3"></th></>}
               {tipo === "tareasVencidas" && <><th className="py-3 px-3">Tarea</th><th className="py-3 px-3">Cliente</th><th className="py-3 px-3">Ejecutivo</th><th className="py-3 px-3">Venció</th><th className="py-3 px-3"></th></>}
               {tipo === "tasacionesSinTomar" && <><th className="py-3 px-3">Tasación</th><th className="py-3 px-3">Vehículo</th><th className="py-3 px-3">Cliente</th><th className="py-3 px-3">Pidió</th><th className="py-3 px-3">Espera</th></>}
+              {tipo === "comprasPorAprobar" && <><th className="py-3 px-3">Compra</th><th className="py-3 px-3">Vehículo</th><th className="py-3 px-3">A pagar</th><th className="py-3 px-3">Pidió</th><th className="py-3 px-3"></th></>}
+              {tipo === "consignacionesPorVencer" && <><th className="py-3 px-3">Consignación</th><th className="py-3 px-3">Vehículo</th><th className="py-3 px-3">Vence</th><th className="py-3 px-3"></th></>}
               {tipo === "campaniasPorAprobar" && <><th className="py-3 px-3">Campaña</th><th className="py-3 px-3">Canal</th><th className="py-3 px-3">Fechas</th><th className="py-3 px-3">Presupuesto</th><th className="py-3 px-3">Pidió</th></>}
               {tipo === "avisosDesactualizados" && <><th className="py-3 px-3">Aviso</th><th className="py-3 px-3">Vehículo</th><th className="py-3 px-3">Qué corregir</th></>}
               {tipo === "validacionesSinTomar" && <><th className="py-3 px-3">Validación</th><th className="py-3 px-3">Tipo</th><th className="py-3 px-3">Vehículo</th><th className="py-3 px-3">Espera</th></>}
@@ -203,6 +207,19 @@ function Alertas({ api, abrirLead, version, onCambio }) {
                 <td className="py-2.5 px-3 text-stone-700">{t.solicitante}</td><td className="py-2.5 px-3 text-rose-700 whitespace-nowrap">{edadTexto(t.solicitada_en)}</td>
               </tr>
             ))}
+            {tipo === "comprasPorAprobar" && lista.map((x) => (
+              <tr key={x.id} className="border-b border-stone-100">
+                <td className="py-2.5 px-3 font-mono text-xs text-stone-500">{x.folio}</td><td className="py-2.5 px-3 text-stone-900">{x.vehiculo}</td><td className="py-2.5 px-3 font-mono">{clp(x.monto_final)}</td><td className="py-2.5 px-3 text-stone-700">{x.solicitado_por}</td>
+                <td className="py-2.5 px-3 text-right"><button onClick={() => abrirLead(x.lead_id)} className={BTN}>Abrir lead</button></td>
+              </tr>
+            ))}
+            {tipo === "consignacionesPorVencer" && lista.map((x) => (
+              <tr key={x.id} className="border-b border-stone-100">
+                <td className="py-2.5 px-3 font-mono text-xs text-stone-500">{x.folio}</td><td className="py-2.5 px-3 text-stone-900">{x.vehiculo}</td>
+                <td className={`py-2.5 px-3 ${x.dias < 0 ? "text-rose-700" : "text-amber-700"}`}>{x.dias < 0 ? `Venció hace ${-x.dias} día(s)` : `En ${x.dias} día(s)`} · {String(x.vence_en).slice(0, 10)}</td>
+                <td className="py-2.5 px-3 text-right"><button onClick={() => abrirLead(x.lead_id)} className={BTN}>Abrir lead</button></td>
+              </tr>
+            ))}
             {tipo === "campaniasPorAprobar" && lista.map((x) => (
               <tr key={x.id} className="border-b border-stone-100">
                 <td className="py-2.5 px-3 text-stone-900">{x.nombre}<div className="font-mono text-xs text-stone-500">{x.folio}</div></td><td className="py-2.5 px-3 text-stone-700 capitalize">{x.canal}</td>
@@ -217,7 +234,7 @@ function Alertas({ api, abrirLead, version, onCambio }) {
             ))}
             {tipo === "validacionesSinTomar" && lista.map((x) => (
               <tr key={x.id} className="border-b border-stone-100">
-                <td className="py-2.5 px-3 font-mono text-xs text-stone-500">{x.folio}</td><td className="py-2.5 px-3 text-stone-700">{{ venta: "Cierre de venta", vehiculo: "Vehículo", compra: "Compra directa" }[x.tipo] || x.tipo}</td>
+                <td className="py-2.5 px-3 font-mono text-xs text-stone-500">{x.folio}</td><td className="py-2.5 px-3 text-stone-700">{{ venta: "Cierre de venta", vehiculo: "Vehículo", compra: "Compra directa", consignacion: "Consignación" }[x.tipo] || x.tipo}</td>
                 <td className="py-2.5 px-3 text-stone-900">{x.vehiculo}</td><td className="py-2.5 px-3 text-rose-700 whitespace-nowrap">{edadTexto(x.solicitada_en)}</td>
               </tr>
             ))}

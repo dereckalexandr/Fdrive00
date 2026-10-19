@@ -216,6 +216,8 @@ export function SeccionValidacion({ api, origen, titulo = "Validación de docume
             {v.validador ? ` · Validador: ${v.validador}` : v.estado === "pendiente" ? " · esperando que un Validador la tome" : ""}
           </p>
           {v.tipo === "venta" && v.estado !== "aprobada" && <p className="text-xs text-amber-700 mt-1">La venta no se podrá aprobar hasta que sus documentos estén validados.</p>}
+          {v.tipo === "compra" && v.compra_id && v.estado !== "aprobada" && <p className="text-xs text-amber-700 mt-1">El pago de la compra no se podrá aprobar hasta que sus documentos estén validados.</p>}
+          {v.tipo === "consignacion" && v.estado !== "aprobada" && <p className="text-xs text-amber-700 mt-1">El vehículo entrará al inventario cuando sus documentos estén validados.</p>}
           <div className="mt-2"><button onClick={() => setDetalle(v.id)} className={BTN}>{v.estado === "aprobada" ? "Ver documentos" : "Ver y subir documentos"}</button></div>
         </div>
       ))}

@@ -23,6 +23,11 @@ import {
 } from "./tasaciones-core.js";
 
 import {
+  folioCompra, folioConsignacion, COMPRA_ABIERTA, CONSIGNACION_ABIERTA, permisoDeTipo, validarVehiculoOfrecido, validarOferta, validarRespuestaOferta, validarPagoCompra,
+  validarTransicionCompra, vehiculoDeCompra, validarConsignacion, vencimientoConsignacion, diasParaVencer, validarTransicionConsignacion, validarExtension,
+  vehiculoDeConsignacion, verificarPisoConsignado, filasConsignacion, metricasCompras,
+} from "./compras-core.js";
+import {
   folioCampania, folioPublicacion, validarCampania, validarResultadosCampania, estadoTrasGuardar, validarTransicionCampania, metricasCampania,
   validarPublicacion, publicacionesAtrasadas, resumenPublicaciones, validarMaterial,
 } from "./marketing-core.js";
@@ -96,7 +101,9 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
   }
   const porIds = (tabla: string, ids: string[]) => enLotes(tabla, "id", ids);
 
-  async function elegibles(local: string) {
+  /** Ejecutivos del local habilitados para un tipo de lead: venta, compra o consignación. */
+  async function elegibles(local: string, tipo = "venta") {
+    const permiso = permisoDeTipo(tipo);
     const overrides = await ctx.rolePermOverrides();
     const { data, error } = await sb.from("usuarios").select("id, nombre, roles, permisos_extra, activo, local_id").eq("local_id", local);
     if (error) throw error;
@@ -104,7 +111,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       .filter((u: any) => u.activo)
       .filter((u: any) => {
         const p = permisosEfectivos(u.roles ?? [], overrides, u.permisos_extra);
-        return p.includes("leads.propios") && p.includes("ventas.operar");
+        return p.includes("leads.propios") && p.includes(permiso);
       })
       .map((u: any) => ({ id: u.id, nombre: u.nombre }));
   }
@@ -150,11 +157,12 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     return (data ?? []).some((u: any) => u.activo && permisosEfectivos(u.roles ?? [], overrides, u.permisos_extra).includes("validacion.realizar"));
   }
   /** Crea una validación con su lista de documentos (reutiliza los del vehículo ya aprobados). null si las tablas aún no existen. */
-  async function crearValidacion(p: { tipo: string; local_id: string; cierre_id?: string; lead_id?: string | null; vehiculo_id?: string | null; tasacion_id?: string | null; sujeto: Record<string, unknown>; opciones?: { conFinanciamiento?: boolean; conParteDePago?: boolean } }) {
+  async function crearValidacion(p: { tipo: string; local_id: string; cierre_id?: string; compra_id?: string; consignacion_id?: string; reutilizarDe?: string; lead_id?: string | null; vehiculo_id?: string | null; tasacion_id?: string | null; sujeto: Record<string, unknown>; opciones?: { conFinanciamiento?: boolean; conParteDePago?: boolean } }) {
     try {
       const ins = await sb.from("validaciones").insert({
         local_id: p.local_id, tipo: p.tipo, cierre_id: p.cierre_id ?? null, lead_id: p.lead_id ?? null, vehiculo_id: p.vehiculo_id ?? null,
         tasacion_id: p.tasacion_id ?? null, sujeto: p.sujeto, creado_por: userId,
+        ...(p.compra_id ? { compra_id: p.compra_id } : {}), ...(p.consignacion_id ? { consignacion_id: p.consignacion_id } : {}),
       }).select().single();
       if (ins.error) { if (ctx.isMissingTable(ins.error)) return null; throw ins.error; }
       const v = ins.data;
@@ -164,6 +172,8 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
         const origen = (o.data ?? [])[0];
         if (origen) reutil = docsReutilizables(await enLotes("validacion_docs", "validacion_id", [origen.id]), origen.id);
       }
+      // Un vehículo recién comprado o consignado hereda como aprobados los documentos del vehículo ya revisados en la operación.
+      if (p.reutilizarDe) reutil = docsReutilizables(await enLotes("validacion_docs", "validacion_id", [p.reutilizarDe]), p.reutilizarDe);
       const docs = checklistPara(p.tipo, p.opciones).map((d, i) => ({ validacion_id: v.id, ...d, orden: i, ...(reutil[d.clave] ?? {}) }));
       const di = await sb.from("validacion_docs").insert(docs);
       if (di.error) throw di.error;
@@ -173,6 +183,58 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     } catch (e) { console.error("crearValidacion:", (e as any)?.message ?? e); return null; }
   }
   const sujetoDeVehiculo = (v: any, extra: Record<string, unknown> = {}) => ({ patente: v.patente, marca: v.marca, modelo: v.modelo, anio: v.anio, ...extra });
+
+  /** Aprueba una compra: exige los documentos validados (si hay Validadores) y entrega el vehículo al inventario. */
+  async function aprobarCompra(c: any): Promise<{ ok: boolean; error?: string; compra?: any }> {
+    let valCompra: any = null;
+    if (await hayValidadores(c.local_id)) {
+      const vq = await sb.from("validaciones").select("*").eq("compra_id", c.id);
+      if (!vq.error) {
+        const activas = (vq.data ?? []).filter((x: any) => x.estado !== "cancelada");
+        valCompra = activas.find((x: any) => x.estado === "aprobada") || activas[0];
+        if (!valCompra) valCompra = await crearValidacion({ tipo: "compra", local_id: c.local_id, compra_id: c.id, lead_id: c.lead_id, tasacion_id: c.tasacion_id, sujeto: sujetoDeVehiculo(c.vehiculo || {}, { folio: folioCompra(c.numero) }) });
+        if (valCompra && valCompra.estado !== "aprobada") return { ok: false, error: "validacion_pendiente" };
+      }
+    } else {
+      const vq = await sb.from("validaciones").select("*").eq("compra_id", c.id);
+      valCompra = (vq.data ?? []).find((x: any) => x.estado === "aprobada") || null;
+    }
+    const { data: tas } = c.tasacion_id ? await sb.from("tasaciones").select("*").eq("id", c.tasacion_id).maybeSingle() : { data: null };
+    const vv = vehiculoDeCompra(c, tas);
+    const dup = await sb.from("vehiculos").select("id").eq("patente", vv.patente).eq("activo", true);
+    if ((dup.data ?? []).length > 0) return { ok: false, error: "patente_duplicada" };
+    const vi = await sb.from("vehiculos").insert({ ...vv, local_id: c.local_id, notas: `Comprado: ${folioCompra(c.numero)}` }).select().single();
+    if (vi.error) { if (vi.error.code === "23505") return { ok: false, error: "patente_duplicada" }; throw vi.error; }
+    const ahora = new Date().toISOString();
+    const { data, error } = await sb.from("compras").update({ estado: "comprada", aprobado_por: userName, aprobado_en: ahora, mes: mesChile(ahora), vehiculo_id: vi.data.id, motivo_rechazo_pago: null, actualizado_en: ahora }).eq("id", c.id).select().single();
+    if (error) throw error;
+    await sb.from("leads").update({ etapa: "ganado", actualizado_en: ahora }).eq("id", c.lead_id);
+    await evento(c.lead_id, "compra", `Compra ${folioCompra(c.numero)} aprobada por ${userName}: ${dinero(c.monto_final)}. El vehículo entró al inventario en preparación. Cuenta para la comisión de ${nombreMes(mesChile(ahora))}.`);
+    await evento(c.lead_id, "etapa", "Oferta aceptada → Comprado");
+    await audit(ctx.actor, "compra.aprobar", "compra", c.id, { numero: c.numero, monto_final: c.monto_final, mes: mesChile(ahora), vehiculo_id: vi.data.id, ejecutivo_id: c.ejecutivo_id });
+    // El vehículo nuevo hereda como aprobados los documentos del vehículo ya revisados en la compra.
+    await crearValidacion({ tipo: "vehiculo", local_id: c.local_id, vehiculo_id: vi.data.id, sujeto: sujetoDeVehiculo(vi.data), reutilizarDe: valCompra ? valCompra.id : undefined });
+    return { ok: true, compra: data };
+  }
+
+  /** Activa una consignación: el vehículo entra al inventario como «consignado» y el lead queda ganado. */
+  async function activarConsignacion(c: any): Promise<{ ok: boolean; error?: string; consignacion?: any }> {
+    const dup = await sb.from("vehiculos").select("id").eq("patente", c.patente).eq("activo", true);
+    if ((dup.data ?? []).length > 0) return { ok: false, error: "patente_duplicada" };
+    const vi = await sb.from("vehiculos").insert({ ...vehiculoDeConsignacion(c), local_id: c.local_id, notas: `Consignado: ${folioConsignacion(c.numero)}` }).select().single();
+    if (vi.error) { if (vi.error.code === "23505") return { ok: false, error: "patente_duplicada" }; throw vi.error; }
+    const ahora = new Date().toISOString();
+    const { data, error } = await sb.from("consignaciones").update({ estado: "vigente", vehiculo_id: vi.data.id, activada_en: ahora, vence_en: vencimientoConsignacion(ahora, Number(c.plazo_dias)), actualizado_en: ahora }).eq("id", c.id).select().single();
+    if (error) throw error;
+    await sb.from("leads").update({ etapa: "ganado", actualizado_en: ahora }).eq("id", c.lead_id);
+    await evento(c.lead_id, "consignacion", `Consignación ${folioConsignacion(c.numero)} vigente: el vehículo entró al inventario (piso ${dinero(c.precio_piso)}, publicado en ${dinero(c.precio_publicacion)}). Vence el ${data.vence_en}.`);
+    await evento(c.lead_id, "etapa", "En validación → Consignado");
+    await audit(ctx.actor, "consignacion.activar", "consignacion", c.id, { numero: c.numero, vehiculo_id: vi.data.id });
+    const vq = await sb.from("validaciones").select("*").eq("consignacion_id", c.id);
+    const val = (vq.data ?? []).find((x: any) => x.estado === "aprobada");
+    await crearValidacion({ tipo: "vehiculo", local_id: c.local_id, vehiculo_id: vi.data.id, sujeto: sujetoDeVehiculo(vi.data), reutilizarDe: val ? val.id : undefined });
+    return { ok: true, consignacion: data };
+  }
 
 
   /** Avisos publicados o pausados con algo que corregir (precio distinto, vehículo vendido o reservado, vencimiento). */
@@ -313,6 +375,8 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       }
       const { data: antes } = await scoped(sb.from("vehiculos").select("*").eq("id", id)).maybeSingle();
       if (!antes) return err("no_existe", 404);
+      const pisoInv = verificarPisoConsignado(antes, v.value.precio_lista);
+      if (v.value.precio_lista != null && !pisoInv.ok) return err(pisoInv.error!);
       // Un vehículo con reserva activa conserva su estado; y nadie lo pone "reservado" a mano.
       if (antes.estado === "reservado") v.value.estado = "reservado";
       else if (v.value.estado === "reservado") return err("estado_automatico");
@@ -529,7 +593,9 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       if (error) return fallar(error);
       if (completar) {
         // El valor tasado queda como el valor del vehículo en parte de pago del lead (y como su tope).
-        if (t.lead_id) {
+        if (t.lead_id && t.tipo !== "parte_pago") {
+          await evento(t.lead_id, "tasacion", `Tasación ${folioTasacion(t.numero)} completada por ${userName}: se paga hasta ${dinero(data.valor_compra)} (venta esperada ${dinero(data.valor_venta)}). Ya se puede hacer la oferta.`);
+        } else if (t.lead_id) {
           const lead = await cargarLead(t.lead_id);
           if (lead) {
             const vh = data.vehiculo || {};
@@ -1084,6 +1150,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       if (realiza || esSupervisor) return true;
       if (v.tipo === "venta") { const l = v.lead_id ? await cargarLead(v.lead_id) : null; return !!l && puedeVer(l); }
       if (v.tipo === "vehiculo") return can("inventario.ver") || can("inventario.editar");
+      if (v.lead_id) { const l = await cargarLead(v.lead_id); if (l && puedeVer(l)) return true; }
       return can("tasaciones.realizar");
     }
     /** ¿Puede subir o quitar archivos? Quien la tiene asignada, el supervisor, o quien la originó. */
@@ -1093,6 +1160,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       if (ctx.esAdmin) return false;
       if (v.tipo === "venta") { const l = v.lead_id ? await cargarLead(v.lead_id) : null; return !!l && puedeVer(l) && puedeTocar(l); }
       if (v.tipo === "vehiculo") return can("inventario.editar");
+      if (v.lead_id) { const l = await cargarLead(v.lead_id); if (l && puedeVer(l) && puedeTocar(l)) return true; }
       return can("tasaciones.realizar");
     }
     async function enriquecerVal(filas: any[]) {
@@ -1213,7 +1281,16 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       const up = await sb.from("validacion_docs").update({ estado: r.value.estado, comentario: r.value.comentario, revisado_por: userName, revisado_en: ahora, actualizado_en: ahora }).eq("id", doc.id);
       if (up.error) return fallar(up.error);
       const { val } = await recalcular(v);
-      if (val.estado === "aprobada") await anotarVal(v, `Validación ${folioValidacion(v.numero)} aprobada por ${userName}: documentos en orden`);
+      if (val.estado === "aprobada") {
+        await anotarVal(v, `Validación ${folioValidacion(v.numero)} aprobada por ${userName}: documentos en orden`);
+        if (val.consignacion_id) {
+          const cq = await sb.from("consignaciones").select("*").eq("id", val.consignacion_id).maybeSingle();
+          if (cq.data && cq.data.estado === "en_validacion") {
+            const act = await activarConsignacion(cq.data);
+            if (!act.ok) await anotarVal(v, `No se pudo activar la consignación: ${act.error === "patente_duplicada" ? "ya hay un vehículo activo con esa patente" : act.error}`);
+          }
+        }
+      }
       else if (r.value.estado === "observado" || r.value.estado === "rechazado") await anotarVal(v, `${userName} ${r.value.estado === "observado" ? "observó" : "rechazó"} «${doc.nombre}» (${folioValidacion(v.numero)}): ${r.value.comentario}`);
       await audit(ctx.actor, "validacion.revisar", "validacion", v.id, { numero: v.numero, doc: doc.clave, estado: r.value.estado, resultado: val.estado });
       return json(await detalle(val));
@@ -1557,6 +1634,368 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
   /* Todo lo que sigue exige poder trabajar con leads. */
   if (!usaLeads) return err("forbidden", 403);
 
+  /* ---------- compras (la automotora le compra un vehículo a un cliente) ---------- */
+  if (op.startsWith("compras.")) {
+    const opera = ctx.esAdmin ? false : can("compras.operar") && can("leads.propios");
+    const fallar = (e: any) => fallo(e);
+    if (!opera && !esSupervisor) return err("forbidden", 403);
+
+    async function cargarCompra(id: string) {
+      const { data, error } = await scoped(sb.from("compras").select("*").eq("id", id)).maybeSingle();
+      if (error) throw error;
+      return data;
+    }
+    /** ¿Puede ver esta compra? Su ejecutivo o quien supervisa el local. */
+    const veCompra = (c: any) => esSupervisor || (opera && c.ejecutivo_id === userId);
+    const enriquecerCompras = async (filas: any[]) => {
+      const [usuarios, clientes, tasaciones, vals] = await Promise.all([
+        porIds("usuarios", filas.map((c) => c.ejecutivo_id)), porIds("clientes", filas.map((c) => c.cliente_id)),
+        porIds("tasaciones", filas.map((c) => c.tasacion_id)), enLotes("validaciones", "compra_id", filas.map((c) => c.id)).catch(() => [] as any[]),
+      ]);
+      return filas.map((c) => {
+        const v = vals.filter((x: any) => x.compra_id === c.id && x.estado !== "cancelada").sort((a: any, b: any) => String(b.creado_en).localeCompare(String(a.creado_en)))[0];
+        const t = tasaciones.find((x: any) => x.id === c.tasacion_id);
+        return {
+          ...c, folio: folioCompra(c.numero), ejecutivo: (usuarios.find((u: any) => u.id === c.ejecutivo_id) || {}).nombre ?? "",
+          cliente: (clientes.find((x: any) => x.id === c.cliente_id) || {}).nombre ?? "", validacion: v ? { id: v.id, folio: folioValidacion(v.numero), estado: v.estado } : null,
+          tasacion: t ? { id: t.id, valor_compra: t.valor_compra, valor_venta: t.valor_venta } : null,
+        };
+      });
+    };
+    const compraDetalle = async (c: any) => ({ compra: (await enriquecerCompras([c]))[0], puedeAprobar: esSupervisor, puedeOperar: opera });
+
+    if (op === "compras.list") {
+      const vista = String(body.vista ?? "");
+      const { data, error } = await scoped(sb.from("compras").select("*").order("creado_en", { ascending: false }));
+      if (error) return fallar(error);
+      let filas: any[] = data ?? [];
+      if (vista === "mias") { if (!opera) return err("forbidden", 403); filas = filas.filter((c) => c.ejecutivo_id === userId); }
+      else if (vista === "local") { if (!esSupervisor) return err("forbidden", 403); }
+      else if (vista === "pendientes") { if (!esSupervisor) return err("forbidden", 403); filas = filas.filter((c) => c.estado === "pago_pendiente"); }
+      else if (vista === "lead") {
+        const lead = await cargarLead(String(body.leadId ?? ""));
+        if (!lead || !puedeVer(lead)) return err("no_existe", 404);
+        filas = filas.filter((c) => c.lead_id === lead.id);
+      } else return err("vista_invalida");
+      if (body.estado) filas = filas.filter((c) => c.estado === String(body.estado));
+      return json({ compras: await enriquecerCompras(filas.slice(0, 200)), puedeAprobar: esSupervisor, puedeOperar: opera });
+    }
+    if (op === "compras.get") {
+      const c = await cargarCompra(String(body.id ?? ""));
+      if (!c || !veCompra(c)) return err("no_existe", 404);
+      return json(await compraDetalle(c));
+    }
+
+    /** Tasaciones ya completadas del vehículo del lead (por patente), para ofertar sobre ellas. */
+    if (op === "compras.tasaciones") {
+      const lead = await cargarLead(String(body.leadId ?? ""));
+      if (!lead || !puedeVer(lead)) return err("no_existe", 404);
+      const patente = String((lead.vehiculo_ofrecido || {}).patente ?? "");
+      if (!patente) return json({ tasaciones: [], pendiente: null });
+      const q = await scoped(sb.from("tasaciones").select("*").eq("patente", patente).order("creado_en", { ascending: false }));
+      if (q.error) return fallar(q.error);
+      const todas: any[] = q.data ?? [];
+      const pendiente = todas.find((t) => t.estado === "pendiente" || t.estado === "en_proceso");
+      return json({
+        tasaciones: todas.filter((t) => t.estado === "completada").map((t) => ({ id: t.id, folio: folioTasacion(t.numero), valor_compra: t.valor_compra, valor_venta: t.valor_venta, completada_en: t.completada_en })),
+        pendiente: pendiente ? { id: pendiente.id, folio: folioTasacion(pendiente.numero), estado: pendiente.estado } : null,
+      });
+    }
+    /** Pide al Tasador que tase el vehículo que ofrece el cliente. */
+    if (op === "compras.pedirTasacion") {
+      const lead = await cargarLead(String(body.leadId ?? ""));
+      if (!lead || !puedeVer(lead)) return err("no_existe", 404);
+      if (!puedeTocar(lead) || lead.tipo !== "compra") return err("forbidden", 403);
+      if (ETAPAS_CERRADAS.includes(lead.etapa)) return err("lead_cerrado");
+      const vh = validarVehiculoOfrecido(lead.vehiculo_ofrecido);
+      if (!vh.ok) return err("vehiculo_ofrecido_incompleto");
+      const previas = await sb.from("tasaciones").select("id, estado").eq("patente", vh.value.patente);
+      if (previas.error) return fallar(previas.error);
+      if ((previas.data ?? []).some((t: any) => t.estado === "pendiente" || t.estado === "en_proceso")) return err("tasacion_en_curso", 409);
+      const ins = await sb.from("tasaciones").insert({ local_id: lead.local_id, tipo: "compra", lead_id: lead.id, solicitante_id: userId, vehiculo: vh.value, patente: vh.value.patente, notas_solicitud: "Para ofertar por la compra del vehículo", creado_por: userId }).select().single();
+      if (ins.error) return fallar(ins.error);
+      await evento(lead.id, "tasacion", `Tasación ${folioTasacion(ins.data.numero)} pedida por ${userName} para ofertar por la compra`);
+      await audit(ctx.actor, "compra.pedir_tasacion", "tasacion", ins.data.id, { numero: ins.data.numero, patente: vh.value.patente, lead_id: lead.id });
+      return json({ tasacion: { id: ins.data.id, folio: folioTasacion(ins.data.numero), estado: "pendiente" } });
+    }
+
+    if (op === "compras.ofertar") {
+      const lead = await cargarLead(String(body.leadId ?? ""));
+      if (!lead || !puedeVer(lead)) return err("no_existe", 404);
+      if (!puedeTocar(lead) || lead.tipo !== "compra") return err("forbidden", 403);
+      if (ETAPAS_CERRADAS.includes(lead.etapa)) return err("lead_cerrado");
+      if (!lead.asignado_a) return err("lead_sin_asignar");
+      const { data: tas, error: te } = await scoped(sb.from("tasaciones").select("*").eq("id", String(body.tasacionId ?? ""))).maybeSingle();
+      if (te) return fallar(te);
+      const v = validarOferta(body.datos, tas, (lead.vehiculo_ofrecido || {}).patente);
+      if (!v.ok) return err(v.error!);
+      const abierta = await sb.from("compras").select("id, estado").eq("lead_id", lead.id);
+      if (abierta.error) return fallar(abierta.error);
+      if ((abierta.data ?? []).some((c: any) => COMPRA_ABIERTA.includes(c.estado))) return err("compra_en_curso", 409);
+      const ins = await sb.from("compras").insert({
+        ...v.value, local_id: lead.local_id, lead_id: lead.id, cliente_id: lead.cliente_id, ejecutivo_id: lead.asignado_a, tasacion_id: tas.id,
+        vehiculo: tas.vehiculo || lead.vehiculo_ofrecido || {}, patente: tas.patente, valor_tasado: tas.valor_compra, estado: "oferta", creado_por: userName,
+      }).select().single();
+      if (ins.error) return ins.error.code === "23505" ? err("compra_en_curso", 409) : fallar(ins.error);
+      await sb.from("leads").update({ etapa: "cotizado", actualizado_en: new Date().toISOString() }).eq("id", lead.id);
+      await evento(lead.id, "compra", `Oferta ${folioCompra(ins.data.numero)} por ${dinero(v.value.monto_oferta)} (tasado en ${dinero(tas.valor_compra)}) hecha por ${userName}`);
+      await audit(ctx.actor, "compra.ofertar", "compra", ins.data.id, { numero: ins.data.numero, monto: v.value.monto_oferta, tasado: tas.valor_compra, lead_id: lead.id });
+      return json(await compraDetalle(ins.data));
+    }
+
+    if (op === "compras.responder") {
+      const c = await cargarCompra(String(body.id ?? ""));
+      if (!c || !veCompra(c)) return err("no_existe", 404);
+      const tr = validarTransicionCompra(c.estado, "responder");
+      if (!tr.ok) return err(tr.error!);
+      const r = validarRespuestaOferta(body);
+      if (!r.ok) return err(r.error!);
+      const ahora = new Date().toISOString();
+      const { data, error } = await sb.from("compras").update(r.value.acepta ? { estado: "aceptada", respondida_en: ahora, actualizado_en: ahora } : { estado: "rechazada", motivo: r.value.motivo, respondida_en: ahora, actualizado_en: ahora }).eq("id", c.id).select().single();
+      if (error) return fallar(error);
+      if (r.value.acepta) {
+        await sb.from("leads").update({ etapa: "reservado", actualizado_en: ahora }).eq("id", c.lead_id);
+        // Los documentos se revisan desde que el cliente acepta.
+        const ex = await sb.from("validaciones").select("*").eq("tasacion_id", c.tasacion_id);
+        const previa = (ex.error ? [] : ex.data ?? []).find((x: any) => x.tipo === "compra" && !x.compra_id && x.estado !== "cancelada");
+        if (previa) await sb.from("validaciones").update({ compra_id: c.id, lead_id: c.lead_id }).eq("id", previa.id);
+        else await crearValidacion({ tipo: "compra", local_id: c.local_id, compra_id: c.id, lead_id: c.lead_id, tasacion_id: c.tasacion_id, sujeto: sujetoDeVehiculo(c.vehiculo || {}, { folio: folioCompra(c.numero) }) });
+      } else {
+        await sb.from("leads").update({ etapa: "cotizado", actualizado_en: ahora }).eq("id", c.lead_id).eq("etapa", "cotizado");
+      }
+      await evento(c.lead_id, "compra", r.value.acepta ? `El cliente aceptó la oferta ${folioCompra(c.numero)} de ${dinero(c.monto_oferta)}` : `El cliente rechazó la oferta ${folioCompra(c.numero)}: ${r.value.motivo}`);
+      await audit(ctx.actor, r.value.acepta ? "compra.aceptada" : "compra.rechazada", "compra", c.id, { numero: c.numero, motivo: r.value.motivo });
+      return json(await compraDetalle(data));
+    }
+
+    // El ejecutivo pide aprobar el pago; el Jefe Local aprueba. Con Validadores en el local, hacen falta los documentos validados.
+    if (op === "compras.solicitarPago") {
+      const c = await cargarCompra(String(body.id ?? ""));
+      if (!c || !veCompra(c)) return err("no_existe", 404);
+      const tr = validarTransicionCompra(c.estado, "solicitarPago");
+      if (!tr.ok) return err(tr.error!);
+      const v = validarPagoCompra(body.datos, c);
+      if (!v.ok) return err(v.error!);
+      const { data, error } = await sb.from("compras").update({ ...v.value, estado: "pago_pendiente", solicitado_por: userName, motivo_rechazo_pago: null, actualizado_en: new Date().toISOString() }).eq("id", c.id).select().single();
+      if (error) return fallar(error);
+      await evento(c.lead_id, "compra", `Pago de ${dinero(v.value.monto_final)} (${v.value.medio_pago}) solicitado por ${userName} para ${folioCompra(c.numero)}`);
+      await audit(ctx.actor, "compra.solicitar_pago", "compra", c.id, { numero: c.numero, monto: v.value.monto_final });
+      // El supervisor que registra su propia compra la aprueba, salvo que falten documentos por validar.
+      if (esSupervisor) {
+        const ap = await aprobarCompra(data);
+        if (ap.ok) return json(await compraDetalle(ap.compra));
+        if (ap.error !== "validacion_pendiente") return err(ap.error!, 409);
+      }
+      return json(await compraDetalle(data));
+    }
+    if (op === "compras.aprobar") {
+      if (!esSupervisor) return err("forbidden", 403);
+      const c = await cargarCompra(String(body.id ?? ""));
+      if (!c) return err("no_existe", 404);
+      const tr = validarTransicionCompra(c.estado, "aprobar");
+      if (!tr.ok) return err(tr.error!);
+      const ap = await aprobarCompra(c);
+      if (!ap.ok) return err(ap.error!, 409);
+      return json(await compraDetalle(ap.compra));
+    }
+    if (op === "compras.rechazarPago") {
+      if (!esSupervisor) return err("forbidden", 403);
+      const c = await cargarCompra(String(body.id ?? ""));
+      if (!c) return err("no_existe", 404);
+      const tr = validarTransicionCompra(c.estado, "rechazarPago");
+      if (!tr.ok) return err(tr.error!);
+      const motivo = String(body.motivo ?? "").trim().slice(0, 200);
+      if (motivo.length < 3) return err("motivo_requerido");
+      const { data, error } = await sb.from("compras").update({ estado: "aceptada", motivo_rechazo_pago: motivo, actualizado_en: new Date().toISOString() }).eq("id", c.id).select().single();
+      if (error) return fallar(error);
+      await evento(c.lead_id, "compra", `Pago de ${folioCompra(c.numero)} rechazado por ${userName}: ${motivo}`);
+      await audit(ctx.actor, "compra.rechazar_pago", "compra", c.id, { numero: c.numero, motivo });
+      return json(await compraDetalle(data));
+    }
+    if (op === "compras.cancelar") {
+      const c = await cargarCompra(String(body.id ?? ""));
+      if (!c || !veCompra(c)) return err("no_existe", 404);
+      const tr = validarTransicionCompra(c.estado, "cancelar");
+      if (!tr.ok) return err(tr.error!);
+      const motivo = String(body.motivo ?? "").trim().slice(0, 200);
+      if (motivo.length < 3) return err("motivo_requerido");
+      const ahora = new Date().toISOString();
+      const { data, error } = await sb.from("compras").update({ estado: "cancelada", motivo, actualizado_en: ahora }).eq("id", c.id).select().single();
+      if (error) return fallar(error);
+      await sb.from("validaciones").update({ estado: "cancelada", actualizado_en: ahora }).eq("compra_id", c.id).neq("estado", "aprobada");
+      await sb.from("leads").update({ etapa: "contactado", actualizado_en: ahora }).eq("id", c.lead_id).in("etapa", ["cotizado", "reservado"]);
+      await evento(c.lead_id, "compra", `${folioCompra(c.numero)} cancelada por ${userName}: ${motivo}`);
+      await audit(ctx.actor, "compra.cancelar", "compra", c.id, { numero: c.numero, motivo });
+      return json(await compraDetalle(data));
+    }
+    // Revertir una compra aprobada: solo el supervisor, y solo si el vehículo aún no se usó.
+    if (op === "compras.anular") {
+      if (!esSupervisor) return err("forbidden", 403);
+      const c = await cargarCompra(String(body.id ?? ""));
+      if (!c) return err("no_existe", 404);
+      const tr = validarTransicionCompra(c.estado, "anular");
+      if (!tr.ok) return err(tr.error!);
+      const motivo = String(body.motivo ?? "").trim().slice(0, 200);
+      if (motivo.length < 3) return err("motivo_requerido");
+      const ahora = new Date().toISOString();
+      if (c.vehiculo_id) {
+        const { data: veh } = await sb.from("vehiculos").select("id, estado").eq("id", c.vehiculo_id).maybeSingle();
+        const [rs, ci] = await Promise.all([sb.from("reservas").select("id").eq("vehiculo_id", c.vehiculo_id), sb.from("cierres").select("id, estado").eq("vehiculo_id", c.vehiculo_id)]);
+        const enUso = !veh || !["preparacion", "disponible"].includes(veh.estado) || (rs.data ?? []).some((x: any) => x) || (ci.data ?? []).some((x: any) => x.estado === "pendiente" || x.estado === "aprobada");
+        if (enUso) return err("vehiculo_en_uso", 409);
+        await sb.from("vehiculos").update({ activo: false, actualizado_en: ahora }).eq("id", c.vehiculo_id);
+      }
+      const { data, error } = await sb.from("compras").update({ estado: "anulada", motivo, actualizado_en: ahora }).eq("id", c.id).select().single();
+      if (error) return fallar(error);
+      await sb.from("leads").update({ etapa: "reservado", actualizado_en: ahora }).eq("id", c.lead_id).eq("etapa", "ganado");
+      await evento(c.lead_id, "compra", `Compra ${folioCompra(c.numero)} anulada por ${userName}: ${motivo}. Sale de la comisión de ${nombreMes(c.mes)} y el vehículo se archiva.`);
+      await audit(ctx.actor, "compra.anular", "compra", c.id, { numero: c.numero, mes: c.mes, motivo });
+      return json(await compraDetalle(data));
+    }
+
+    return err("unknown_op");
+  }
+
+  /* ---------- consignaciones (el dueño deja su vehículo para que se venda) ---------- */
+  if (op.startsWith("consignaciones.")) {
+    const opera = ctx.esAdmin ? false : can("consignaciones.operar") && can("leads.propios");
+    const fallar = (e: any) => fallo(e);
+    if (!opera && !esSupervisor) return err("forbidden", 403);
+
+    async function cargarConsig(id: string) {
+      const { data, error } = await scoped(sb.from("consignaciones").select("*").eq("id", id)).maybeSingle();
+      if (error) throw error;
+      return data;
+    }
+    const veConsig = (c: any) => esSupervisor || (opera && c.ejecutivo_id === userId);
+    const enriquecerConsig = async (filas: any[]) => {
+      const [usuarios, clientes, vals] = await Promise.all([
+        porIds("usuarios", filas.map((c) => c.ejecutivo_id)), porIds("clientes", filas.map((c) => c.cliente_id)),
+        enLotes("validaciones", "consignacion_id", filas.map((c) => c.id)).catch(() => [] as any[]),
+      ]);
+      const ahora = new Date();
+      return filas.map((c) => {
+        const v = vals.filter((x: any) => x.consignacion_id === c.id && x.estado !== "cancelada").sort((a: any, b: any) => String(b.creado_en).localeCompare(String(a.creado_en)))[0];
+        const dias = c.estado === "vigente" ? diasParaVencer(c.vence_en, ahora) : null;
+        return {
+          ...c, folio: folioConsignacion(c.numero), ejecutivo: (usuarios.find((u: any) => u.id === c.ejecutivo_id) || {}).nombre ?? "",
+          cliente: (clientes.find((x: any) => x.id === c.cliente_id) || {}).nombre ?? "", validacion: v ? { id: v.id, folio: folioValidacion(v.numero), estado: v.estado } : null,
+          diasRestantes: dias, vencida: dias !== null && dias < 0, margenEsperado: Number(c.precio_publicacion) - Number(c.precio_piso),
+        };
+      });
+    };
+    const consigDetalle = async (c: any) => ({ consignacion: (await enriquecerConsig([c]))[0], puedeSupervisar: esSupervisor, puedeOperar: opera });
+
+    if (op === "consignaciones.list") {
+      const vista = String(body.vista ?? "");
+      const { data, error } = await scoped(sb.from("consignaciones").select("*").order("creado_en", { ascending: false }));
+      if (error) return fallar(error);
+      let filas: any[] = data ?? [];
+      if (vista === "mias") { if (!opera) return err("forbidden", 403); filas = filas.filter((c) => c.ejecutivo_id === userId); }
+      else if (vista === "local") { if (!esSupervisor) return err("forbidden", 403); }
+      else if (vista === "lead") {
+        const lead = await cargarLead(String(body.leadId ?? ""));
+        if (!lead || !puedeVer(lead)) return err("no_existe", 404);
+        filas = filas.filter((c) => c.lead_id === lead.id);
+      } else return err("vista_invalida");
+      if (body.estado) filas = filas.filter((c) => c.estado === String(body.estado));
+      return json({ consignaciones: await enriquecerConsig(filas.slice(0, 200)), puedeSupervisar: esSupervisor, puedeOperar: opera });
+    }
+    if (op === "consignaciones.get") {
+      const c = await cargarConsig(String(body.id ?? ""));
+      if (!c || !veConsig(c)) return err("no_existe", 404);
+      return json(await consigDetalle(c));
+    }
+
+    if (op === "consignaciones.crear") {
+      const lead = await cargarLead(String(body.leadId ?? ""));
+      if (!lead || !puedeVer(lead)) return err("no_existe", 404);
+      if (!puedeTocar(lead) || lead.tipo !== "consignacion") return err("forbidden", 403);
+      if (ETAPAS_CERRADAS.includes(lead.etapa)) return err("lead_cerrado");
+      if (!lead.asignado_a) return err("lead_sin_asignar");
+      const vh = validarVehiculoOfrecido(lead.vehiculo_ofrecido);
+      if (!vh.ok) return err("vehiculo_ofrecido_incompleto");
+      const v = validarConsignacion(body.datos);
+      if (!v.ok) return err(v.error!);
+      const abierta = await sb.from("consignaciones").select("id, estado").eq("lead_id", lead.id);
+      if (abierta.error) return fallar(abierta.error);
+      if ((abierta.data ?? []).some((c: any) => CONSIGNACION_ABIERTA.includes(c.estado))) return err("consignacion_en_curso", 409);
+      const dup = await sb.from("vehiculos").select("id").eq("patente", vh.value.patente).eq("activo", true);
+      if ((dup.data ?? []).length > 0) return err("patente_duplicada", 409);
+      const ins = await sb.from("consignaciones").insert({
+        ...v.value, local_id: lead.local_id, lead_id: lead.id, cliente_id: lead.cliente_id, ejecutivo_id: lead.asignado_a, vehiculo: vh.value, patente: vh.value.patente,
+        estado: "en_validacion", creado_por: userName,
+      }).select().single();
+      if (ins.error) return ins.error.code === "23505" ? err("consignacion_en_curso", 409) : fallar(ins.error);
+      const c = ins.data;
+      await sb.from("leads").update({ etapa: "cotizado", actualizado_en: new Date().toISOString() }).eq("id", lead.id);
+      await evento(lead.id, "consignacion", `Contrato de consignación ${folioConsignacion(c.numero)} registrado por ${userName}: piso ${dinero(v.value.precio_piso)}, publicación ${dinero(v.value.precio_publicacion)}, ${v.value.plazo_dias} días`);
+      await audit(ctx.actor, "consignacion.crear", "consignacion", c.id, { numero: c.numero, piso: v.value.precio_piso, publicacion: v.value.precio_publicacion, lead_id: lead.id });
+      const val = await crearValidacion({ tipo: "consignacion", local_id: c.local_id, consignacion_id: c.id, lead_id: lead.id, sujeto: sujetoDeVehiculo(vh.value, { folio: folioConsignacion(c.numero) }) });
+      // Sin Validadores en el local, el vehículo entra al inventario de inmediato; si no, cuando se aprueben los documentos.
+      if (!val || !(await hayValidadores(c.local_id))) {
+        const act = await activarConsignacion(c);
+        if (!act.ok) return err(act.error!, 409);
+        return json(await consigDetalle(act.consignacion));
+      }
+      return json(await consigDetalle(c));
+    }
+    if (op === "consignaciones.cancelar") {
+      const c = await cargarConsig(String(body.id ?? ""));
+      if (!c || !veConsig(c)) return err("no_existe", 404);
+      const tr = validarTransicionConsignacion(c.estado, "cancelar");
+      if (!tr.ok) return err(tr.error!);
+      const motivo = String(body.motivo ?? "").trim().slice(0, 200);
+      if (motivo.length < 3) return err("motivo_requerido");
+      const ahora = new Date().toISOString();
+      const { data, error } = await sb.from("consignaciones").update({ estado: "cancelada", motivo, actualizado_en: ahora }).eq("id", c.id).select().single();
+      if (error) return fallar(error);
+      await sb.from("validaciones").update({ estado: "cancelada", actualizado_en: ahora }).eq("consignacion_id", c.id).neq("estado", "aprobada");
+      await sb.from("leads").update({ etapa: "contactado", actualizado_en: ahora }).eq("id", c.lead_id).eq("etapa", "cotizado");
+      await evento(c.lead_id, "consignacion", `${folioConsignacion(c.numero)} cancelada por ${userName}: ${motivo}`);
+      await audit(ctx.actor, "consignacion.cancelar", "consignacion", c.id, { numero: c.numero, motivo });
+      return json(await consigDetalle(data));
+    }
+    // Devolver el vehículo al dueño: sale del inventario (solo si no está reservado ni vendido).
+    if (op === "consignaciones.devolver") {
+      const c = await cargarConsig(String(body.id ?? ""));
+      if (!c || !veConsig(c)) return err("no_existe", 404);
+      const tr = validarTransicionConsignacion(c.estado, "devolver");
+      if (!tr.ok) return err(tr.error!);
+      const motivo = String(body.motivo ?? "").trim().slice(0, 200);
+      if (motivo.length < 3) return err("motivo_requerido");
+      const ahora = new Date().toISOString();
+      if (c.vehiculo_id) {
+        const { data: veh } = await sb.from("vehiculos").select("id, estado").eq("id", c.vehiculo_id).maybeSingle();
+        if (!veh || !["preparacion", "disponible"].includes(veh.estado)) return err("vehiculo_en_uso", 409);
+        await sb.from("vehiculos").update({ activo: false, actualizado_en: ahora }).eq("id", c.vehiculo_id);
+      }
+      const { data, error } = await sb.from("consignaciones").update({ estado: "devuelta", motivo, actualizado_en: ahora }).eq("id", c.id).select().single();
+      if (error) return fallar(error);
+      await evento(c.lead_id, "consignacion", `Vehículo de ${folioConsignacion(c.numero)} devuelto al dueño por ${userName}: ${motivo}`);
+      await audit(ctx.actor, "consignacion.devolver", "consignacion", c.id, { numero: c.numero, motivo });
+      return json(await consigDetalle(data));
+    }
+    if (op === "consignaciones.extender") {
+      const c = await cargarConsig(String(body.id ?? ""));
+      if (!c || !veConsig(c)) return err("no_existe", 404);
+      const tr = validarTransicionConsignacion(c.estado, "extender");
+      if (!tr.ok) return err(tr.error!);
+      const d = validarExtension(body);
+      if (!d.ok) return err(d.error!);
+      // Si ya venció, los días corren desde hoy; si no, se suman al vencimiento actual.
+      const base = diasParaVencer(c.vence_en) !== null && diasParaVencer(c.vence_en)! >= 0 ? `${String(c.vence_en).slice(0, 10)}T12:00:00Z` : new Date().toISOString();
+      const vence = vencimientoConsignacion(base, d.value);
+      const { data, error } = await sb.from("consignaciones").update({ vence_en: vence, plazo_dias: Number(c.plazo_dias) + d.value, actualizado_en: new Date().toISOString() }).eq("id", c.id).select().single();
+      if (error) return fallar(error);
+      await evento(c.lead_id, "consignacion", `Plazo de ${folioConsignacion(c.numero)} extendido ${d.value} días por ${userName}: vence el ${vence}`);
+      await audit(ctx.actor, "consignacion.extender", "consignacion", c.id, { numero: c.numero, dias: d.value, vence_en: vence });
+      return json(await consigDetalle(data));
+    }
+
+    return err("unknown_op");
+  }
+
   /* ---------- clientes ---------- */
   if (op === "clientes.list") {
     const { data, error } = await scoped(sb.from("clientes").select("*").order("nombre"));
@@ -1664,12 +2103,21 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
   }
 
   if (op === "leads.create") {
-    if (!(can("ventas.operar") && can("leads.propios")) && !esSupervisor) return err("forbidden", 403);
+    // El tipo de lead (venta, compra o consignación) exige la habilitación correspondiente.
+    const tipoLead = ["compra", "consignacion"].includes(String(body.lead?.tipo)) ? String(body.lead.tipo) : "venta";
+    if (!(can(permisoDeTipo(tipoLead)) && can("leads.propios")) && !esSupervisor) return err("forbidden", 403);
     const local = await localParaCrear();
     if (!local) return err("sin_local");
 
     const datosLead = validarLead(body.lead);
     if (!datosLead.ok) return err(datosLead.error!);
+    let ofrecido: any = null;
+    if (tipoLead !== "venta") {
+      const vo = validarVehiculoOfrecido(body.lead?.vehiculoOfrecido);
+      if (!vo.ok) return err(vo.error!);
+      ofrecido = vo.value;
+      datosLead.value.vehiculo_id = null;
+    }
     if (datosLead.value.vehiculo_id) {
       const { data: v } = await sb.from("vehiculos").select("id, local_id").eq("id", datosLead.value.vehiculo_id).maybeSingle();
       if (!v || v.local_id !== local) return err("vehiculo_invalido");
@@ -1703,15 +2151,15 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     if (!esSupervisor) {
       asignado = { id: userId, nombre: userName };
     } else if (body.asignarA && body.asignarA !== "auto") {
-      const candidatos = await elegibles(local);
+      const candidatos = await elegibles(local, tipoLead);
       asignado = candidatos.find((c: any) => c.id === body.asignarA) ?? null;
       if (!asignado) return err("asignado_invalido");
     } else {
-      asignado = elegirAsignado(await elegibles(local), await ultimasAsignaciones());
+      asignado = elegirAsignado(await elegibles(local, tipoLead), await ultimasAsignaciones());
     }
 
     const { data: lead, error } = await sb.from("leads").insert({
-      ...datosLead.value, ...(camp.id ? { campania_id: camp.id } : {}), tipo: "venta", etapa: "nuevo", local_id: local, cliente_id: cliente.id,
+      ...datosLead.value, ...(camp.id ? { campania_id: camp.id } : {}), tipo: tipoLead, ...(ofrecido ? { vehiculo_ofrecido: ofrecido } : {}), etapa: "nuevo", local_id: local, cliente_id: cliente.id,
       asignado_a: asignado ? asignado.id : null, creado_por: ctx.esAdmin ? null : userId,
     }).select().single();
     if (error) return fallo(error);
@@ -1730,6 +2178,14 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       const { data: veh } = await sb.from("vehiculos").select("id, local_id").eq("id", v.value.vehiculo_id).maybeSingle();
       if (!veh || veh.local_id !== lead.local_id) return err("vehiculo_invalido");
     }
+    // El vehículo que ofrece el cliente (compras y consignaciones).
+    let ofrPatch: Record<string, unknown> = {};
+    if (lead.tipo !== "venta" && body.lead && Object.prototype.hasOwnProperty.call(body.lead, "vehiculoOfrecido")) {
+      const vo = validarVehiculoOfrecido(body.lead.vehiculoOfrecido);
+      if (!vo.ok) return err(vo.error!);
+      ofrPatch = { vehiculo_ofrecido: vo.value };
+      v.value.vehiculo_id = null;
+    }
     // La campaña solo se cambia si la pantalla la envía.
     let campPatch: Record<string, unknown> = {};
     if (body.lead && Object.prototype.hasOwnProperty.call(body.lead, "campaniaId")) {
@@ -1741,7 +2197,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     const tope = verificarTopeParteDePago(v.value.parte_pago, await topeDeLead(lead));
     if (!tope.ok) return err(tope.error!);
     v.value.parte_pago = fusionarParteDePago(lead.parte_pago, v.value.parte_pago);
-    const { data, error } = await sb.from("leads").update({ ...v.value, ...campPatch, actualizado_en: new Date().toISOString() }).eq("id", lead.id).select().single();
+    const { data, error } = await sb.from("leads").update({ ...v.value, ...campPatch, ...ofrPatch, actualizado_en: new Date().toISOString() }).eq("id", lead.id).select().single();
     if (error) return fallo(error);
     await evento(lead.id, "nota", "Se actualizaron los datos del lead");
     return json({ lead: data });
@@ -1753,6 +2209,10 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     if (!puedeTocar(lead)) return err("forbidden", 403);
     const r = validarCambioEtapa({ desde: lead.etapa, hacia: String(body.etapa ?? ""), motivo: body.motivo, puedeReabrir: esSupervisor });
     if (!r.ok) return err(r.error!);
+    if (lead.tipo !== "venta" && r.value.etapa === "perdido") {
+      const [cp, cs] = await Promise.all([sb.from("compras").select("estado").eq("lead_id", lead.id), sb.from("consignaciones").select("estado").eq("lead_id", lead.id)]);
+      if ((cp.data ?? []).some((x: any) => COMPRA_ABIERTA.includes(x.estado)) || (cs.data ?? []).some((x: any) => CONSIGNACION_ABIERTA.includes(x.estado))) return err("operacion_en_curso");
+    }
     // Con una reserva activa solo se puede perder el lead (y eso cancela la reserva); no moverlo a otra etapa.
     const reservaActiva = await reservaActivaDeLead(lead.id);
     if (reservaActiva && r.value.etapa !== "perdido") return err("reserva_activa");
@@ -1768,7 +2228,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     if (!esSupervisor) return err("forbidden", 403);
     const lead = await cargarLead(String(body.id ?? ""));
     if (!lead) return err("no_existe", 404);
-    const candidatos = await elegibles(lead.local_id);
+    const candidatos = await elegibles(lead.local_id, lead.tipo || "venta");
     let nuevo: { id: string; nombre: string } | null;
     if (body.asignarA && body.asignarA !== "auto") {
       nuevo = candidatos.find((c: any) => c.id === body.asignarA) ?? null;
@@ -1891,6 +2351,8 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     // El precio de lista es siempre el actual del inventario; si cambió y hay descuento, se vuelve a pedir aprobación.
     const v = validarCotizacion(body.datos, veh.precio_lista);
     if (!v.ok) return err(v.error!);
+    const pisoCot = verificarPisoConsignado(veh, v.value.precio_final);
+    if (!pisoCot.ok) return err(pisoCot.error!);
     // El vehículo en parte de pago no se puede valorar por sobre lo tasado.
     const tope = verificarTopeParteDePago(v.value.parte_pago, await topeDeLead(lead));
     if (!tope.ok) return err(tope.error!);
@@ -2114,6 +2576,12 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     }).eq("id", c.id).select().single();
     if (error) throw error;
     await sb.from("vehiculos").update({ estado: "vendido", actualizado_en: ahora }).eq("id", c.vehiculo_id);
+    // Un vehículo consignado vendido paga comisión al ejecutivo de la consignación: el margen es lo que queda sobre el piso.
+    const cons = await sb.from("consignaciones").select("*").eq("vehiculo_id", c.vehiculo_id).eq("estado", "vigente").maybeSingle();
+    if (!cons.error && cons.data) {
+      await sb.from("consignaciones").update({ estado: "vendida", cierre_id: c.id, precio_venta: c.precio_final, margen: Number(c.precio_final) - Number(cons.data.precio_piso), mes, vendida_en: ahora, actualizado_en: ahora }).eq("id", cons.data.id);
+      await evento(c.lead_id, "consignacion", `Vehículo consignado (${folioConsignacion(cons.data.numero)}) vendido en ${dinero(c.precio_final)}: margen ${dinero(Number(c.precio_final) - Number(cons.data.precio_piso))} sobre el piso.`);
+    }
     if (c.reserva_id) await sb.from("reservas").update({ estado: "convertida", motivo: "Venta cerrada", cerrado_en: ahora }).eq("id", c.reserva_id).eq("estado", "activa");
     if (c.cotizacion_id) await sb.from("cotizaciones").update({ estado: "vendida", actualizado_en: ahora }).eq("id", c.cotizacion_id);
     await sb.from("leads").update({ etapa: "ganado", actualizado_en: ahora }).eq("id", c.lead_id);
@@ -2141,6 +2609,8 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
 
     const v = validarCierre(body.datos);
     if (!v.ok) return err(v.error!);
+    const pisoCierre = verificarPisoConsignado(veh, v.value.precio_final);
+    if (!pisoCierre.ok) return err(pisoCierre.error!);
     // Lo que se recibe por el vehículo en parte de pago no puede superar lo tasado.
     const tope = verificarTopeParteDePago({ tiene: v.value.monto_parte_pago > 0, valor: v.value.monto_parte_pago }, await topeDeLead(lead));
     if (!tope.ok) return err(tope.error!);
@@ -2233,6 +2703,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     const { data, error } = await sb.from("cierres").update({ estado: "anulada", motivo_anulacion: motivo, anulado_por: userName, anulado_en: ahora, actualizado_en: ahora }).eq("id", c.id).select().single();
     if (error) return fallo(error);
     await sb.from("vehiculos").update({ estado: "disponible", actualizado_en: ahora }).eq("id", c.vehiculo_id).eq("estado", "vendido");
+    await sb.from("consignaciones").update({ estado: "vigente", cierre_id: null, precio_venta: null, margen: null, mes: null, vendida_en: null, actualizado_en: ahora }).eq("cierre_id", c.id).eq("estado", "vendida");
     if (c.cotizacion_id) await sb.from("cotizaciones").update({ estado: "vigente", actualizado_en: ahora }).eq("id", c.cotizacion_id).eq("estado", "vendida");
     await sb.from("leads").update({ etapa: "cotizado", actualizado_en: ahora }).eq("id", c.lead_id).eq("etapa", "ganado");
     await evento(c.lead_id, "cierre", `Venta ${folioVenta(c.numero)} anulada por ${userName}: ${motivo}. Sale de la comisión de ${nombreMes(c.mes)}.`);
@@ -2273,12 +2744,16 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     const mes = body.mes === undefined ? mesChile() : String(body.mes);
     if (!esMes(mes)) return err("mes_invalido");
 
-    const [{ data, error }, pend, equipoElegible] = await Promise.all([
+    const [{ data, error }, pend, equipoElegible, comprasQ, consigQ] = await Promise.all([
       scoped(sb.from("cierres").select("*").eq("estado", "aprobada")),
       scoped(sb.from("cierres").select("ejecutivo_id").eq("estado", "pendiente")),
       verTodos && localId ? elegibles(localId) : Promise.resolve([] as any[]),
+      scoped(sb.from("compras").select("*").eq("estado", "comprada")),
+      scoped(sb.from("consignaciones").select("*").eq("estado", "vendida")),
     ]);
     if (error) return fallo(error);
+    const comprasMes: any[] = comprasQ.error ? [] : (comprasQ.data ?? []).filter((c: any) => c.mes === mes);
+    const consigMes: any[] = consigQ.error ? [] : (consigQ.data ?? []).filter((c: any) => c.mes === mes);
     const delMes = (data ?? []).filter((c: any) => c.mes === mes);
     const pendientesPor: Record<string, number> = {};
     for (const c of pend.data ?? []) pendientesPor[c.ejecutivo_id] = (pendientesPor[c.ejecutivo_id] ?? 0) + 1;
@@ -2287,7 +2762,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     const ids = new Set<string>();
     if (verTodos) {
       for (const e of equipoElegible) ids.add(e.id);
-      for (const c of delMes) if (c.ejecutivo_id) ids.add(c.ejecutivo_id);
+      for (const c of [...delMes, ...comprasMes, ...consigMes]) if (c.ejecutivo_id) ids.add(c.ejecutivo_id);
     } else if (!ctx.esAdmin) ids.add(userId);
     const usuarios = await porIds("usuarios", Array.from(ids));
     const puedeCosto = can("inventario.editar");
@@ -2298,6 +2773,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       const datos = {
         ventasN: suyas.length, segurosN: suyas.filter((c: any) => c.seguro).length,
         creditosN: conCredito.length, creditosComision: conCredito.reduce((a: number, c: any) => a + Number(c.comision_financiera || 0), 0),
+        comprasN: comprasMes.filter((c: any) => c.ejecutivo_id === u.id).length, consigRows: filasConsignacion(consigMes, u.id, mes),
       };
       const tramos = tramosEfectivos(u.comision);
       const produccion = calcularProduccion(datos, tramos);
@@ -2307,15 +2783,16 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
         montoVendido: suyas.reduce((a: number, c: any) => a + Number(c.precio_final), 0),
         margen: puedeCosto && suyas.every((c: any) => c.margen != null) ? suyas.reduce((a: number, c: any) => a + Number(c.margen), 0) : null,
         pendientes: pendientesPor[u.id] ?? 0,
+        comprado: comprasMes.filter((c: any) => c.ejecutivo_id === u.id).reduce((a: number, c: any) => a + Number(c.monto_final || 0), 0),
       };
-    }).sort((a: any, b: any) => b.datos.ventasN - a.datos.ventasN || a.nombre.localeCompare(b.nombre));
+    }).sort((a: any, b: any) => b.produccion.total - a.produccion.total || b.datos.ventasN - a.datos.ventasN || a.nombre.localeCompare(b.nombre));
 
     let meta = 0;
     try { meta = (await configNegocio()).meta_mensual_unidades; } catch (e) { /* sin meta */ }
     return json({
       mes, nombreMes: nombreMes(mes), meta, ejecutivos, verTodos,
       totales: { unidades: delMes.length, produccion: ejecutivos.reduce((a: number, e: any) => a + e.produccion.total, 0), montoVendido: ejecutivos.reduce((a: number, e: any) => a + e.montoVendido, 0) },
-      pendientesDeOtrosModulos: ["compras", "consignaciones"],
+      pendientesDeOtrosModulos: [],
     });
   }
 
@@ -2370,7 +2847,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     let cfg;
     const ahora = new Date();
     // Todo lo que no depende de otra consulta se pide a la vez (antes eran ~12 viajes seguidos a la base).
-    const [cfgR, lr, tr, rr, tsr, isr, vsr, cpr0, avisosMalos0, equipoBase0] = await Promise.all([
+    const [cfgR, lr, tr, rr, tsr, isr, vsr, cpr0, avisosMalos0, equipoBase0, cmpQ, cnsQ] = await Promise.all([
       configNegocio().then((c) => ({ c }), (e) => ({ e })),
       scoped(sb.from("leads").select("*").in("etapa", ETAPAS_ABIERTAS)),
       scoped(sb.from("tareas").select("*").eq("hecha", false)),
@@ -2381,6 +2858,8 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       esSupervisor ? scoped(sb.from("campanias").select("*").eq("estado", "pendiente")) : Promise.resolve({ data: [], error: null }),
       esSupervisor ? avisosConAlertas() : Promise.resolve([] as any[]),
       localId ? elegibles(localId) : Promise.resolve([] as any[]),
+      scoped(sb.from("compras").select("*").eq("estado", "pago_pendiente")),
+      scoped(sb.from("consignaciones").select("*").eq("estado", "vigente")),
     ]);
     if ((cfgR as any).e) return fallo((cfgR as any).e);
     cfg = (cfgR as any).c;
@@ -2396,6 +2875,8 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       const cv = await porIds("cierres", valSinTomar.map((x) => x.cierre_id));
       valSinTomar = valSinTomar.filter((x) => x.tipo !== "venta" || !x.cierre_id || ["pendiente", "aprobada"].includes((cv.find((c: any) => c.id === x.cierre_id) || {}).estado));
     }
+    const comprasPorAprobar: any[] = cmpQ.error || !esSupervisor ? [] : cmpQ.data ?? [];
+    const consigPorVencer: any[] = cnsQ.error || !esSupervisor ? [] : (cnsQ.data ?? []).filter((c: any) => { const d = diasParaVencer(c.vence_en); return d !== null && d <= 7; });
     const avisosMalos = avisosMalos0;
     const cpr = cpr0;
     const campPend: any[] = cpr.error ? [] : cpr.data ?? [];
@@ -2427,7 +2908,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
 
     return json({
       config: { horas_sin_contacto: cfg.horas_sin_contacto, dias_detenido: cfg.dias_detenido, horas_tasacion: cfg.horas_tasacion, horas_inspeccion: cfg.horas_inspeccion, horas_validacion: cfg.horas_validacion },
-      conteos: { abiertos: abiertos.length, sinAtender: sinAtender.length, detenidos: detenidos.length, sinAsignar: sinAsignar.length, tareasVencidas: tareasVencidas.length, reservasPorVencer: porVencer.length, tasacionesSinTomar: tasSinTomar.length, inspeccionesSinTomar: inspSinTomar.length, validacionesSinTomar: valSinTomar.length, avisosDesactualizados: avisosMalos.length, campaniasPorAprobar: campPend.length },
+      conteos: { abiertos: abiertos.length, sinAtender: sinAtender.length, detenidos: detenidos.length, sinAsignar: sinAsignar.length, tareasVencidas: tareasVencidas.length, reservasPorVencer: porVencer.length, tasacionesSinTomar: tasSinTomar.length, inspeccionesSinTomar: inspSinTomar.length, validacionesSinTomar: valSinTomar.length, avisosDesactualizados: avisosMalos.length, campaniasPorAprobar: campPend.length, comprasPorAprobar: comprasPorAprobar.length, consignacionesPorVencer: consigPorVencer.length },
       sinAtender: tope(sinAtender).map(fila),
       detenidos: tope(detenidos).map(fila),
       sinAsignar: tope(sinAsignar).map(fila),
@@ -2445,6 +2926,8 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
         const vh = t.vehiculo || {};
         return { id: t.id, lead_id: t.lead_id, folio: folioTasacion(t.numero), vehiculo: `${vh.marca ?? ""} ${vh.modelo ?? ""} ${vh.anio ?? ""} · ${vh.patente ?? ""}`.trim(), cliente: l ? clienteDe(l.cliente_id) : (t.contacto && t.contacto.nombre) || "", solicitante: nombreDe(t.solicitante_id), solicitada_en: t.solicitada_en };
       }),
+      comprasPorAprobar: tope(comprasPorAprobar).map((c: any) => ({ id: c.id, lead_id: c.lead_id, folio: folioCompra(c.numero), vehiculo: `${(c.vehiculo || {}).marca ?? ""} ${(c.vehiculo || {}).modelo ?? ""} ${(c.vehiculo || {}).anio ?? ""} · ${c.patente ?? ""}`.trim(), monto_final: c.monto_final, solicitado_por: c.solicitado_por })),
+      consignacionesPorVencer: tope(consigPorVencer).map((c: any) => ({ id: c.id, lead_id: c.lead_id, folio: folioConsignacion(c.numero), vehiculo: `${(c.vehiculo || {}).marca ?? ""} ${(c.vehiculo || {}).modelo ?? ""} ${(c.vehiculo || {}).anio ?? ""} · ${c.patente ?? ""}`.trim(), vence_en: c.vence_en, dias: diasParaVencer(c.vence_en) })),
       campaniasPorAprobar: tope(campPend).map((c: any) => ({ id: c.id, folio: folioCampania(c.numero), nombre: c.nombre, canal: c.canal, presupuesto: c.presupuesto, desde: c.desde, hasta: c.hasta, creado_por: c.creado_por })),
       avisosDesactualizados: tope(avisosMalos).map((x: any) => ({ id: x.id, folio: x.folio, vehiculo: x.vehiculo, alertas: x.alertas.map((a: any) => a.texto) })),
       validacionesSinTomar: tope(valSinTomar).map((x) => {
@@ -2528,13 +3011,15 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     if (ids.length === 0 || ids.length > 50) return err("lote_invalido");
     const local = await localParaCrear();
     if (!local) return err("sin_local");
-    const candidatos = await elegibles(local);
+    const [cVenta, cCompra, cConsig] = await Promise.all([elegibles(local, "venta"), elegibles(local, "compra"), elegibles(local, "consignacion")]);
+    const porTipo: Record<string, any[]> = { venta: cVenta, compra: cCompra, consignacion: cConsig };
+    const todosCand = [...cVenta, ...cCompra, ...cConsig];
     const ultima = await ultimasAsignaciones();
     let destino: { id: string; nombre: string } | null = null;
     if (body.asignarA && body.asignarA !== "auto") {
-      destino = candidatos.find((c: any) => c.id === body.asignarA) ?? null;
+      destino = todosCand.find((c: any) => c.id === body.asignarA) ?? null;
       if (!destino) return err("asignado_invalido");
-    } else if (candidatos.length === 0) return err("sin_candidatos");
+    } else if (todosCand.length === 0) return err("sin_candidatos");
 
     const leads = (await enLotes("leads", "id", ids)).filter((l: any) => l.local_id === local);
     const cierres = await enLotes("cierres", "lead_id", leads.map((l: any) => l.id));
@@ -2546,6 +3031,8 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       if (ETAPAS_CERRADAS.includes(l.etapa)) { omitidos.push({ id: l.id, motivo: "lead_cerrado" }); continue; }
       if (ocupados.has(l.id)) { omitidos.push({ id: l.id, motivo: "cierre_en_curso" }); continue; }
       // Con "reparto automático" se va rotando entre el equipo (sin repetir a quien ya lo tiene).
+      const candidatos = porTipo[l.tipo || "venta"] ?? cVenta;
+      if (destino && !candidatos.some((c: any) => c.id === destino!.id)) { omitidos.push({ id: l.id, motivo: "sin_candidatos" }); continue; }
       const asignado = destino ?? elegirAsignado(candidatos.filter((c: any) => c.id !== l.asignado_a), ultima);
       if (!asignado) { omitidos.push({ id: l.id, motivo: "sin_candidatos" }); continue; }
       if (asignado.id === l.asignado_a) { omitidos.push({ id: l.id, motivo: "sin_cambio" }); continue; }

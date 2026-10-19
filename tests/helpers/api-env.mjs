@@ -15,6 +15,8 @@ let contadorTasaciones = 0;
 let contadorInspecciones = 0;
 let contadorValidaciones = 0;
 let contadorAnuncios = 0;
+let contadorCompras = 0;
+let contadorConsig = 0;
 let contadorCampanias = 0;
 let contadorPublicaciones = 0;
 const DEFAULTS = {
@@ -35,6 +37,8 @@ const DEFAULTS = {
   campanias: () => ({ id: randomUUID(), numero: ++contadorCampanias, estado: "borrador", presupuesto: 0, presupuesto_aprobado: 0, gasto: 0, alcance: 0, impresiones: 0, clics: 0, motivo_rechazo: null, aprobado_por: null, aprobado_en: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
   publicaciones_rrss: () => ({ id: randomUUID(), numero: ++contadorPublicaciones, estado: "idea", tipo: "post", fecha_programada: null, texto: null, url: null, campania_id: null, vehiculo_id: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
   material_vehiculo: () => ({ id: randomUUID(), estado: "pendiente", url: null, notas: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
+  compras: () => ({ id: randomUUID(), numero: ++contadorCompras, estado: "oferta", vehiculo: {}, motivo: null, monto_final: null, mes: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
+  consignaciones: () => ({ id: randomUUID(), numero: ++contadorConsig, estado: "en_validacion", vehiculo: {}, plazo_dias: 90, vence_en: null, motivo: null, cierre_id: null, precio_venta: null, margen: null, mes: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
   avisos: () => ({ id: randomUUID(), leido_en: null, creado_en: new Date().toISOString() }),
   cierres: () => ({ id: randomUUID(), numero: ++contadorCierres, estado: "pendiente", mes: null, aprobado_por: null, aprobado_en: null, motivo_rechazo: null, anulado_por: null, anulado_en: null, motivo_anulacion: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
   reservas: () => ({ id: randomUUID(), estado: "activa", motivo: null, cerrado_en: null, creado_en: new Date().toISOString() }),
@@ -59,7 +63,7 @@ function patronARegex(patron, insensible) {
 }
 
 export function crearBaseFalsa() {
-  const tablas = { usuarios: [], locales: [], roles_permisos: [], bitacora: [], config_negocio: [], kv_store: [], vehiculos: [], clientes: [], leads: [], lead_eventos: [], tareas: [], cotizaciones: [], reservas: [], cierres: [], avisos: [], tasaciones: [], inspecciones: [], validaciones: [], validacion_docs: [], anuncios: [], anuncio_portales: [], campanias: [], publicaciones_rrss: [], material_vehiculo: [] };
+  const tablas = { usuarios: [], locales: [], roles_permisos: [], bitacora: [], config_negocio: [], kv_store: [], vehiculos: [], clientes: [], leads: [], lead_eventos: [], tareas: [], cotizaciones: [], reservas: [], cierres: [], avisos: [], tasaciones: [], inspecciones: [], validaciones: [], validacion_docs: [], anuncios: [], anuncio_portales: [], campanias: [], publicaciones_rrss: [], material_vehiculo: [], compras: [], consignaciones: [] };
   const consultas = [];
 
   function builder(nombre) {
@@ -71,6 +75,7 @@ export function crearBaseFalsa() {
       upsert(p, o) { st.op = "upsert"; st.payload = p; st.upsertOn = o && o.onConflict; return b; },
       delete() { st.op = "delete"; return b; },
       eq(c, v) { st.filtros.push([c, v]); return b; },
+      neq(c, v) { st.filtros.push([c, (x) => x !== v]); return b; },
       in(c, arr) { st.filtros.push([c, (x) => arr.includes(x)]); return b; },
       limit(n) { st.limite = n; return b; },
       gte(c, v) { st.filtros.push([c, (x) => x !== null && x !== undefined && x >= v]); return b; },

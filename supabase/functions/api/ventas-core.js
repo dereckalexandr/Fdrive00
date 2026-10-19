@@ -510,5 +510,7 @@ export function validarAviso(input) {
 /** Quién puede modificar un lead: quien reasigna (supervisor) o su dueño con permiso de leads propios. Y debe estar habilitado para ventas, salvo el supervisor. */
 export function puedeEditarLead({ permisos, esAdmin, usuarioId, lead }) {
   if (esAdmin || permisos.includes("leads.asignar")) return true;
-  return permisos.includes("leads.propios") && permisos.includes("ventas.operar") && lead.asignado_a === usuarioId;
+  // Cada tipo de lead exige su habilitación: venta, compra o consignación.
+  const habilitacion = lead.tipo === "compra" ? "compras.operar" : lead.tipo === "consignacion" ? "consignaciones.operar" : "ventas.operar";
+  return permisos.includes("leads.propios") && permisos.includes(habilitacion) && lead.asignado_a === usuarioId;
 }

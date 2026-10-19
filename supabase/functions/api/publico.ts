@@ -5,6 +5,7 @@
 // leads normales del CRM con la fuente «Sitio web», que se reparten solos entre los ejecutivos habilitados.
 import { permisosEfectivos, configCompleta } from "./crm-core.js";
 import { elegirAsignado } from "./ventas-core.js";
+import { permisoDeTipo } from "./compras-core.js";
 import { validarVehiculoTasacion } from "./tasaciones-core.js";
 import { sugerirAviso } from "./anuncios-core.js";
 import {
@@ -141,12 +142,13 @@ export async function publicOp(ctx: CtxPublico, body: any): Promise<Response> {
     const overrides = await ctx.rolePermOverrides();
     const uq = await sb.from("usuarios").select("id, nombre, roles, permisos_extra, activo, local_id").eq("local_id", local);
     if (uq.error) throw uq.error;
-    const elegibles = (uq.data ?? []).filter((u: any) => u.activo && (() => { const p = permisosEfectivos(u.roles ?? [], overrides, u.permisos_extra); return p.includes("leads.propios") && p.includes("ventas.operar"); })()).map((u: any) => ({ id: u.id, nombre: u.nombre }));
+    const elegibles = (uq.data ?? []).filter((u: any) => u.activo && (() => { const p = permisosEfectivos(u.roles ?? [], overrides, u.permisos_extra); return p.includes("leads.propios") && p.includes(permisoDeTipo(tipoLeadDe(s))); })()).map((u: any) => ({ id: u.id, nombre: u.nombre }));
     const ultimas: Record<string, string> = {};
     const lastQ = await sb.from("leads").select("asignado_a, creado_en").eq("local_id", local);
     for (const l of lastQ.data ?? []) if (l.asignado_a && (!ultimas[l.asignado_a] || l.creado_en > ultimas[l.asignado_a])) ultimas[l.asignado_a] = l.creado_en;
     const asignado = elegirAsignado(elegibles, ultimas);
 
+    const vtWeb = s.tipo === "vender" ? validarVehiculoTasacion({ patente: s.vende.patente, marca: s.vende.marca, modelo: s.vende.modelo, anio: s.vende.anio, km: s.vende.km }) : null;
     const vehTexto = vehiculo ? `${vehiculo.marca} ${vehiculo.modelo} ${vehiculo.anio}` : "";
     const resumen = resumenSolicitud(s, vehTexto);
     let financiamiento: Record<string, unknown> = {};
@@ -159,7 +161,7 @@ export async function publicOp(ctx: CtxPublico, body: any): Promise<Response> {
       local_id: local, tipo: tipoLeadDe(s), etapa: "nuevo", cliente_id: cliente.id, fuente: FUENTE_WEB,
       vehiculo_id: vehiculo ? vehiculo.id : null,
       vehiculo_interes: s.tipo === "vender" ? `${s.vende.modalidad === "consignar" ? "CONSIGNA" : "VENDE"}: ${s.vende.marca} ${s.vende.modelo} ${s.vende.anio} · ${s.vende.patente}` : null,
-      parte_pago: {}, financiamiento, asignado_a: asignado ? asignado.id : null,
+      parte_pago: {}, financiamiento, asignado_a: asignado ? asignado.id : null, ...(vtWeb && vtWeb.ok ? { vehiculo_ofrecido: vtWeb.value } : {}),
       notas: [resumen, cuota ? `Cuota referencial: $${cuota.cuota.toLocaleString("es-CL")} por mes (financiando $${cuota.montoFinanciar.toLocaleString("es-CL")} a ${s.plazo} cuotas, tasa ${cfg.tasa_mensual_web}% mensual). Sujeta a evaluación.` : ""].filter(Boolean).join("\n").slice(0, 1000),
     }).select().single();
     if (ins.error) return fallo(ins.error);
@@ -174,7 +176,7 @@ export async function publicOp(ctx: CtxPublico, body: any): Promise<Response> {
     // Vender o consignar: además queda una tasación esperando al Tasador.
     let folioTasacion: number | null = null;
     if (s.tipo === "vender") {
-      const vt = validarVehiculoTasacion({ patente: s.vende.patente, marca: s.vende.marca, modelo: s.vende.modelo, anio: s.vende.anio, km: s.vende.km });
+      const vt = vtWeb!;
       if (vt.ok) {
         const t = await sb.from("tasaciones").insert({
           local_id: local, tipo: "directa", contacto: { nombre: s.contacto.nombre, telefono: s.contacto.telefono }, vehiculo: vt.value, patente: vt.value.patente,

@@ -13,6 +13,7 @@ export const tasacionNombre = (id) => (ESTADOS_TASACION.find((e) => e.id === id)
 export const TIPOS_TASACION = [
   { id: "parte_pago", nombre: "Parte de pago" },
   { id: "directa", nombre: "Directa" },
+  { id: "compra", nombre: "Para una compra" },
 ];
 export const folioTasacion = (n) => `TAS-${String(n || 0).padStart(6, "0")}`;
 
