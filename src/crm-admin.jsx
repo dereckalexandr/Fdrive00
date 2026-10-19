@@ -536,6 +536,32 @@ function NumeroEditor({ clave, etiqueta, valor, sufijo, paso, onGuardado, onErro
   );
 }
 
+/** Datos que muestra el sitio web público (nombre, WhatsApp, dirección) y la tasa para la cuota referencial. */
+function SitioWebConfig({ c, ok, mal }) {
+  const Fila = ({ clave, etiqueta, ayuda, valor, ancho = "w-64", placeholder }) => {
+    const [v, setV] = useState(String(valor ?? ""));
+    const [guardando, setGuardando] = useState(false);
+    useEffect(() => setV(String(valor ?? "")), [valor]);
+    const guardar = async () => { setGuardando(true); try { await crm("config.set", { clave, valor: v }); ok(); } catch (e) { mal(mensajeCrm(e)); } setGuardando(false); };
+    return (
+      <div className="flex flex-wrap items-center gap-3 py-2 border-b border-stone-100">
+        <div className="flex-1 min-w-[180px]"><span className="text-sm text-stone-800">{etiqueta}</span>{ayuda && <p className="text-xs text-stone-500">{ayuda}</p>}</div>
+        <input value={v} placeholder={placeholder} onChange={(e) => setV(e.target.value)} className={`${INPUT} ${ancho}`} />
+        <button onClick={guardar} disabled={guardando || v === String(valor ?? "")} className={BTN}>Guardar</button>
+      </div>
+    );
+  };
+  return (
+    <Tarjeta titulo="Sitio web público" ayuda="Lo que ven los visitantes en el catálogo de la dirección principal del sitio. Los vehículos disponibles y reservados se publican solos.">
+      <Fila clave="sitio_nombre" etiqueta="Nombre del negocio" valor={c.sitio_nombre} />
+      <Fila clave="sitio_whatsapp" etiqueta="WhatsApp" ayuda="Con código de país y sin símbolos, por ejemplo 56912345678. Vacío = sin botón de WhatsApp." valor={c.sitio_whatsapp} ancho="w-48" placeholder="56912345678" />
+      <Fila clave="sitio_direccion" etiqueta="Dirección" valor={c.sitio_direccion} placeholder="Calle 123, Comuna" />
+      <NumeroEditor clave="tasa_mensual_web" etiqueta="Tasa mensual para la cuota referencial del financiamiento" valor={c.tasa_mensual_web} sufijo="% mes" paso="0.1" onGuardado={ok} onError={mal} />
+      <p className="text-xs text-stone-500 mt-2">La cuota que ve el visitante es solo referencial y siempre dice que está sujeta a evaluación crediticia.</p>
+    </Tarjeta>
+  );
+}
+
 function TextoEditor({ clave, titulo, ayuda, valor, onGuardado, onError }) {
   const [v, setV] = useState(valor);
   const [guardando, setGuardando] = useState(false);
@@ -614,6 +640,7 @@ function ConfigTab() {
         <NumeroEditor clave="vigencia_cotizacion_dias" etiqueta="Vigencia de una cotización" valor={c.vigencia_cotizacion_dias} sufijo="días" paso="1" onGuardado={ok} onError={mal} />
         <NumeroEditor clave="dias_reserva" etiqueta="Duración de una reserva" valor={c.dias_reserva} sufijo="días" paso="1" onGuardado={ok} onError={mal} />
       </Tarjeta>
+      <SitioWebConfig c={c} ok={ok} mal={mal} />
       <TextoEditor clave="condiciones_cotizacion" titulo="Condiciones en el PDF de la cotización" ayuda="Este texto aparece al final de cada cotización que se entrega al cliente. Redáctalo con tus condiciones comerciales." valor={c.condiciones_cotizacion} onGuardado={ok} onError={mal} />
       <Tarjeta titulo="Alertas del panel de gestión" ayuda="Cuándo el panel del Jefe Local marca un lead como desatendido o detenido.">
         <NumeroEditor clave="horas_sin_contacto" etiqueta="Lead nuevo sin ningún contacto desde hace" valor={c.horas_sin_contacto} sufijo="horas" paso="1" onGuardado={ok} onError={mal} />

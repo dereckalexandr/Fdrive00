@@ -520,6 +520,43 @@ Se midió desde dentro cuánto tarda cada pantalla (la función real contra una 
 
 Para repetir la medición: `node scripts/medir-rendimiento.mjs` (muestra cuántas consultas y cuánto tarda cada pantalla con 35 ms de latencia simulada a la base).
 
+## CRM · Entrega 9: sitio web público
+
+**Instalar:** no hay SQL nuevo (usa las tablas que ya existen). Solo redesplegar la función (`node scripts/deploy-api.mjs`) y subir el código (`git push origin main`).
+
+**Direcciones nuevas** (todo en el mismo proyecto de Vercel):
+- `/` — **catálogo público** de vehículos.
+- `/vehiculo/<id>` — detalle de un vehículo (se puede compartir el enlace).
+- `/vender` — formulario para vender o consignar el auto del visitante.
+- **`/plataforma` — el CRM del personal** (lo que antes estaba en la raíz). El enlace «Acceso del personal» del pie del sitio lleva ahí. *Los enlaces antiguos de ejecutivos e inspectores (`?vendor=` y `?inspector=`) siguen funcionando donde estén*, porque se reconocen por su código. **Lo que cambia: el favorito o la dirección que usas para entrar como administrador o con RUT ahora es `tudominio/plataforma`.**
+
+**Qué vehículos se ven:** los **disponibles** y los **reservados** (estos con la etiqueta «Reservado»), activos y con precio de lista. Se ven solos: no necesitan pasar por el Anunciante. Con filtros por marca, transmisión, precio máximo y búsqueda, y orden por precio, año o kilometraje. El texto del detalle es el del aviso del Anunciante si existe; si no, uno armado con los datos del vehículo. **Nunca se muestran la patente, el costo ni las notas internas.** Las fotos son las del inventario y se piden de a una, cuando se ven en pantalla.
+
+**Cuatro solicitudes** (sin iniciar sesión). Cada una crea un lead normal del CRM con la fuente **«Sitio web»** y lo reparte de forma rotativa entre los ejecutivos habilitados para ventas del local del vehículo (si no hay ninguno, queda sin asignar y aparece en las alertas del Jefe Local); el historial del lead dice que vino del sitio:
+1. **Consultar por un vehículo** — nombre, teléfono, correo (opcional) y mensaje.
+2. **Agendar una visita o test drive** — además, deja una tarea de *visita* en la agenda del ejecutivo asignado, con la fecha y hora que pidió el visitante (a confirmar).
+3. **Cotizar financiamiento** — pie y plazo (12 a 72 cuotas). El lead guarda el pie como «quiere financiamiento» y el visitante ve una **cuota referencial**, siempre con el aviso de que está sujeta a evaluación. La tasa mensual se define en *Configuración → Sitio web público* (por defecto 1,5 %).
+4. **Vender o consignar mi auto** — patente, marca, modelo, año y kilometraje. Crea un lead de **compra** o **consignación** (según lo que elija) y **una tasación directa en la cola del Tasador**, con el nombre y teléfono de quien ofrece el vehículo.
+
+**Protección contra spam y abusos** (lo hace cumplir el servidor):
+- **Límites por hora:** 8 solicitudes por dirección IP, 3 por teléfono y 60 por local en total (freno de emergencia). Al pasarse, se pide intentar más tarde o escribir por WhatsApp.
+- **Campo trampa invisible y tiempo mínimo:** los robots llenan un campo que las personas no ven o envían en menos de 3 segundos; en ambos casos el servidor responde «ok» sin crear nada, para no darles pistas. Un formulario abierto más de 6 horas pide recargar.
+- **Consentimiento:** casilla obligatoria para aceptar el uso de los datos, con un resumen de cómo se usan.
+- Un mismo teléfono reutiliza al mismo cliente (no se duplican).
+- Todo queda en la bitácora como «web.solicitud».
+
+**Configuración** (*Configuración → Sitio web público*): nombre del negocio, WhatsApp (con código de país; vacío = sin botón), dirección y la tasa de la cuota referencial.
+
+**Peso y rapidez:** quien visita el sitio descarga solo el catálogo (~60 KB comprimidos); el CRM y sus librerías pesadas se cargan solo en `/plataforma`.
+
+**Límites conocidos:**
+- *Buscadores:* el sitio se dibuja en el navegador, por lo que Google puede tardar o ver menos contenido que en un sitio prerenderizado. Se puede mejorar más adelante.
+- *Anti-spam:* los límites por IP se llevan por instancia de la función (son un freno, no una garantía absoluta); el límite por teléfono y por local sí se cuenta en la base de datos. Si hubiera abuso real, el siguiente paso es agregar una verificación tipo «No soy un robot» (Cloudflare Turnstile).
+- *Fotos:* son las del inventario, reducidas en el dispositivo; para un catálogo más vistoso conviene subir 4 a 6 por vehículo.
+- *Cuenta de la solicitud:* los datos de contacto del visitante quedan como cliente del local; hay que atender los pedidos de borrado de datos que lleguen.
+
+Código: reglas en `supabase/functions/api/publico-core.js`; servidor en `supabase/functions/api/publico.ts` (acción `public`, sin sesión); pantallas en `src/sitio-publico.jsx`; el enrutamiento entre el sitio y el CRM está en `src/main.jsx`. Pruebas: `tests/publico-core.test.mjs` y `tests/publico-api.test.mjs` (la función real contra una base falsa, incluidos los frenos contra spam).
+
 ## Desplegar en un hosting público
 
 Las opciones más simples (tienen plan gratuito y se conectan directo a

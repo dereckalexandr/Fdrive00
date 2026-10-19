@@ -1,6 +1,5 @@
-import React from "react";
+import React, { lazy, Suspense } from "react";
 import ReactDOM from "react-dom/client";
-import App from "./App.jsx";
 import { ErrorBoundary } from "./error-boundary.jsx";
 import { installStorageShim } from "./storage-shim.js";
 import { installSupabaseStorage, hasSupabaseConfig } from "./supabase-storage.js";
@@ -21,10 +20,24 @@ if (hasSupabaseConfig()) {
   );
 }
 
+// Dos aplicaciones en un mismo sitio, cada una se descarga solo cuando hace falta:
+//   - «/plataforma» (y los enlaces antiguos con ?vendor= o ?inspector=): el CRM del personal.
+//   - cualquier otra dirección: el sitio web público con el catálogo de vehículos.
+const App = lazy(() => import("./App.jsx"));
+const SitioPublico = lazy(() => import("./sitio-publico.jsx"));
+
+function esPlataforma() {
+  const ruta = window.location.pathname.replace(/\/+$/, "");
+  const q = new URLSearchParams(window.location.search);
+  return ruta === "/plataforma" || ruta.startsWith("/plataforma/") || q.has("vendor") || q.has("inspector");
+}
+
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <ErrorBoundary>
-      <App />
+      <Suspense fallback={<p style={{ padding: 24, fontFamily: "system-ui", color: "#57534e" }}>Cargando…</p>}>
+        {esPlataforma() ? <App /> : <SitioPublico />}
+      </Suspense>
     </ErrorBoundary>
   </React.StrictMode>
 );

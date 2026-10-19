@@ -234,6 +234,10 @@ export const CONFIG_DEFECTO = {
   horas_inspeccion: 8,
   horas_validacion: 8,
   dias_detenido: 7,
+  sitio_nombre: "Drive Futuro",
+  sitio_whatsapp: "",
+  sitio_direccion: "",
+  tasa_mensual_web: 1.5,
   vigencia_cotizacion_dias: 7,
   condiciones_cotizacion: "Cotización sujeta a disponibilidad del vehículo y a la aprobación del financiamiento, si corresponde. El precio puede variar si cambian las condiciones. Válida hasta la fecha indicada.",
 };
@@ -263,6 +267,25 @@ export function validarConfig(clave, valor) {
   if (clave === "condiciones_cotizacion") {
     if (typeof valor !== "string" || valor.length > 800) return { ok: false };
     return { ok: true, value: valor.trim() };
+  }
+  if (clave === "sitio_nombre" || clave === "sitio_direccion") {
+    if (typeof valor !== "string") return { ok: false };
+    const t = valor.trim().replace(/\s+/g, " ");
+    if (t.length > 120 || (clave === "sitio_nombre" && t.length < 2)) return { ok: false };
+    return { ok: true, value: t };
+  }
+  if (clave === "sitio_whatsapp") {
+    // Solo dígitos con código de país (ej. 56912345678); vacío = sin botón de WhatsApp.
+    if (typeof valor !== "string") return { ok: false };
+    const d = valor.replace(/[\s+()-]/g, "");
+    if (d !== "" && !/^\d{8,15}$/.test(d)) return { ok: false };
+    return { ok: true, value: d };
+  }
+  if (clave === "tasa_mensual_web") {
+    if (valor === null || valor === "" || typeof valor === "boolean") return { ok: false };
+    const n = Number(valor);
+    if (!Number.isFinite(n) || n < 0 || n > 10) return { ok: false };
+    return { ok: true, value: Math.round(n * 100) / 100 };
   }
   if (clave === "meta_mensual_unidades") {
     const n = Number(valor);

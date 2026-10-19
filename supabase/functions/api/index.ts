@@ -22,6 +22,7 @@ import {
   normalizarRut, validarRut, claveValida, claveProvisoria, validarUsuario, validarConfig, configCompleta, ROLES_ASIGNABLES,
 } from "./crm-core.js";
 import { ventasOp } from "./ventas.ts";
+import { publicOp } from "./publico.ts";
 
 const sb = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -491,6 +492,11 @@ Deno.serve(async (req) => {
   const action = body?.action;
 
   try {
+    // Sitio web público: catálogo y solicitudes de los visitantes (no requiere sesión; se valida y limita adentro).
+    if (action === "public") {
+      return await publicOp({ sb, json, audit, isMissingTable, rolePermOverrides, ip }, body);
+    }
+
     /* ----- autenticación ----- */
     if (action === "adminStatus") {
       return json({ hasExtra: !!(await adminAuthRecord()) });
