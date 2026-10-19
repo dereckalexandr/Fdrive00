@@ -260,3 +260,9 @@ export function CamposVehiculo({ v, set, bloqueado = false }) {
 
 export const aVehiculoForm = (v) => ({ ...VEH_VACIO, ...(v || {}), anio: v && v.anio != null ? v.anio : "", km: v && v.km != null ? v.km : "" });
 
+
+/**
+ * Función por defecto para hablar con el servidor. Debe ser SIEMPRE la misma función (no una nueva en cada dibujo):
+ * si cambiara cada vez, las pantallas que la usan como dependencia volverían a pedir sus datos sin parar y el sitio se congelaría.
+ */
+export const apiPorDefecto = (op, params) => window.auth.ventas(op, params);

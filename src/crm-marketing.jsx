@@ -15,7 +15,7 @@ import {
   CANALES, TIPOS_PUBLICACION, ESTADOS_PUBLICACION, TIPOS_MATERIAL, ESTADOS_MATERIAL, canalNombre, tipoPublicacionNombre, publicacionNombre,
   campaniaNombre, materialTipoNombre, materialEstadoNombre, validarCampania, validarPublicacion,
 } from "../supabase/functions/api/marketing-core.js";
-import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, useCarga, mensajeError } from "./crm-ui.jsx";
+import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, useCarga, mensajeError, apiPorDefecto } from "./crm-ui.jsx";
 
 const COLOR_PUB = { idea: "bg-stone-100 text-stone-700", produccion: "bg-sky-100 text-sky-800", programada: "bg-amber-100 text-amber-800", publicada: "bg-emerald-100 text-emerald-800", cancelada: "bg-stone-200 text-stone-500" };
 const COLOR_CAMP = { borrador: "bg-stone-100 text-stone-700", pendiente: "bg-amber-100 text-amber-800", aprobada: "bg-emerald-100 text-emerald-800", rechazada: "bg-rose-100 text-rose-800", finalizada: "bg-sky-100 text-sky-800", cancelada: "bg-stone-200 text-stone-500" };
@@ -347,7 +347,7 @@ function Resultados({ api, version }) {
 export function ModuloMarketing({ api: apiProp, permisos = [], esAdmin = false }) {
   const puedeGestionar = !esAdmin && permisos.includes("marketing.gestionar");
   const puedeAprobar = esAdmin || permisos.includes("leads.asignar");
-  const api = apiProp || ((op, params) => window.auth.ventas(op, params));
+  const api = apiProp || apiPorDefecto;
   const [tab, setTab] = useState(puedeGestionar ? "calendario" : "campanias");
   const [version, setVersion] = useState(0);
   const subir = () => setVersion((v) => v + 1);

@@ -512,6 +512,8 @@ Se midió desde dentro cuánto tarda cada pantalla (la función real contra una 
 - **Sitio pesado:** el paquete principal pasó de 1,4 MB a 0,66 MB. Las gráficas (recharts) y el lector de PDF del CAV (pdf.js) se cargan recién cuando se usan.
 - **Esperas infinitas y respuestas cruzadas:** las llamadas al servidor se cortan a los 45 s con un aviso claro (las de lectura se reintentan solas), y una respuesta lenta de una pantalla anterior ya no pisa a la actual.
 
+- **Ciclo infinito de peticiones (Avisos, Marketing y otros módulos de la estación):** cuando un módulo se abría desde la estación de trabajo, la función que habla con el servidor se creaba de nuevo en cada dibujo y las pantallas volvían a pedir sus datos sin parar (medido: más de 180.000 peticiones en pocos segundos), lo que congelaba el navegador y saturaba la función. Ahora todos usan una única función estable (`apiPorDefecto`, en `src/crm-ui.jsx`) y una prueba automática (`tests/estabilidad-ui.test.mjs`) impide que el error vuelva a colarse.
+
 **Qué más puede hacer lenta la plataforma (no depende del código):**
 - *Arranque en frío:* la primera acción después de un rato sin uso tarda más (la función se reinicia).
 - *Distancia entre la función y la base:* si la región donde corre la función es distinta a la de la base de datos, cada consulta cruza continentes. Se ve en el panel de Supabase (Project Settings → General → Region) y en *Edge Functions → api → Metrics*.

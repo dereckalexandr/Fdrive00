@@ -11,7 +11,7 @@
  */
 import React, { useState, useEffect } from "react";
 import { PORTALES, portalNombre, portalEstadoNombre, anuncioNombre, urlValida } from "../supabase/functions/api/anuncios-core.js";
-import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, useCarga, mensajeError } from "./crm-ui.jsx";
+import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, useCarga, mensajeError, apiPorDefecto } from "./crm-ui.jsx";
 
 const COLOR = { por_publicar: "bg-amber-100 text-amber-800", publicado: "bg-emerald-100 text-emerald-800", pausado: "bg-sky-100 text-sky-800", baja: "bg-stone-200 text-stone-600", pendiente: "bg-amber-100 text-amber-800" };
 const Estado = ({ id, portal = false }) => <span className={`text-[11px] px-2 py-0.5 ${COLOR[id] || ""}`}>{portal ? portalEstadoNombre(id) : anuncioNombre(id)}</span>;
@@ -284,7 +284,7 @@ function Resumen({ api, version, onAbrir }) {
 ========================================================= */
 export function ModuloAnuncios({ api: apiProp, permisos = [], esAdmin = false }) {
   const puedeGestionar = !esAdmin && permisos.includes("anuncios.gestionar");
-  const api = apiProp || ((op, params) => window.auth.ventas(op, params));
+  const api = apiProp || apiPorDefecto;
   const [tab, setTab] = useState(puedeGestionar ? "cola" : "avisos");
   const [version, setVersion] = useState(0);
   const [abierto, setAbierto] = useState(null);

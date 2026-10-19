@@ -13,7 +13,7 @@ import React, { useState } from "react";
 import { mesChile } from "../supabase/functions/api/ventas-core.js";
 import { validacionNombre, docNombre, tipoValidacionNombre, claveArchivo, MAX_ARCHIVOS_DOC, MAX_BYTES_ARCHIVO } from "../supabase/functions/api/validaciones-core.js";
 import { compressImage, makePhotoId } from "./photos.js";
-import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, useCarga, mensajeError } from "./crm-ui.jsx";
+import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, useCarga, mensajeError, apiPorDefecto } from "./crm-ui.jsx";
 
 const COLOR = { pendiente: "bg-amber-100 text-amber-800", en_revision: "bg-sky-100 text-sky-800", observada: "bg-orange-100 text-orange-800", rechazada: "bg-rose-100 text-rose-800", aprobada: "bg-emerald-100 text-emerald-800", cancelada: "bg-stone-200 text-stone-600" };
 const COLOR_DOC = { pendiente: "bg-stone-100 text-stone-600", aprobado: "bg-emerald-100 text-emerald-800", observado: "bg-orange-100 text-orange-800", rechazado: "bg-rose-100 text-rose-800", no_aplica: "bg-stone-200 text-stone-600" };
@@ -305,7 +305,7 @@ export function ModuloValidaciones({ api: apiProp, permisos = [], esAdmin = fals
   const can = (p) => esAdmin || permisos.includes(p);
   const realiza = !esAdmin && permisos.includes("validacion.realizar");
   const supervisa = can("leads.asignar");
-  const api = apiProp || ((op, params) => window.auth.ventas(op, params));
+  const api = apiProp || apiPorDefecto;
   const [tab, setTab] = useState(realiza ? "cola" : "todas");
   const [version, setVersion] = useState(0);
   const [abierta, setAbierta] = useState(null);

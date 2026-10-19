@@ -12,7 +12,7 @@
 import React, { useState, useEffect } from "react";
 import { mesChile } from "../supabase/functions/api/ventas-core.js";
 import { validarSolicitudInspeccion, inspeccionNombre, origenNombre, VEREDICTOS, diaChile } from "../supabase/functions/api/inspecciones-core.js";
-import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, useCarga, mensajeError, CamposVehiculo, aVehiculoForm } from "./crm-ui.jsx";
+import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, useCarga, mensajeError, CamposVehiculo, aVehiculoForm, apiPorDefecto } from "./crm-ui.jsx";
 
 const COLOR = { pendiente: "bg-amber-100 text-amber-800", en_proceso: "bg-sky-100 text-sky-800", completada: "bg-emerald-100 text-emerald-800", cancelada: "bg-stone-200 text-stone-600" };
 const COLOR_VEREDICTO = { sin_observaciones: "bg-emerald-100 text-emerald-800", con_observaciones: "bg-amber-100 text-amber-800", con_fallas: "bg-rose-100 text-rose-800" };
@@ -344,7 +344,7 @@ export function ModuloInspecciones({ api: apiProp, permisos = [], esAdmin = fals
   const can = (p) => esAdmin || permisos.includes(p);
   const realiza = !esAdmin && permisos.includes("inspecciones.realizar");
   const supervisa = can("leads.asignar");
-  const api = apiProp || ((op, params) => window.auth.ventas(op, params));
+  const api = apiProp || apiPorDefecto;
   const [tab, setTab] = useState(realiza ? "agenda" : supervisa ? "cola" : "solicitadas");
   const [version, setVersion] = useState(0);
   const [abierta, setAbierta] = useState(null);

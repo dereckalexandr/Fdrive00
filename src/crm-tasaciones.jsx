@@ -13,7 +13,7 @@ import React, { useState, useEffect } from "react";
 import { mesChile } from "../supabase/functions/api/ventas-core.js";
 import { tasacionNombre, validarVehiculoTasacion, validarTasacionDirecta, MAX_FOTOS_TASACION } from "../supabase/functions/api/tasaciones-core.js";
 import { compressImage, makePhotoId } from "./photos.js";
-import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, useCarga, mensajeError, CamposVehiculo, aVehiculoForm, VEH_VACIO } from "./crm-ui.jsx";
+import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, useCarga, mensajeError, CamposVehiculo, aVehiculoForm, VEH_VACIO, apiPorDefecto } from "./crm-ui.jsx";
 import { SeccionInspeccion } from "./crm-inspecciones.jsx";
 import { SeccionValidacion } from "./crm-validaciones.jsx";
 
@@ -469,7 +469,7 @@ export function ModuloTasaciones({ api: apiProp, permisos = [], esAdmin = false,
   const can = (p) => esAdmin || permisos.includes(p);
   const realiza = can("tasaciones.realizar");
   const supervisa = can("leads.asignar");
-  const api = apiProp || ((op, params) => window.auth.ventas(op, params));
+  const api = apiProp || apiPorDefecto;
   const [tab, setTab] = useState(realiza ? "cola" : "todas");
   const [version, setVersion] = useState(0);
   const [abierta, setAbierta] = useState(null);
