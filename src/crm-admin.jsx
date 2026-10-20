@@ -782,7 +782,7 @@ function ReportesTab() {
   const kpi = (titulo, valor, pie) => (
     <div className="bg-white border border-stone-200 p-5">
       <p className="text-xs uppercase tracking-widest text-stone-400">{titulo}</p>
-      <p className="font-mono text-3xl text-stone-900 mt-1">{valor}</p>
+      <p className="font-bold tabular-nums text-3xl text-stone-900 mt-1">{valor}</p>
       {pie && <p className="text-xs text-stone-500 mt-1">{pie}</p>}
     </div>
   );

@@ -144,7 +144,7 @@ function Alertas({ api, abrirLead, version, onCambio }) {
         {TIPOS.map((t) => (
           <button key={t.id} onClick={() => cambiarTipo(t.id)} className={`text-left bg-white border-2 p-4 ${tipo === t.id ? t.color : "border-stone-200"} hover:border-stone-400`}>
             <p className="text-[11px] uppercase tracking-widest text-stone-400">{t.nombre}</p>
-            <p className={`font-mono text-3xl mt-1 ${c[t.id] > 0 ? "text-stone-900" : "text-stone-300"}`}>{c[t.id]}</p>
+            <p className={`font-bold tabular-nums text-3xl mt-1 ${c[t.id] > 0 ? "text-stone-900" : "text-stone-300"}`}>{c[t.id]}</p>
           </button>
         ))}
       </div>

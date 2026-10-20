@@ -234,7 +234,7 @@ function Resumen({ api, version, onAbrir }) {
     <>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[["Por publicar", e.por_publicar], ["Publicados", e.publicado], ["Pausados", e.pausado], ["Por corregir", datos.alertas.length]].map(([t, n]) => (
-          <div key={t} className="bg-white border border-stone-200 p-4"><p className="text-xs uppercase tracking-wide text-stone-400">{t}</p><p className="font-mono text-2xl text-stone-900">{n}</p></div>
+          <div key={t} className="bg-white border border-stone-200 p-4"><p className="text-xs uppercase tracking-wide text-stone-400">{t}</p><p className="font-bold tabular-nums text-2xl text-stone-900">{n}</p></div>
         ))}
       </div>
       <Tarjeta titulo="Avisos por corregir" ayuda="Precio distinto al del inventario, vehículo reservado o vendido, o aviso vencido o por vencer.">

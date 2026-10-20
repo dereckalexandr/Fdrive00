@@ -318,7 +318,7 @@ function Detalle({ id, ir, locales }) {
         <div className="lg:col-span-2 flex flex-col gap-4">
           <div>
             <h1 className="font-serif text-2xl md:text-3xl text-stone-900 leading-tight">{nombreVeh(v)} {v.anio}</h1>
-            <p className="font-mono text-3xl text-stone-900 mt-2">{clp(v.precio)}</p>
+            <p className="font-bold tabular-nums text-3xl text-stone-900 mt-2">{clp(v.precio)}</p>
             {v.reservado && <p className="text-sm text-stone-600 mt-1">Este vehículo está reservado. Puedes consultar por si la venta no se concreta.</p>}
           </div>
           <div className="flex flex-col gap-2">

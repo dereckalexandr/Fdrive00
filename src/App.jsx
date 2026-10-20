@@ -963,7 +963,7 @@ function TotalCard({ value }) {
         <p className="text-xs uppercase tracking-widest text-stone-400">Total valorizaciones</p>
         <p className="text-xs text-stone-400 mt-0.5">Suma de los subtotales de todos los módulos</p>
       </div>
-      <span className="font-mono text-2xl">{clp(value)}</span>
+      <span className="font-bold tabular-nums text-2xl">{clp(value)}</span>
     </div>
   );
 }
@@ -1620,7 +1620,7 @@ function ProductionSummary({ totals, title = "Resumen de producción" }) {
       </div>
       <div className="border-t border-stone-200 pt-4 flex items-baseline justify-between">
         <span className="font-serif text-lg text-stone-900">Total producción</span>
-        <span className="font-mono text-2xl text-stone-900">{clp(totals.total)}</span>
+        <span className="font-bold tabular-nums text-2xl text-stone-900">{clp(totals.total)}</span>
       </div>
     </div>
   );
@@ -1900,7 +1900,7 @@ function LiquidacionModule({
 
       <div className="border-t border-stone-200 pt-3 flex items-baseline justify-between">
         <span className="text-sm text-stone-600">Líquido a pago (Total Haberes − Total Descuento − Anticipos)</span>
-        <span className="font-mono text-2xl text-emerald-700">{clp(liquido)}</span>
+        <span className="font-bold tabular-nums text-2xl text-emerald-700">{clp(liquido)}</span>
       </div>
       {!readOnly && onGenerate && (
         <div className="flex justify-end pt-1">
@@ -2063,7 +2063,7 @@ function ReportModal({ vendor, ym, totals, record, afpList = [], ufValor = DEFAU
 
           <div className="border-t-2 border-stone-900 pt-4 flex items-baseline justify-between">
             <span className="font-serif text-xl text-stone-900">Líquido a pago</span>
-            <span className="font-mono text-3xl text-emerald-700">{clp(liquido)}</span>
+            <span className="font-bold tabular-nums text-3xl text-emerald-700">{clp(liquido)}</span>
           </div>
           <p className="text-xs text-stone-400 mt-2">
             El monto para los descuentos de salud y de AFP pueden variar, debido a la UF. Se recomienda generar la pre liquidación el mismo día del pago de remuneración.
@@ -2134,11 +2134,11 @@ function AnnualView({ vendor, year, onYearChange, afpList = [], ufValor = DEFAUL
         <div className="flex gap-8 text-center">
           <div>
             <p className="text-xs uppercase tracking-widest text-stone-400">Producción anual {year}</p>
-            <p className="font-mono text-3xl text-stone-900">{clp(annualTotal)}</p>
+            <p className="font-bold tabular-nums text-3xl text-stone-900">{clp(annualTotal)}</p>
           </div>
           <div>
             <p className="text-xs uppercase tracking-widest text-stone-400">Líquido a pago anual</p>
-            <p className="font-mono text-3xl text-emerald-700">{clp(annualLiquido)}</p>
+            <p className="font-bold tabular-nums text-3xl text-emerald-700">{clp(annualLiquido)}</p>
           </div>
         </div>
         <button onClick={() => onYearChange(year + 1)} className="border border-stone-300 px-3 py-1 text-sm text-stone-600 hover:bg-stone-50">{year + 1} →</button>
@@ -3300,7 +3300,7 @@ function TasacionCompra({ inicial, onResultado } = {}) {
   const Tarjeta = ({ titulo, sub, valor, destacado = false }) => (
     <div className={`p-4 border ${destacado ? "bg-stone-900 text-stone-100 border-stone-900" : "bg-white border-stone-200"}`}>
       <p className={`text-xs uppercase tracking-wide ${destacado ? "text-stone-400" : "text-stone-500"}`}>{titulo}</p>
-      <p className="font-mono text-2xl md:text-3xl mt-1">{clp(valor)}</p>
+      <p className="font-bold tabular-nums text-2xl md:text-3xl mt-1">{clp(valor)}</p>
       <p className={`text-xs mt-1 ${destacado ? "text-stone-400" : "text-stone-500"}`}>{sub}</p>
     </div>
   );
@@ -3909,7 +3909,7 @@ function AdminDashboard({ vendors, setVendors, inspectors, setInspectors, onExit
               </div>
               <div className="text-left md:text-right">
                 <p className="text-xs uppercase tracking-widest text-stone-400">Producción total del equipo</p>
-                <p className="font-mono text-3xl text-amber-600">{clp(totalEmpresa)}</p>
+                <p className="font-bold tabular-nums text-3xl text-amber-600">{clp(totalEmpresa)}</p>
               </div>
             </div>
 

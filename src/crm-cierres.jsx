@@ -338,7 +338,7 @@ export function Ventas({ api, catalogos, abrirLead, version, onCambio }) {
           <label className="text-sm text-stone-600 flex items-center gap-2">Mes <input type="month" value={mes} max={mesChile()} onChange={(e) => e.target.value && setMes(e.target.value)} className={`${INPUT} w-44`} /></label>
           <div className="ml-auto text-right">
             <p className="text-xs uppercase tracking-widest text-stone-400">{verEquipo ? "Producción del equipo" : "Mi comisión"} · {r.nombreMes}</p>
-            <p className="font-mono text-2xl text-amber-600">{clp(verEquipo ? r.totales.produccion : (r.ejecutivos[0] ? r.ejecutivos[0].produccion.total : 0))}</p>
+            <p className="font-bold tabular-nums text-2xl text-amber-600">{clp(verEquipo ? r.totales.produccion : (r.ejecutivos[0] ? r.ejecutivos[0].produccion.total : 0))}</p>
           </div>
         </div>
         {verEquipo && <p className="text-xs text-stone-500 mt-2">{r.totales.unidades} venta(s) aprobada(s) por {clp(r.totales.montoVendido)}. La «producción» es la comisión que corresponde a cada ejecutivo según sus tramos.</p>}
