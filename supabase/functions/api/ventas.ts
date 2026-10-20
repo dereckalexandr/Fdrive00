@@ -17,6 +17,7 @@ import {
   horasDesde, ETAPAS_ABIERTAS, esSinAtender, esDetenido, ultimaActividad, embudoCohorte, rendimientoPorFuente, motivosDePerdida, validarAviso, claseTarea,
 } from "./ventas-core.js";
 import { tramosEfectivos, calcularProduccion } from "./comisiones-core.js";
+import { enviarAviso, enSegundoPlano, correoActivo } from "./correo.ts";
 import {
   folioTasacion, validarSolicitudTasacion, validarTasacionDirecta, validarBorradorTasacion, validarCompletarTasacion, validarTransicionTasacion,
   topeParteDePago, verificarTopeParteDePago, fusionarParteDePago, metricasTasador, colaTasaciones,
@@ -137,6 +138,46 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     if (error) throw error;
     return data;
   }
+  /** Avisos por correo a personas del CRM (nunca a quien hizo la acción). Son un extra: si algo falla, la operación sigue igual. */
+  async function avisarA(ids: string[], asunto: string, lineas: string[], ruta?: string) {
+    try {
+      if (!correoActivo()) return;
+      const unicos = Array.from(new Set(ids.filter((i) => i && i !== userId)));
+      if (unicos.length === 0) return;
+      const us = await enLotes("usuarios", "id", unicos);
+      const para = us.filter((u: any) => u.activo && u.email).map((u: any) => u.email);
+      if (para.length === 0) return;
+      await enSegundoPlano(enviarAviso({ para, asunto, titulo: asunto, lineas, ruta }));
+    } catch (e) { console.error("avisarA:", String((e as any)?.message ?? e)); }
+  }
+  /** Avisa a quienes aprueban (Jefes Local) del local. */
+  async function avisarSupervisores(local: string, asunto: string, lineas: string[]) {
+    try {
+      if (!correoActivo() || !local) return;
+      const overrides = await ctx.rolePermOverrides();
+      const { data, error } = await sb.from("usuarios").select("id, roles, permisos_extra, activo, local_id").eq("local_id", local);
+      if (error) throw error;
+      const ids = (data ?? []).filter((u: any) => u.activo && permisosEfectivos(u.roles ?? [], overrides, u.permisos_extra).includes("leads.asignar")).map((u: any) => u.id);
+      await avisarA(ids, asunto, lineas);
+    } catch (e) { console.error("avisarSupervisores:", String((e as any)?.message ?? e)); }
+  }
+  /** Datos básicos de un lead para los textos de los avisos. */
+  async function resumenDeLead(leadId: string | null | undefined) {
+    try {
+      if (!leadId) return null;
+      const { data: l } = await sb.from("leads").select("id, asignado_a, local_id, cliente_id, tipo").eq("id", leadId).maybeSingle();
+      if (!l) return null;
+      const { data: c } = l.cliente_id ? await sb.from("clientes").select("nombre").eq("id", l.cliente_id).maybeSingle() : { data: null };
+      return { ...l, cliente: (c && c.nombre) || "cliente" };
+    } catch { return null; }
+  }
+  /** Avisa a quien trabaja el lead (su ejecutivo). */
+  async function avisarEjecutivoDe(leadId: string | null | undefined, asunto: string, detalle: string) {
+    if (!correoActivo()) return;
+    const l = await resumenDeLead(leadId);
+    if (l && l.asignado_a) await avisarA([l.asignado_a], asunto, [`Lead de ${l.cliente}.`, detalle]);
+  }
+
   /** Lo máximo que se le puede reconocer al cliente por su vehículo en parte de pago: lo tasado (o null si no hay tasación). */
   async function topeDeLead(lead: any): Promise<number | null> {
     const id = lead && lead.parte_pago && lead.parte_pago.tasacion_id;
@@ -605,6 +646,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
           await evento(t.lead_id, "tasacion", `Tasación ${folioTasacion(t.numero)} completada por ${userName}: se reconoce ${dinero(data.valor_compra)} por el vehículo (venta esperada ${dinero(data.valor_venta)}). Las cotizaciones deben usar este valor o uno menor.`);
         }
         await audit(ctx.actor, "tasacion.completar", "tasacion", t.id, { numero: t.numero, valor_compra: data.valor_compra, valor_venta: data.valor_venta, lead_id: t.lead_id });
+        { const vh = data.vehiculo || {}; await avisarA([t.solicitante_id].filter(Boolean), "Tasación completada", [`${userName} completó la tasación ${folioTasacion(t.numero)}${vh.marca ? ` de ${vh.marca} ${vh.modelo || ""}` : ""}.`, `Se paga hasta ${dinero(data.valor_compra)}; venta esperada ${dinero(data.valor_venta)}.`]); }
         if (t.tipo === "directa") {
           const ya = await sb.from("validaciones").select("id").eq("tasacion_id", t.id);
           if (!ya.error && (ya.data ?? []).length === 0) await crearValidacion({ tipo: "compra", local_id: t.local_id, tasacion_id: t.id, sujeto: sujetoDeVehiculo(data.vehiculo || {}, { vendedor: (t.contacto && t.contacto.nombre) || "" }) });
@@ -1293,6 +1335,10 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       }
       else if (r.value.estado === "observado" || r.value.estado === "rechazado") await anotarVal(v, `${userName} ${r.value.estado === "observado" ? "observó" : "rechazó"} «${doc.nombre}» (${folioValidacion(v.numero)}): ${r.value.comentario}`);
       await audit(ctx.actor, "validacion.revisar", "validacion", v.id, { numero: v.numero, doc: doc.clave, estado: r.value.estado, resultado: val.estado });
+      if (val.estado === "aprobada" || r.value.estado === "observado" || r.value.estado === "rechazado") {
+        const texto = val.estado === "aprobada" ? `${userName} aprobó la validación ${folioValidacion(v.numero)}: documentos en orden.` : `${userName} ${r.value.estado === "observado" ? "observó" : "rechazó"} «${doc.nombre}» (${folioValidacion(v.numero)})${r.value.comentario ? `: ${r.value.comentario}` : "."}`;
+        if (v.lead_id) await avisarEjecutivoDe(v.lead_id, val.estado === "aprobada" ? "Documentos validados" : "Documento con observaciones", texto);
+      }
       return json(await detalle(val));
     }
 
@@ -1591,6 +1637,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
         fila = r.data;
       }
       await audit(ctx.actor, "inspeccion.registrar", "inspeccion", fila.id, { numero: fila.numero, patente: v.value.vehiculo.patente, origen: fila.origen, veredicto: v.value.resumen.veredicto });
+      if (fila.origen !== "espontanea" && fila.solicitante_id) await avisarA([fila.solicitante_id], "Inspección realizada", [`${userName} realizó la inspección ${folioInspeccion(fila.numero)} de ${v.value.vehiculo.patente}.`, `Veredicto: ${VEREDICTOS[v.value.resumen.veredicto as keyof typeof VEREDICTOS]}.`]);
       return json({ inspeccion: (await enriquecer([fila]))[0] });
     }
 
@@ -1794,6 +1841,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       if (error) return fallar(error);
       await evento(c.lead_id, "compra", `Pago de ${dinero(v.value.monto_final)} (${v.value.medio_pago}) solicitado por ${userName} para ${folioCompra(c.numero)}`);
       await audit(ctx.actor, "compra.solicitar_pago", "compra", c.id, { numero: c.numero, monto: v.value.monto_final });
+      if (!esSupervisor) await avisarSupervisores(c.local_id, "Pago de compra por aprobar", [`${userName} pidió aprobar el pago de ${dinero(v.value.monto_final)} (${v.value.medio_pago}) de la compra ${folioCompra(c.numero)}.`]);
       // El supervisor que registra su propia compra la aprueba, salvo que falten documentos por validar.
       if (esSupervisor) {
         const ap = await aprobarCompra(data);
@@ -1810,6 +1858,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       if (!tr.ok) return err(tr.error!);
       const ap = await aprobarCompra(c);
       if (!ap.ok) return err(ap.error!, 409);
+      await avisarEjecutivoDe(c.lead_id, "Pago de compra aprobado", `${userName} aprobó el pago de la compra ${folioCompra(c.numero)}: el vehículo ya está en el inventario.`);
       return json(await compraDetalle(ap.compra));
     }
     if (op === "compras.rechazarPago") {
@@ -1824,6 +1873,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       if (error) return fallar(error);
       await evento(c.lead_id, "compra", `Pago de ${folioCompra(c.numero)} rechazado por ${userName}: ${motivo}`);
       await audit(ctx.actor, "compra.rechazar_pago", "compra", c.id, { numero: c.numero, motivo });
+      await avisarEjecutivoDe(c.lead_id, "Pago de compra rechazado", `${userName} rechazó el pago de la compra ${folioCompra(c.numero)}: ${motivo}`);
       return json(await compraDetalle(data));
     }
     if (op === "compras.cancelar") {
@@ -2179,6 +2229,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     if (error) return fallo(error);
     await evento(lead.id, "creado", asignado ? `Lead creado y asignado a ${asignado.nombre}` : "Lead creado sin asignar (no hay ejecutivos habilitados para ventas)");
     await audit(ctx.actor, "lead.crear", "lead", lead.id, { cliente: cliente.nombre, asignado: asignado?.nombre ?? null });
+    if (asignado) await avisarA([asignado.id], "Nuevo lead asignado", [`Se te asignó un lead de ${cliente.nombre}${cliente.telefono ? ` (teléfono ${cliente.telefono})` : ""}.`, `Lo creó ${userName || "el sistema"}. Contáctalo cuanto antes.`]);
     return json({ lead, cliente, asignado });
   }
 
@@ -2255,6 +2306,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     if (error) return fallo(error);
     await evento(lead.id, "asignacion", `Reasignado a ${nuevo.nombre}`);
     await audit(ctx.actor, "lead.reasignar", "lead", lead.id, { de: lead.asignado_a, a: nuevo.id, nombre: nuevo.nombre });
+    { const rl = await resumenDeLead(lead.id); await avisarA([nuevo.id], "Nuevo lead asignado", [`${userName || "El Jefe Local"} te reasignó el lead de ${rl ? rl.cliente : "un cliente"}.`, "Contáctalo cuanto antes."]); }
     return json({ lead: data, asignado: nuevo });
   }
 
@@ -2410,6 +2462,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     await audit(ctx.actor, previa ? "cotizacion.editar" : "cotizacion.crear", "cotizacion", cot.id, {
       numero: cot.numero, patente: veh.patente, precio_lista: cot.precio_lista, descuento: cot.descuento, estado: cot.estado,
     });
+    if (estado === "pendiente") await avisarSupervisores(lead.local_id, "Descuento por aprobar", [`${userName} pidió un descuento de ${dinero(cot.descuento)} en la cotización N° ${cot.numero} (${veh.marca} ${veh.modelo}, precio final ${dinero(cot.precio_final)}).`]);
     return json({ cotizacion: cot });
   }
 
@@ -2475,6 +2528,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     await audit(ctx.actor, aprobar ? "cotizacion.aprobar" : "cotizacion.rechazar", "cotizacion", cot.id, {
       numero: cot.numero, descuento: cot.descuento, precio_final: cot.precio_final, solicitado_por: cot.solicitado_por, motivo: motivo || null,
     });
+    await avisarEjecutivoDe(cot.lead_id, aprobar ? "Descuento aprobado" : "Descuento rechazado", aprobar ? `${userName} aprobó el descuento de ${dinero(cot.descuento)} (cotización N° ${cot.numero}).` : `${userName} rechazó el descuento de ${dinero(cot.descuento)} (cotización N° ${cot.numero}): ${motivo}`);
     return json({ cotizacion: data });
   }
 
@@ -2649,6 +2703,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     // Si hay Validadores en el local, la venta espera su aprobación; si no, el supervisor que cierra aprueba su propia venta (queda a su nombre en la bitácora).
     const exige = !!valCierre && (await hayValidadores(lead.local_id));
     if (esSupervisor && !exige) cierre = await aprobarCierre(cierre);
+    if (cierre.estado === "pendiente") await avisarSupervisores(lead.local_id, "Cierre de venta por aprobar", [`${userName} pidió aprobar el cierre ${folioVenta(cierre.numero)} por ${dinero(cierre.precio_final)} (${veh.marca} ${veh.modelo}).`]);
     return json({ cierre: sinCosto(cierre, can("inventario.editar")), validacion: valCierre ? { id: valCierre.id, folio: folioValidacion(valCierre.numero), estado: valCierre.estado, exige } : null });
   }
 
@@ -2664,6 +2719,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       if (error) return fallo(error);
       await evento(c.lead_id, "cierre", `Cierre ${folioVenta(c.numero)} rechazado por ${userName}: ${motivo}`);
       await audit(ctx.actor, "venta.rechazar", "cierre", c.id, { numero: c.numero, motivo, solicitado_por: c.solicitado_por });
+      await avisarEjecutivoDe(c.lead_id, "Cierre de venta rechazado", `${userName} rechazó el cierre ${folioVenta(c.numero)}: ${motivo}`);
       return json({ cierre: sinCosto(data, can("inventario.editar")) });
     }
     // Al aprobar, la reserva debe seguir vigente y el vehículo reservado: si no, el cierre ya no se sostiene.
@@ -2686,7 +2742,9 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
         if (val && val.estado !== "aprobada") return err("validacion_pendiente", 409);
       }
     }
-    return json({ cierre: sinCosto(await aprobarCierre(c), can("inventario.editar")) });
+    const aprobado = await aprobarCierre(c);
+    await avisarEjecutivoDe(c.lead_id, "Cierre de venta aprobado", `${userName} aprobó el cierre ${folioVenta(c.numero)} por ${dinero(c.precio_final)}.`);
+    return json({ cierre: sinCosto(aprobado, can("inventario.editar")) });
   }
 
   // El ejecutivo (o el supervisor) retira un cierre que aún no se aprueba.

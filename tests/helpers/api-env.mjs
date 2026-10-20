@@ -144,6 +144,8 @@ const hashPw = (pw) => { const salt = randomBytes(16); return `pbkdf2$150000$${s
 
 let handler;
 export let db;
+/** Correos que la función habría enviado (uno por destinatario). */
+export const correos = [];
 const IP = { n: 1 };
 
 export const iniciarFuncion = async () => {
@@ -157,7 +159,13 @@ export const iniciarFuncion = async () => {
   const archivo = join(dir, "index.mts");
   writeFileSync(archivo, src);
   globalThis.__baseFalsa = db;
-  const env = { SUPABASE_URL: "http://x", SUPABASE_SERVICE_ROLE_KEY: "k", SESSION_SECRET, ADMIN_EMAIL, ADMIN_PASSWORD_HASH: hashPw(ADMIN_PW) };
+  const env = { SUPABASE_URL: "http://x", SUPABASE_SERVICE_ROLE_KEY: "k", SESSION_SECRET, ADMIN_EMAIL, ADMIN_PASSWORD_HASH: hashPw(ADMIN_PW), RESEND_API_KEY: "re_prueba", MAIL_FROM: "Drive Futuro <avisos@prueba.cl>", APP_URL: "https://app.prueba.cl" };
+  // Los avisos por correo no salen a internet: se guardan para revisarlos.
+  const fetchReal = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (String(url).startsWith("https://api.resend.com/")) { correos.push(JSON.parse(init.body)); return new Response("{}", { status: 200 }); }
+    return fetchReal(url, init);
+  };
   globalThis.Deno = { env: { get: (k) => env[k] }, serve: (h) => { handler = h; } };
   await import(pathToFileURL(archivo).href);
 };

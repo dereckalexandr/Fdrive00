@@ -8,6 +8,7 @@ import { elegirAsignado } from "./ventas-core.js";
 import { permisoDeTipo } from "./compras-core.js";
 import { validarVehiculoTasacion } from "./tasaciones-core.js";
 import { sugerirAviso } from "./anuncios-core.js";
+import { enviarAviso, enSegundoPlano, correoActivo } from "./correo.ts";
 import {
   visibleEnCatalogo, vehiculoPublico, validarSolicitudWeb, cuotaReferencial, tipoLeadDe, resumenSolicitud, FUENTE_WEB,
   LIMITE_IP_HORA, LIMITE_TELEFONO_HORA, LIMITE_LOCAL_HORA, ESTADOS_VISIBLES,
@@ -34,7 +35,42 @@ function superaLimiteIp(ip: string) {
 
 const UNA_HORA = 3_600_000;
 
+const QUE_PIDIO: Record<string, string> = { consulta: "una consulta", visita: "una visita", financiamiento: "una simulación de financiamiento", vender: "vender o consignar tu vehículo" };
+
 export async function publicOp(ctx: CtxPublico, body: any): Promise<Response> {
+  /** Avisos por correo de una solicitud del sitio: al ejecutivo asignado (o a los Jefes Local si no hay) y la confirmación al cliente. Nunca frenan la solicitud. */
+  async function avisarSolicitud(d: { s: any; lead: any; cliente: any; asignado: any; local: string; vehTexto: string; empresa?: string }) {
+    try {
+      if (!correoActivo()) return;
+      const { sb } = ctx;
+      let para: string[] = [];
+      if (d.asignado) {
+        const u = await sb.from("usuarios").select("email, activo").eq("id", d.asignado.id).maybeSingle();
+        if (u.data && u.data.activo && u.data.email) para = [u.data.email];
+      } else {
+        const overrides = await ctx.rolePermOverrides();
+        const uq = await sb.from("usuarios").select("email, roles, permisos_extra, activo").eq("local_id", d.local);
+        para = (uq.data ?? []).filter((u: any) => u.activo && u.email && permisosEfectivos(u.roles ?? [], overrides, u.permisos_extra).includes("leads.asignar")).map((u: any) => u.email);
+      }
+      const que = QUE_PIDIO[d.s.tipo] ?? "una solicitud";
+      const tareas: Promise<unknown>[] = [];
+      if (para.length) {
+        tareas.push(enviarAviso({
+          para, asunto: d.asignado ? "Nuevo lead del sitio web" : "Lead del sitio web sin ejecutivo asignado", titulo: d.asignado ? "Nuevo lead del sitio web" : "Lead del sitio web sin ejecutivo asignado",
+          lineas: [`${d.s.contacto.nombre} pidió ${que}${d.vehTexto ? ` (${d.vehTexto})` : ""}.`, `Teléfono: ${d.s.contacto.telefono}${d.s.contacto.email ? ` · correo: ${d.s.contacto.email}` : ""}`, d.asignado ? "Contáctalo cuanto antes." : "No hay ejecutivos habilitados: asígnalo desde la plataforma."],
+        }));
+      }
+      if (d.s.contacto.email) {
+        tareas.push(enviarAviso({
+          para: [d.s.contacto.email], asunto: "Recibimos tu solicitud", titulo: "Recibimos tu solicitud",
+          lineas: [`Hola ${d.s.contacto.nombre}, recibimos tu solicitud de ${que}${d.vehTexto ? ` por el ${d.vehTexto}` : ""}.`, "Un ejecutivo se pondrá en contacto contigo a la brevedad al teléfono que nos dejaste.", d.empresa ? `Equipo ${d.empresa}` : ""],
+          ruta: "/", enlaceTexto: "Ver nuestros vehículos",
+        }));
+      }
+      await enSegundoPlano(Promise.all(tareas));
+    } catch (e) { console.error("avisarSolicitud:", String((e as any)?.message ?? e)); }
+  }
+
   const { sb, json } = ctx;
   const op = String(body.op ?? "");
   const err = (error: string, status = 400) => json({ error }, status);
@@ -186,6 +222,7 @@ export async function publicOp(ctx: CtxPublico, body: any): Promise<Response> {
       }
     }
     await ctx.audit(sistema, "web.solicitud", "lead", lead.id, { tipo: s.tipo, vehiculo_id: vehiculo ? vehiculo.id : null, asignado: asignado ? asignado.nombre : null, ip: ctx.ip.slice(0, 45) });
+    await avisarSolicitud({ s, lead, cliente, asignado, local, vehTexto, empresa: cfg.sitio_nombre });
     return json({ ok: true, cuota });
   }
 

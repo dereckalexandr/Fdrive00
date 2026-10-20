@@ -698,3 +698,26 @@ drive-futuro/
 En **Comercial → Fichas de inspectores** (sin SQL nuevo) el **Jefe Local** (las de su local) y la **cuenta maestra** (las de todos los locales) ven, en **solo lectura**, el detalle completo de cada **inspección** del Inspector (checklist ítem por ítem, ficha del vehículo, fotos, observaciones, **nombre y RUN del propietario** y descarga del **PDF con el CAV**) y cada **tasación** (valorización) que el Inspector hace en su propio checklist, con sus valores y PDF. Hay pestañas Inspecciones / Tasaciones del Inspector y un buscador por inspector, patente, vehículo o propietario.
 
 Servidor: `inspecciones.fichas_equipo` (quiénes inspeccionan en el local) y una lectura (`get` / `list`) del almacén para las claves `inspeccion::`, `tasacion::` y `foto::` de personas del **mismo local** del Jefe Local; nunca escritura ni borrado. Solo incluye a los Inspectores del CRM (con RUT); los perfiles antiguos por código siguen en *Versión anterior → Inspectores (código)*. Esto reemplaza la regla anterior de que los datos del propietario eran solo del Inspector y el Administrador. Pruebas: `tests/inspecciones-api.test.mjs`.
+
+## CRM · Avisos automáticos por correo
+
+Sin SQL nuevo. Los avisos salen por **Resend** y **solo se activan si existe el secreto `RESEND_API_KEY`**; sin él, el CRM funciona igual y no envía nada. Un fallo del correo nunca frena ni deshace la operación (queda en el registro de la función).
+
+**Activar** (en tu terminal, con la sesión de Supabase iniciada; la clave nunca se escribe en el código):
+```
+npx supabase secrets set RESEND_API_KEY=<tu clave> MAIL_FROM="Drive Futuro <avisos@tu-dominio.cl>" APP_URL=https://<tu-sitio>.vercel.app --project-ref lvcmstvcbbvltompunbr
+```
+- `MAIL_FROM`: remitente. Con un dominio verificado en Resend se puede escribir a cualquiera; sin dominio, Resend solo deja enviar `onboarding@resend.dev` a la cuenta dueña de la clave (sirve para probar).
+- `APP_URL`: dirección pública del sitio, para el botón «Abrir en la plataforma» (sin ella, el correo va sin botón).
+
+**Quién recibe qué** (nunca quien hizo la acción; solo personas activas con correo en su ficha de *Usuarios*):
+| Evento | Recibe |
+|---|---|
+| Lead nuevo asignado o reasignado (incluye los del sitio web) | el Ejecutivo asignado |
+| Solicitud en el sitio web | el Ejecutivo asignado (o los Jefes Local si no hay ejecutivos habilitados) y, si dejó correo, **confirmación al cliente** |
+| Descuento por aprobar · cierre de venta por aprobar · pago de compra por aprobar | los Jefes Local del local |
+| Descuento aprobado/rechazado · cierre aprobado/rechazado · pago de compra aprobado/rechazado | el Ejecutivo del lead |
+| Tasación completada · inspección realizada | quien la pidió |
+| Documentos validados · documento observado o rechazado | el Ejecutivo del lead |
+
+Los textos van escapados (nada de lo que escribe una persona se interpreta como código) y los asuntos son de una sola línea. Código: `supabase/functions/api/correo.ts` (envío) y `avisos-core.js` (formato); los avisos se disparan en `ventas.ts` y `publico.ts`. Pruebas: `tests/avisos-core.test.mjs` y `tests/avisos-api.test.mjs` (envío simulado). **Límites:** no hay WhatsApp; no hay reintentos ni opción de que cada persona apague sus avisos; la confirmación al cliente usa el correo que él escribió (los frenos por IP y teléfono del sitio limitan el abuso).
