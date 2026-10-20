@@ -54,18 +54,20 @@ export async function publicOp(ctx: CtxPublico, body: any): Promise<Response> {
       }
       const que = QUE_PIDIO[d.s.tipo] ?? "una solicitud";
       const tareas: Promise<unknown>[] = [];
+      const alFallar = (error: string) => ctx.audit({ tipo: "sistema", nombre: "Sitio web" }, "aviso.fallido", "aviso", undefined, { asunto: "solicitud del sitio web", error });
+      if (para.length === 0) await ctx.audit({ tipo: "sistema", nombre: "Sitio web" }, "aviso.omitido", "aviso", undefined, { asunto: "solicitud del sitio web", motivo: "ningún ejecutivo ni Jefe Local tiene correo en su ficha" });
       if (para.length) {
         tareas.push(enviarAviso({
           para, asunto: d.asignado ? "Nuevo lead del sitio web" : "Lead del sitio web sin ejecutivo asignado", titulo: d.asignado ? "Nuevo lead del sitio web" : "Lead del sitio web sin ejecutivo asignado",
           lineas: [`${d.s.contacto.nombre} pidió ${que}${d.vehTexto ? ` (${d.vehTexto})` : ""}.`, `Teléfono: ${d.s.contacto.telefono}${d.s.contacto.email ? ` · correo: ${d.s.contacto.email}` : ""}`, d.asignado ? "Contáctalo cuanto antes." : "No hay ejecutivos habilitados: asígnalo desde la plataforma."],
-        }));
+        }, alFallar));
       }
       if (d.s.contacto.email) {
         tareas.push(enviarAviso({
           para: [d.s.contacto.email], asunto: "Recibimos tu solicitud", titulo: "Recibimos tu solicitud",
           lineas: [`Hola ${d.s.contacto.nombre}, recibimos tu solicitud de ${que}${d.vehTexto ? ` por el ${d.vehTexto}` : ""}.`, "Un ejecutivo se pondrá en contacto contigo a la brevedad al teléfono que nos dejaste.", d.empresa ? `Equipo ${d.empresa}` : ""],
           ruta: "/", enlaceTexto: "Ver nuestros vehículos",
-        }));
+        }, alFallar));
       }
       await enSegundoPlano(Promise.all(tareas));
     } catch (e) { console.error("avisarSolicitud:", String((e as any)?.message ?? e)); }

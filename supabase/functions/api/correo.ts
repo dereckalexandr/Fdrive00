@@ -7,7 +7,8 @@ export const correoActivo = () => !!Deno.env.get("RESEND_API_KEY");
 type Aviso = { para: string[]; asunto: string; titulo: string; lineas: string[]; ruta?: string; enlaceTexto?: string };
 
 /** Envía un aviso a cada destinatario por separado (nadie ve las direcciones de los demás). Devuelve cuántos salieron. */
-export async function enviarAviso(a: Aviso): Promise<number> {
+export async function enviarAviso(a: Aviso, alFallar?: (motivo: string) => Promise<unknown>): Promise<number> {
+  const fallo = async (m: string) => { console.error("aviso por correo:", m); try { if (alFallar) await alFallar(m.slice(0, 300)); } catch { /* el registro es un extra */ } };
   const clave = Deno.env.get("RESEND_API_KEY");
   if (!clave) return 0;
   const para = destinatariosValidos(a.para);
@@ -25,9 +26,9 @@ export async function enviarAviso(a: Aviso): Promise<number> {
         signal: AbortSignal.timeout(6000),
       });
       if (r.ok) enviados++;
-      else console.error("aviso por correo rechazado:", r.status, (await r.text()).slice(0, 200));
+      else await fallo(`Resend rechazó el envío (${r.status}): ${(await r.text()).slice(0, 200)}`);
     } catch (e) {
-      console.error("aviso por correo falló:", String((e as any)?.message ?? e));
+      await fallo(`no se pudo contactar a Resend: ${String((e as any)?.message ?? e)}`);
     }
   }
   return enviados;

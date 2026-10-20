@@ -146,8 +146,8 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       if (unicos.length === 0) return;
       const us = await enLotes("usuarios", "id", unicos);
       const para = us.filter((u: any) => u.activo && u.email).map((u: any) => u.email);
-      if (para.length === 0) return;
-      await enSegundoPlano(enviarAviso({ para, asunto, titulo: asunto, lineas, ruta }));
+      if (para.length === 0) { await audit(ctx.actor, "aviso.omitido", "aviso", undefined, { asunto, motivo: "la persona no tiene correo en su ficha o está inactiva" }); return; }
+      await enSegundoPlano(enviarAviso({ para, asunto, titulo: asunto, lineas, ruta }, (error) => audit(ctx.actor, "aviso.fallido", "aviso", undefined, { asunto, error })));
     } catch (e) { console.error("avisarA:", String((e as any)?.message ?? e)); }
   }
   /** Avisa a quienes aprueban (Jefes Local) del local. */

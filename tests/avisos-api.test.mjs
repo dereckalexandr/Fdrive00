@@ -1,7 +1,7 @@
 // Avisos por correo de los eventos del CRM y del sitio web, contra la función real con el envío simulado.
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
-import { iniciarFuncion, api, nuevaIp, loginAdmin, crm, correos } from "./helpers/api-env.mjs";
+import { iniciarFuncion, api, nuevaIp, loginAdmin, crm, correos, db } from "./helpers/api-env.mjs";
 
 const ve = (token, op, extra = {}) => api({ action: "ventas", token, op, ...extra });
 const pub = (op, extra = {}) => api({ action: "public", op, ...extra });
@@ -119,9 +119,11 @@ test("Si el envío falla o la persona no tiene correo, la operación sigue igual
   const r = await nuevoLead(U.jefe.token, { asignarA: U.sinmail.id });
   assert.equal(r.status, 200);
   assert.deepEqual(enviados(), []);
+  assert.ok(db.tablas.bitacora.some((b) => b.accion === "aviso.omitido"), "queda anotado que no había correo");
   const antes = globalThis.fetch;
   globalThis.fetch = async (u, i) => (String(u).includes("resend") ? new Response("no", { status: 500 }) : antes(u, i));
   try {
     assert.equal((await nuevoLead(U.jefe.token, { asignarA: U.e1.id })).status, 200, "un fallo del correo no rompe la creación");
+    assert.ok(db.tablas.bitacora.some((b) => b.accion === "aviso.fallido" && JSON.stringify(b.detalle).includes("500")), "el fallo queda en la bitácora");
   } finally { globalThis.fetch = antes; }
 });
