@@ -8,7 +8,75 @@ html, body, #root {
 
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color: #0f172a;
+  background: #f1f5f9;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: "cv11", "ss01";
+}
+
+/* ---------- Diseño general: bordes redondeados, sombras suaves y transiciones ---------- */
+@layer components {
+  /* Títulos: peso y espaciado de una interfaz moderna. */
+  .font-serif { font-weight: 600; letter-spacing: -0.015em; }
+
+  /* Controles de formulario y botones. */
+  button,
+  select,
+  textarea,
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]) {
+    border-radius: 0.5rem;
+  }
+  button, a, select, input, textarea {
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+  }
+  button:not(:disabled) { cursor: pointer; }
+  button:active:not(:disabled) { transform: translateY(0.5px); }
+
+  /* Tarjetas: cualquier bloque blanco con borde (paneles, tablas, formularios). */
+  .bg-white.border:not(button):not(input):not(select):not(textarea):not(a):not(label):not(span) {
+    border-radius: 0.875rem;
+    border-color: #e2e8f0;
+    box-shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 3px rgb(15 23 42 / 0.05);
+  }
+  /* Botones blancos con borde: más sobrios que las tarjetas. */
+  button.bg-white.border, a.bg-white.border { border-radius: 0.5rem; box-shadow: none; }
+  button.bg-white.border:hover:not(:disabled) { border-color: #94a3b8; }
+
+  /* Cabeceras oscuras: degradado sutil y sombra hacia el contenido. */
+  .bg-stone-900.text-stone-100:not(button):not(.sticky) {
+    background-image: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+    box-shadow: 0 2px 8px rgb(15 23 42 / 0.18);
+  }
+  .bg-stone-900.text-stone-100 button.border { border-radius: 0.5rem; }
+
+  /* Tablas: encabezado discreto y filas con resalte al pasar el mouse. */
+  table tbody tr { transition: background-color 0.12s ease; }
+  table tbody tr:hover { background-color: rgb(248 250 252 / 0.9); }
+  table thead th { font-weight: 600; }
+
+  /* Foco visible y consistente. */
+  input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible, a:focus-visible {
+    outline: 2px solid #f59e0b;
+    outline-offset: 1px;
+  }
+  input:focus, select:focus, textarea:focus { border-color: #f59e0b; }
+
+  /* Pestañas: barra de desplazamiento fina (en celular se desliza con el dedo). */
+  .pestanas-scroll { scrollbar-width: none; -ms-overflow-style: none; }
+  .pestanas-scroll::-webkit-scrollbar { display: none; }
+}
+
+/* Barras de desplazamiento finas en todo el sitio. */
+* { scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 9999px; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+/* Menos movimiento si la persona lo pidió en su dispositivo. */
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
 }
 
 /* Celular: 16px evita el zoom automático de iOS al enfocar un campo, y 44px es la

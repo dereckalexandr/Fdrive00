@@ -171,6 +171,9 @@ export const iniciarFuncion = async () => {
 };
 export const prepararFuncion = () => before(iniciarFuncion);
 
+/** Atiende una petición HTTP tal cual la recibiría la función (lo usa el entorno de demostración). */
+export const manejar = (req) => handler(req);
+
 export async function api(body) {
   const ip = `10.0.0.${IP.n}`;
   const res = await handler(new Request("http://x/api", { method: "POST", headers: { "content-type": "application/json", "x-forwarded-for": ip }, body: JSON.stringify(body) }));

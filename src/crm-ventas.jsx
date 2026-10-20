@@ -25,7 +25,7 @@ import { ErrorBoundary } from "./error-boundary.jsx";
 import { SeccionCompra, SeccionConsignacion, ModuloCompras } from "./crm-compras.jsx";
 import { etapaDeOperacion, tipoLeadNombre, TIPOS_LEAD, validarVehiculoOfrecido } from "../supabase/functions/api/compras-core.js";
 import {
-  INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, useCarga, mensajeError, CamposVehiculo, aVehiculoForm,
+  INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, NavegacionLateral, useCarga, mensajeError, CamposVehiculo, aVehiculoForm,
 } from "./crm-ui.jsx";
 
 const COLOR_ETAPA = {
@@ -590,9 +590,9 @@ function Inicio({ api, catalogos, abrirLead, irA, version, onCambio }) {
   const g = agruparTareas(t.tareas);
   const cliente = (id) => (l.clientes.find((c) => c.id === id) || {}).nombre || "Cliente";
   const kpi = (titulo, valor, destacado, onClick) => (
-    <button onClick={onClick} className={`text-left bg-white border p-4 ${destacado ? "border-amber-400" : "border-stone-200"} hover:border-amber-500`}>
-      <p className="text-xs uppercase tracking-widest text-stone-400">{titulo}</p>
-      <p className={`font-mono text-3xl mt-1 ${destacado ? "text-amber-600" : "text-stone-900"}`}>{valor}</p>
+    <button onClick={onClick} className={`text-left bg-white border p-4 hover:shadow-elevada hover:-translate-y-px ${destacado ? "border-amber-400 ring-1 ring-amber-200" : "border-stone-200"} hover:border-amber-500`}>
+      <p className="text-xs font-medium uppercase tracking-wide text-stone-500">{titulo}</p>
+      <p className={`text-3xl font-bold tabular-nums mt-1 ${destacado ? "text-amber-600" : "text-stone-900"}`}>{valor}</p>
     </button>
   );
   const alcance = catalogos.puedeAsignar ? "del local" : "tuyos";
@@ -601,7 +601,7 @@ function Inicio({ api, catalogos, abrirLead, irA, version, onCambio }) {
       <AvisosDelSupervisor api={api} version={version} abrirLead={abrirLead} />
       {catalogos.puedePedirTasacion && <MisTasaciones api={api} version={version} abrirLead={abrirLead} />}
       <FranjaAlertas resumen={ge} onVer={() => irA("gestion")} />
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 2xl:grid-cols-6 gap-4">
         {catalogos.puedeAsignar && kpi("Descuentos por aprobar", p.pendientes.length, p.pendientes.length > 0, () => irA("aprobaciones"))}
         {kpi(`Leads por atender`, porAtender.length, porAtender.length > 0, () => irA("leads"))}
         {kpi("Tareas de hoy", g.hoy.length, g.hoy.length > 0, () => irA("agenda"))}
@@ -711,14 +711,22 @@ export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador, 
   opciones.push(["inventario", "Inventario"]);
   if (usaLeads) opciones.push(["clientes", "Clientes"]);
 
+  const GRUPOS = [
+    { titulo: "Trabajo diario", ids: ["inicio", "leads", "agenda", "clientes", "inventario"] },
+    { titulo: "Comercial", ids: ["ventas", "gestion", "aprobaciones", "compras", "tasaciones", "inspecciones", "fichas"] },
+    { titulo: "Operación", ids: ["validaciones", "anuncios", "marketing"] },
+  ];
+
   return (
-    <div className="flex flex-col gap-5">
+    <div className="lg:grid lg:grid-cols-[13.5rem_minmax(0,1fr)] lg:gap-6 lg:items-start">
+      <aside className="hidden lg:block lg:sticky lg:top-4"><NavegacionLateral valor={tab} onCambio={setTab} opciones={opciones} grupos={GRUPOS} /></aside>
+    <div className="flex flex-col gap-5 min-w-0">
       {esAdmin && locales.length > 1 && (
         <div className="flex items-center gap-3 text-sm text-stone-700">Local:
           <select value={localSel} onChange={(e) => setLocalSel(e.target.value)} className={`${INPUT} md:w-64`}>{locales.filter((l) => l.activo).map((l) => <option key={l.id} value={l.id}>{l.nombre}</option>)}</select>
         </div>
       )}
-      <Pestanas valor={tab} onCambio={setTab} opciones={opciones} />
+      <div className="lg:hidden"><Pestanas valor={tab} onCambio={setTab} opciones={opciones} /></div>
       <ErrorBoundary clave={tab}>
       {tab === "inicio" && <Inicio api={api} catalogos={catalogos} abrirLead={setLeadAbierto} irA={setTab} version={version} onCambio={subir} />}
       {tab === "leads" && <Leads api={api} catalogos={catalogos} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
@@ -742,6 +750,7 @@ export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador, 
           onEditar={async () => { const r = await api("leads.get", { id: leadAbierto }); setLeadEditando(r.lead); }} />
       )}
       {leadEditando && <FormLead api={api} catalogos={catalogos} lead={leadEditando} onCerrar={() => setLeadEditando(null)} onGuardado={() => { setLeadEditando(null); subir(); }} />}
+    </div>
     </div>
   );
 }

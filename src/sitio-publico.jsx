@@ -70,8 +70,8 @@ function Foto({ vehiculoId, fotoId, alt = "", className = "" }) {
 }
 
 /* ---------- piezas ---------- */
-const BTN = "px-5 py-3 text-sm bg-amber-500 text-stone-900 font-medium hover:bg-amber-400 disabled:opacity-50 transition-colors";
-const BTN_2 = "px-5 py-3 text-sm border border-stone-300 bg-white text-stone-800 hover:bg-stone-50 transition-colors";
+const BTN = "px-5 py-3 text-sm bg-amber-500 text-stone-900 font-semibold rounded-lg shadow-suave hover:bg-amber-400 disabled:opacity-50 transition-colors";
+const BTN_2 = "px-5 py-3 text-sm border border-stone-300 bg-white text-stone-800 font-medium rounded-lg hover:bg-stone-50 transition-colors";
 const INPUT = "border border-stone-300 bg-white px-3 py-2.5 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-amber-500 w-full";
 const Campo = ({ etiqueta, children, ayuda }) => (<label className="text-sm text-stone-700 flex flex-col gap-1">{etiqueta}{children}{ayuda && <span className="text-xs text-stone-500">{ayuda}</span>}</label>);
 
@@ -81,11 +81,14 @@ function Marco({ empresa, ir, children }) {
     <div className="min-h-screen bg-stone-50 text-stone-900 flex flex-col">
       <header className="bg-stone-900 text-stone-100">
         <div className="max-w-6xl mx-auto px-4 md:px-6 py-4 flex items-center justify-between gap-4">
-          <a href="/" onClick={(e) => { e.preventDefault(); ir("/"); }} className="font-serif text-xl md:text-2xl">{(empresa && empresa.nombre) || "Drive Futuro"}</a>
+          <a href="/" onClick={(e) => { e.preventDefault(); ir("/"); }} className="flex items-center gap-2.5 font-serif text-xl md:text-2xl">
+            <span className="w-9 h-9 rounded-xl bg-amber-500 text-stone-900 text-sm font-bold flex items-center justify-center">{String((empresa && empresa.nombre) || "Drive Futuro").split(/s+/).slice(0, 2).map((x) => x[0]).join("").toUpperCase()}</span>
+            {(empresa && empresa.nombre) || "Drive Futuro"}
+          </a>
           <nav className="flex items-center gap-2 md:gap-5 text-sm">
             <a href="/" onClick={(e) => { e.preventDefault(); ir("/"); }} className="hidden md:inline text-stone-300 hover:text-white">Vehículos</a>
             <a href="/vender" onClick={(e) => { e.preventDefault(); ir("/vender"); }} className="text-stone-300 hover:text-white">Vende tu auto</a>
-            {wa && <a href={wa} target="_blank" rel="noreferrer" className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5">WhatsApp</a>}
+            {wa && <a href={wa} target="_blank" rel="noreferrer" className="bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-3.5 py-1.5 rounded-lg">WhatsApp</a>}
           </nav>
         </div>
       </header>
@@ -205,7 +208,7 @@ function Ventana({ titulo, onCerrar, children }) {
   }, [onCerrar]);
   return (
     <div className="fixed inset-0 z-40 bg-stone-900/60 flex items-end md:items-center justify-center overflow-y-auto" onMouseDown={(e) => e.target === e.currentTarget && onCerrar()}>
-      <div className="bg-white w-full md:max-w-xl max-h-screen overflow-y-auto p-5 md:p-6 flex flex-col gap-4 relative" role="dialog" aria-modal="true" aria-label={titulo}>
+      <div className="bg-white w-full md:max-w-xl max-h-screen overflow-y-auto p-5 md:p-6 flex flex-col gap-4 relative rounded-t-2xl md:rounded-2xl shadow-elevada" role="dialog" aria-modal="true" aria-label={titulo}>
         <div className="flex items-start justify-between gap-3"><h2 className="font-serif text-xl text-stone-900">{titulo}</h2><button onClick={onCerrar} className="text-stone-500 hover:text-stone-900 px-2" aria-label="Cerrar">✕</button></div>
         {children}
       </div>
@@ -218,15 +221,15 @@ function Ventana({ titulo, onCerrar, children }) {
 ========================================================= */
 function Tarjeta({ v, ir }) {
   return (
-    <a href={`/vehiculo/${v.id}`} onClick={(e) => { e.preventDefault(); ir(`/vehiculo/${v.id}`); }} className="bg-white border border-stone-200 hover:border-amber-500 hover:shadow-md transition-all flex flex-col">
-      <div className="relative">
-        <Foto vehiculoId={v.id} fotoId={v.fotos[0]} alt={`${nombreVeh(v)} ${v.anio}`} className="aspect-[4/3]" />
-        {v.reservado && <span className="absolute top-2 left-2 bg-stone-900 text-white text-xs px-2 py-1">Reservado</span>}
+    <a href={`/vehiculo/${v.id}`} onClick={(e) => { e.preventDefault(); ir(`/vehiculo/${v.id}`); }} className="group bg-white border border-stone-200 rounded-2xl overflow-hidden hover:border-amber-400 hover:shadow-elevada hover:-translate-y-0.5 transition-all flex flex-col">
+      <div className="relative overflow-hidden">
+        <Foto vehiculoId={v.id} fotoId={v.fotos[0]} alt={`${nombreVeh(v)} ${v.anio}`} className="aspect-[4/3] group-hover:scale-[1.03] transition-transform duration-300" />
+        {v.reservado && <span className="absolute top-3 left-3 bg-stone-900/90 text-white text-xs font-medium px-2.5 py-1 rounded-full">Reservado</span>}
       </div>
       <div className="p-4 flex flex-col gap-1">
         <h3 className="font-serif text-lg text-stone-900 leading-tight">{nombreVeh(v)}</h3>
         <p className="text-sm text-stone-600">{v.anio} · {km(v.km)}{v.transmision ? ` · ${v.transmision}` : ""}</p>
-        <p className="font-mono text-xl text-stone-900 mt-2">{clp(v.precio)}</p>
+        <p className="text-xl font-bold tabular-nums text-stone-900 mt-2">{clp(v.precio)}</p>
       </div>
     </a>
   );

@@ -3873,23 +3873,23 @@ function AdminDashboard({ vendors, setVendors, inspectors, setInspectors, onExit
   return (
     <div className="min-h-screen bg-stone-100 pb-16">
       <div className="bg-stone-900 text-stone-100">
-        <div className="max-w-5xl mx-auto px-6 py-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div className="max-w-6xl mx-auto px-4 md:px-6 py-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
             <p className="text-xs uppercase tracking-widest text-stone-400 mb-1">Panel administrador</p>
             <h1 className="font-serif text-2xl md:text-3xl">Administración de la plataforma</h1>
           </div>
           <button onClick={onExit} className="self-start md:self-auto border border-stone-700 px-3 py-1.5 text-sm text-stone-300 hover:bg-stone-800">Salir</button>
         </div>
-        <div className="max-w-5xl mx-auto px-6 flex gap-2 border-t border-stone-800 overflow-x-auto whitespace-nowrap">
+        <div className="pestanas-scroll max-w-6xl mx-auto px-4 md:px-6 py-2 flex gap-1 border-t border-white/10 overflow-x-auto whitespace-nowrap">
           {PESTANAS_CRM.map(([id, texto]) => (
-            <button key={id} onClick={() => setTab(id)} className={`px-4 py-3 text-sm ${tab === id ? "text-amber-400 border-b-2 border-amber-400" : "text-stone-400"}`}>{texto}</button>
+            <button key={id} onClick={() => setTab(id)} className={`px-3.5 py-2 text-sm rounded-lg shrink-0 ${tab === id ? "bg-white/15 text-amber-300 font-medium" : "text-stone-300 hover:text-white hover:bg-white/10"}`}>{texto}</button>
           ))}
           <span className="self-center h-5 border-l border-stone-700 mx-1" aria-hidden="true" />
-          <button onClick={() => !esLegado(tab) && setTab("resumen")} className={`px-4 py-3 text-sm ${esLegado(tab) ? "text-amber-400 border-b-2 border-amber-400" : "text-stone-500"}`}>Versión anterior</button>
+          <button onClick={() => !esLegado(tab) && setTab("resumen")} className={`px-3.5 py-2 text-sm rounded-lg shrink-0 ${esLegado(tab) ? "bg-white/15 text-amber-300 font-medium" : "text-stone-400 hover:text-white hover:bg-white/10"}`}>Versión anterior</button>
         </div>
       </div>
 
-      <div className="max-w-5xl mx-auto px-6 mt-8 flex flex-col gap-6">
+      <div className="max-w-6xl mx-auto px-4 md:px-6 mt-8 flex flex-col gap-6">
         {esLegado(tab) && (
           <div className="bg-amber-50 border border-amber-200 p-4 text-sm text-stone-700 flex flex-col gap-3">
             <p><strong>Versión anterior.</strong> Perfiles que ingresan con código y la producción que registraron a mano (compras, seguros, consignaciones, inspecciones y tasaciones). Se conservan para no perder el historial; las ventas, las inspecciones y las tasaciones nuevas ya se trabajan en las pestañas del CRM. Cuando compras y consignaciones pasen al CRM, esta sección se podrá retirar.</p>
@@ -4442,44 +4442,38 @@ function Landing({ onEnterAdmin, onEnterVendor, onEnterInspector, onEnterPersona
   };
 
   return (
-    <div className="min-h-screen bg-stone-100 flex items-center justify-center px-6">
-      <div className="max-w-3xl w-full">
-        <div className="text-center mb-10">
-          <p className="text-xs uppercase tracking-widest text-stone-400 mb-2">Plataforma de gestión automotriz</p>
-          <h1 className="font-serif text-3xl md:text-4xl text-stone-900">Drive Futuro</h1>
+    <div className="min-h-screen flex items-start md:items-center justify-center px-4 py-10" style={{ background: "linear-gradient(180deg, #0f172a 0, #1e293b 300px, #f1f5f9 300px)" }}>
+      <div className="max-w-md w-full">
+        <div className="text-center mb-7 text-white">
+          <div className="mx-auto mb-3 w-12 h-12 rounded-2xl bg-amber-500 text-stone-900 font-bold text-lg flex items-center justify-center shadow-elevada">DF</div>
+          <h1 className="font-serif text-3xl">Drive Futuro</h1>
+          <p className="text-sm text-stone-300 mt-1">Plataforma de gestión automotriz</p>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="bg-white border border-stone-200 p-6 flex flex-col gap-4">
-            <div>
-              <h2 className="font-serif text-xl text-stone-900">Administrador</h2>
-              <p className="text-sm text-stone-500 mt-1">Visualiza la producción de todo el equipo, crea o elimina perfiles de ejecutivos e inspectores.</p>
-            </div>
-            <button onClick={onEnterAdmin} className="mt-auto bg-stone-900 text-white px-4 py-2 text-sm hover:bg-stone-800">Entrar como administrador</button>
-          </div>
-          <div className="bg-white border border-stone-200 p-6 flex flex-col gap-4">
-            <div>
-              <h2 className="font-serif text-xl text-stone-900">Ejecutivo</h2>
-              <p className="text-sm text-stone-500 mt-1">Ingresa con el enlace o código que te entregó tu administrador.</p>
-            </div>
-            <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="Código de acceso"
-              className="border border-stone-300 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-amber-500" />
-            {error && <p className="text-xs text-rose-600">{error}</p>}
-            <button onClick={handleVendorEnter} className="bg-amber-500 text-stone-900 px-4 py-2 text-sm font-medium hover:bg-amber-400">Entrar a mi dashboard</button>
-          </div>
-          <div className="bg-white border border-stone-200 p-6 flex flex-col gap-4">
-            <div>
-              <h2 className="font-serif text-xl text-stone-900">Inspector</h2>
-              <p className="text-sm text-stone-500 mt-1">Ingresa con el enlace o código que te entregó tu administrador.</p>
-            </div>
-            <input value={inspCode} onChange={(e) => setInspCode(e.target.value)} placeholder="Código de acceso"
-              className="border border-stone-300 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-sky-500" />
-            {inspError && <p className="text-xs text-rose-600">{inspError}</p>}
-            <button onClick={handleInspectorEnter} className="bg-sky-600 text-white px-4 py-2 text-sm font-medium hover:bg-sky-500">Entrar a mi checklist</button>
-          </div>
+        <LoginPersonal onEntrar={onEnterPersonal} />
+        <div className="mt-4 text-center">
+          <button onClick={onEnterAdmin} className="text-sm text-stone-600 hover:text-stone-900 underline underline-offset-4">Entrar como administrador</button>
         </div>
-        <div className="mt-6">
-          <LoginPersonal onEntrar={onEnterPersonal} />
-        </div>
+        <details className="mt-6 bg-white/70 border border-stone-200 rounded-xl text-sm">
+          <summary className="cursor-pointer px-4 py-3 text-stone-600 select-none">Acceso con código (perfiles anteriores)</summary>
+          <div className="px-4 pb-4 grid grid-cols-1 gap-5">
+            <div className="flex flex-col gap-2">
+              <h2 className="font-medium text-stone-900">Ejecutivo</h2>
+              <p className="text-xs text-stone-500">Ingresa con el enlace o código que te entregó tu administrador.</p>
+              <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="Código de acceso"
+                className="border border-stone-300 bg-white px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-amber-500" />
+              {error && <p className="text-xs text-rose-600">{error}</p>}
+              <button onClick={handleVendorEnter} className="bg-amber-500 text-stone-900 px-4 py-2 text-sm font-semibold hover:bg-amber-400">Entrar a mi dashboard</button>
+            </div>
+            <div className="flex flex-col gap-2">
+              <h2 className="font-medium text-stone-900">Inspector</h2>
+              <p className="text-xs text-stone-500">Ingresa con el enlace o código que te entregó tu administrador.</p>
+              <input value={inspCode} onChange={(e) => setInspCode(e.target.value)} placeholder="Código de acceso"
+                className="border border-stone-300 bg-white px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-sky-500" />
+              {inspError && <p className="text-xs text-rose-600">{inspError}</p>}
+              <button onClick={handleInspectorEnter} className="bg-sky-600 text-white px-4 py-2 text-sm font-medium hover:bg-sky-500">Entrar a mi checklist</button>
+            </div>
+          </div>
+        </details>
       </div>
     </div>
   );

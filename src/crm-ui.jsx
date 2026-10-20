@@ -5,9 +5,9 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { TRANSMISIONES, COMBUSTIBLES } from "../supabase/functions/api/ventas-core.js";
 
 export const INPUT = "border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-amber-500 w-full";
-export const BTN = "px-3 py-1.5 text-sm border border-stone-300 bg-white text-stone-700 hover:bg-stone-50 disabled:opacity-50";
-export const BTN_PRIMARIO = "px-4 py-2 text-sm bg-stone-900 text-white hover:bg-stone-800 disabled:opacity-50";
-export const BTN_AMBAR = "px-4 py-2 text-sm bg-amber-500 text-stone-900 font-medium hover:bg-amber-400 disabled:opacity-50";
+export const BTN = "px-3 py-1.5 text-sm font-medium border border-stone-300 bg-white text-stone-700 hover:bg-stone-50 disabled:opacity-50";
+export const BTN_PRIMARIO = "px-4 py-2 text-sm font-medium bg-stone-900 text-white shadow-suave hover:bg-stone-700 disabled:opacity-50";
+export const BTN_AMBAR = "px-4 py-2 text-sm bg-amber-500 text-stone-900 font-semibold shadow-suave hover:bg-amber-400 disabled:opacity-50";
 
 export const clp = (n) => (n === null || n === undefined || n === "" || Number.isNaN(Number(n)) ? "—" : `$${Math.round(Number(n)).toLocaleString("es-CL")}`);
 export const fechaHora = (iso) => (iso ? new Date(iso).toLocaleString("es-CL", { dateStyle: "short", timeStyle: "short" }) : "—");
@@ -164,7 +164,7 @@ export const mensajeError = (e) => MENSAJES[e && e.message] || `No se pudo compl
 
 export function Aviso({ tipo = "error", children }) {
   const estilos = tipo === "error" ? "bg-rose-50 border-rose-200 text-rose-800" : tipo === "ok" ? "bg-emerald-50 border-emerald-200 text-emerald-800" : "bg-amber-50 border-amber-200 text-stone-800";
-  return <div className={`border px-4 py-3 text-sm ${estilos}`}>{children}</div>;
+  return <div className={`border px-4 py-3 text-sm rounded-xl ${estilos}`}>{children}</div>;
 }
 export const Cargando = ({ texto = "Cargando…" }) => <p className="text-sm text-stone-500">{texto}</p>;
 
@@ -203,11 +203,11 @@ export function Modal({ titulo, onCerrar, children, ancho = "max-w-2xl" }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [onCerrar]);
   return (
-    <div className="fixed inset-0 z-40 bg-stone-900/50 flex md:items-start md:justify-center md:overflow-y-auto md:py-10" onMouseDown={(e) => e.target === e.currentTarget && onCerrar()}>
-      <div className={`bg-stone-100 w-full ${ancho} md:my-auto flex flex-col max-h-screen md:max-h-none overflow-y-auto`}>
-        <div className="bg-stone-900 text-stone-100 px-5 py-3 flex items-center justify-between sticky top-0 z-10">
+    <div className="fixed inset-0 z-40 bg-stone-900/50 backdrop-blur-[2px] flex md:items-start md:justify-center md:overflow-y-auto md:py-10" onMouseDown={(e) => e.target === e.currentTarget && onCerrar()}>
+      <div className={`bg-stone-100 w-full ${ancho} md:my-auto flex flex-col max-h-screen md:max-h-none overflow-y-auto md:rounded-2xl md:shadow-elevada`}>
+        <div className="bg-stone-900 text-stone-100 px-5 py-3.5 flex items-center justify-between sticky top-0 z-10">
           <h2 className="font-serif text-lg">{titulo}</h2>
-          <button onClick={onCerrar} className="text-stone-300 hover:text-white px-2 py-1" aria-label="Cerrar">✕</button>
+          <button onClick={onCerrar} className="text-stone-300 hover:text-white hover:bg-white/10 px-2.5 py-1" aria-label="Cerrar">✕</button>
         </div>
         <div className="p-5 flex flex-col gap-4">{children}</div>
       </div>
@@ -240,13 +240,39 @@ export function useCarga(fn, deps) {
 /** Pestañas horizontales con el estilo del panel. */
 export function Pestanas({ valor, onCambio, opciones }) {
   return (
-    <div className="flex gap-1 border-b border-stone-300 overflow-x-auto whitespace-nowrap">
+    <div className="pestanas-scroll flex gap-1 overflow-x-auto whitespace-nowrap p-1 bg-white border border-stone-200 rounded-xl shadow-suave">
       {opciones.map(([id, texto, extra]) => (
-        <button key={id} onClick={() => onCambio(id)} className={`px-4 py-2.5 text-sm ${valor === id ? "text-stone-900 border-b-2 border-amber-500 font-medium" : "text-stone-500 hover:text-stone-800"}`}>
-          {texto}{extra ? <span className="ml-1.5 text-xs bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded-full">{extra}</span> : null}
+        <button key={id} onClick={() => onCambio(id)} aria-current={valor === id ? "page" : undefined}
+          className={`px-3.5 py-2 text-sm rounded-lg shrink-0 ${valor === id ? "bg-stone-900 text-white font-medium shadow-suave" : "text-stone-600 hover:text-stone-900 hover:bg-stone-100"}`}>
+          {texto}{extra ? <span className={`ml-1.5 text-xs px-1.5 py-0.5 rounded-full ${valor === id ? "bg-amber-400 text-stone-900" : "bg-amber-100 text-amber-800"}`}>{extra}</span> : null}
         </button>
       ))}
     </div>
+  );
+}
+
+/** Menú lateral agrupado (pantallas anchas). `grupos`: [{ titulo, ids }] ordenados; las opciones que no estén en ningún grupo van al final. */
+export function NavegacionLateral({ valor, onCambio, opciones, grupos }) {
+  const porId = Object.fromEntries(opciones.map((o) => [o[0], o]));
+  const usados = new Set();
+  const bloques = grupos.map((g) => ({ titulo: g.titulo, items: g.ids.filter((id) => porId[id]).map((id) => { usados.add(id); return porId[id]; }) })).filter((b) => b.items.length);
+  const sueltas = opciones.filter((o) => !usados.has(o[0]));
+  if (sueltas.length) bloques.push({ titulo: "Otros", items: sueltas });
+  return (
+    <nav className="bg-white border border-stone-200 rounded-2xl shadow-suave p-2 flex flex-col gap-3" aria-label="Secciones">
+      {bloques.map((b) => (
+        <div key={b.titulo}>
+          <p className="px-3 pt-1 pb-1 text-[11px] font-semibold uppercase tracking-wider text-stone-400">{b.titulo}</p>
+          {b.items.map(([id, texto, extra]) => (
+            <button key={id} onClick={() => onCambio(id)} aria-current={valor === id ? "page" : undefined}
+              className={`w-full text-left flex items-center justify-between gap-2 px-3 py-2 text-sm rounded-lg ${valor === id ? "bg-stone-900 text-white font-medium shadow-suave" : "text-stone-600 hover:text-stone-900 hover:bg-stone-100"}`}>
+              <span className="truncate">{texto}</span>
+              {extra ? <span className={`text-xs px-1.5 py-0.5 rounded-full ${valor === id ? "bg-amber-400 text-stone-900" : "bg-amber-100 text-amber-800"}`}>{extra}</span> : null}
+            </button>
+          ))}
+        </div>
+      ))}
+    </nav>
   );
 }
 

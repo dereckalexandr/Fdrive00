@@ -6,6 +6,7 @@
  * permisos de la persona y deja a la vista los que vienen en camino.
  * ----------------------------------------------------------------
  */
+import { Icono, Iniciales } from "./iconos.jsx";
 import React, { useState } from "react";
 import { ROLES, PERMISOS, tienePermiso, validarRut, formatearRut, claveValida } from "../supabase/functions/api/crm-core.js";
 
@@ -44,20 +45,20 @@ export function LoginPersonal({ onEntrar }) {
   };
 
   return (
-    <form onSubmit={entrar} className="bg-white border border-stone-200 p-6 flex flex-col md:flex-row md:items-end gap-4">
-      <div className="md:w-1/3">
-        <h2 className="font-serif text-xl text-stone-900">Personal</h2>
-        <p className="text-sm text-stone-500 mt-1">Ingresa con tu RUT y la clave que te entregó el administrador.</p>
+    <form onSubmit={entrar} className="bg-white border border-stone-200 p-6 flex flex-col gap-4 shadow-elevada">
+      <div>
+        <h2 className="font-serif text-xl text-stone-900">Ingresa a tu cuenta</h2>
+        <p className="text-sm text-stone-500 mt-1">Usa tu RUT y la clave que te entregó el administrador.</p>
       </div>
-      <label className="flex-1 text-xs text-stone-500 flex flex-col gap-1">RUT
+      <label className="text-sm text-stone-700 flex flex-col gap-1">RUT
         <input value={rut} onChange={(e) => setRut(e.target.value)} onBlur={() => validarRut(rut) && setRut(formatearRut(rut))}
           placeholder="12.345.678-5" autoComplete="username" inputMode="text" className={`${INPUT} font-mono`} />
       </label>
-      <label className="flex-1 text-xs text-stone-500 flex flex-col gap-1">Clave
+      <label className="text-sm text-stone-700 flex flex-col gap-1">Clave
         <input type="password" value={clave} onChange={(e) => setClave(e.target.value)} autoComplete="current-password" className={INPUT} />
       </label>
-      <button type="submit" disabled={enviando} className="bg-stone-900 text-white px-5 py-2 text-sm hover:bg-stone-800 disabled:opacity-60">{enviando ? "Ingresando…" : "Ingresar"}</button>
-      {error && <p className="text-xs text-rose-600 md:basis-full">{error}</p>}
+      {error && <p className="text-sm text-rose-600">{error}</p>}
+      <button type="submit" disabled={enviando} className="bg-stone-900 text-white px-5 py-2.5 text-sm font-medium hover:bg-stone-700 disabled:opacity-60 shadow-suave">{enviando ? "Ingresando…" : "Ingresar"}</button>
     </form>
   );
 }
@@ -116,48 +117,47 @@ const MODULOS_ACTIVOS = [
   { id: "compra", titulo: "Tasación de compra", texto: "Precio de compra sugerido según los avisos de Chileautos.", permisos: ["tasacion_compra.usar"] },
 ];
 
+const ACENTOS = {
+  tasaciones: "bg-sky-100 text-sky-700", validacion: "bg-emerald-100 text-emerald-700", anuncios: "bg-violet-100 text-violet-700", marketing: "bg-rose-100 text-rose-700",
+  ventas: "bg-amber-100 text-amber-700", inspector: "bg-teal-100 text-teal-700", compra: "bg-indigo-100 text-indigo-700",
+};
+
 export function EstacionTrabajo({ me, onAbrir, onSalir }) {
   const abiertos = MODULOS_ACTIVOS.filter((m) => m.permisos.some((p) => tienePermiso(me.permisos, p)));
-  // Lo que la persona podrá usar cuando se construya su perfil (permisos suyos aún sin módulo).
-  const proximos = PERMISOS.filter((p) => !p.disponible && tienePermiso(me.permisos, p.id));
 
   return (
     <div className="min-h-screen bg-stone-100 pb-16">
       <div className="bg-stone-900 text-stone-100">
-        <div className="max-w-5xl mx-auto px-6 py-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-          <div>
-            <p className="text-xs uppercase tracking-widest text-stone-400 mb-1">Estación de trabajo{me.local ? ` · ${me.local.nombre}` : ""}</p>
-            <h1 className="font-serif text-2xl md:text-3xl">{me.nombre}</h1>
-            <p className="text-sm text-stone-400 mt-1">{me.roles.map(rolNombre).join(" · ")}</p>
+        <div className="max-w-5xl mx-auto px-4 md:px-6 py-6 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-4 min-w-0">
+            <Iniciales nombre={me.nombre} className="w-12 h-12 text-base" />
+            <div className="min-w-0">
+              <p className="text-xs uppercase tracking-widest text-stone-400 mb-0.5 truncate">Estación de trabajo{me.local ? ` · ${me.local.nombre}` : ""}</p>
+              <h1 className="font-serif text-xl md:text-2xl truncate">{me.nombre}</h1>
+              <p className="text-sm text-stone-400 truncate">{me.roles.map(rolNombre).join(" · ")}</p>
+            </div>
           </div>
-          <button onClick={onSalir} className="self-start md:self-auto border border-stone-700 px-3 py-1.5 text-sm text-stone-300 hover:bg-stone-800">Salir</button>
+          <button onClick={onSalir} className="shrink-0 inline-flex items-center gap-2 border border-stone-600 px-3 py-1.5 text-sm text-stone-200 hover:bg-white/10"><Icono nombre="salir" className="w-4 h-4" />Salir</button>
         </div>
       </div>
 
-      <div className="max-w-5xl mx-auto px-6 mt-8 flex flex-col gap-6">
+      <div className="max-w-5xl mx-auto px-4 md:px-6 mt-8 flex flex-col gap-6">
         {abiertos.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {abiertos.map((m) => (
-              <button key={m.id} onClick={() => onAbrir(m.id)} className="text-left bg-white border border-stone-200 p-6 hover:border-amber-500 transition-colors">
-                <h2 className="font-serif text-xl text-stone-900">{m.titulo}</h2>
-                <p className="text-sm text-stone-500 mt-1">{m.texto}</p>
-                <p className="text-sm text-amber-700 mt-4">Abrir →</p>
+              <button key={m.id} onClick={() => onAbrir(m.id)} className="group text-left bg-white border border-stone-200 p-5 hover:border-amber-400 hover:shadow-elevada flex gap-4">
+                <span className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${ACENTOS[m.id] || "bg-stone-100 text-stone-700"}`}><Icono nombre={m.id} className="w-6 h-6" /></span>
+                <span className="min-w-0 flex-1">
+                  <span className="block font-serif text-lg text-stone-900">{m.titulo}</span>
+                  <span className="block text-sm text-stone-500 mt-1">{m.texto}</span>
+                  <span className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-amber-700 group-hover:gap-2 transition-all">Abrir <Icono nombre="flecha" className="w-4 h-4" /></span>
+                </span>
               </button>
             ))}
           </div>
         ) : (
           <div className="bg-white border border-stone-200 p-8 text-center text-stone-600 text-sm">
-            Tu perfil todavía no tiene módulos disponibles. Estamos construyendo tu estación de trabajo; cuando esté lista aparecerá aquí.
-          </div>
-        )}
-
-        {proximos.length > 0 && (
-          <div className="bg-white border border-stone-200 p-5">
-            <h3 className="font-serif text-lg text-stone-900">En construcción para tu perfil</h3>
-            <p className="text-xs text-stone-500 mt-1 mb-3">Ya tienes permiso para esto; se activará cuando termine su desarrollo.</p>
-            <div className="flex flex-wrap gap-2">
-              {proximos.map((p) => <span key={p.id} className="text-xs border border-stone-200 bg-stone-50 text-stone-600 px-2 py-1">{p.nombre}</span>)}
-            </div>
+            Tu perfil todavía no tiene módulos disponibles. Cuando el administrador te habilite uno, aparecerá aquí.
           </div>
         )}
       </div>

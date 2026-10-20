@@ -1,0 +1,85 @@
+// Entorno de demostración LOCAL para trabajar el diseño sin tocar producción.
+//
+// Levanta la función real contra una base falsa en memoria, con datos de ejemplo, y abre la interfaz apuntando a ella.
+// Nada de esto toca Supabase. Uso:  node scripts/dev-demo.mjs   y abrir http://127.0.0.1:5199
+//
+// Accesos de demostración (clave de todos: Prueba12345):
+//   Administrador (cuenta maestra): admin@prueba.cl / MaestraSegura123
+//   Jefe Local 12.345.678-5 · Ejecutivo 6.000.000-K · Tasador 5.555.555-9 · Inspector 12.000.000-4
+//   Validador 13.000.000-2 · Anunciante 14.000.000-0 · Marketing 10.000.013-K
+import { createServer as crearHttp } from "node:http";
+import { iniciarFuncion, api, nuevaIp, loginAdmin, crm, manejar, db, ADMIN_EMAIL, ADMIN_PW } from "../tests/helpers/api-env.mjs";
+
+const CLAVE = "Prueba12345";
+const PUERTO_API = 54321;
+const PUERTO_WEB = 5199;
+
+await iniciarFuncion();
+const admin = await loginAdmin();
+const ve = (token, op, extra = {}) => api({ action: "ventas", token, op, ...extra });
+const U = {};
+const L1 = (await crm(admin, "locales.create", { nombre: "Casa matriz" })).local.id;
+async function crear(clave, nombre, rut, roles, extra) {
+  const r = await crm(admin, "usuarios.create", { datos: { nombre, rut, roles, localId: L1, extra, email: `${clave}@demo.cl` }, clave: CLAVE });
+  nuevaIp();
+  const l = await api({ action: "userLogin", rut, password: CLAVE });
+  U[clave] = { id: r.usuario.id, token: l.token, nombre };
+}
+const habil = { otorgar: ["ventas.operar", "compras.operar", "consignaciones.operar"], quitar: [] };
+await crear("jefe", "Julia Jefa", "12.345.678-5", ["jefe_local"]);
+await crear("e1", "Eva Contreras", "6.000.000-K", ["ejecutivo"], habil);
+await crear("e2", "Marcos Rojas", "7.654.321-6", ["ejecutivo"], habil);
+await crear("tasador", "Tito Tasador", "5.555.555-9", ["tasador"]);
+await crear("insp", "Ivo Inspector", "12.000.000-4", ["inspector"]);
+await crear("val", "Vera Validadora", "13.000.000-2", ["validador"]);
+await crear("anu", "Ana Anunciante", "14.000.000-0", ["anunciante"]);
+await crear("mkt", "Marta Marketing", "10.000.013-K", ["marketing"]);
+
+// En la demostración nadie debe cambiar su clave al entrar.
+for (const u of db.tablas.usuarios) u.debe_cambiar_clave = false;
+
+const foto = (c1, c2) => `data:image/svg+xml;utf8,${encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' width='640' height='400'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='${c1}'/><stop offset='1' stop-color='${c2}'/></linearGradient></defs><rect width='640' height='400' fill='url(#g)'/><g fill='white' opacity='.85'><rect x='150' y='190' width='340' height='80' rx='30'/><rect x='215' y='140' width='210' height='70' rx='30'/><circle cx='220' cy='280' r='34'/><circle cx='420' cy='280' r='34'/></g></svg>`)}`;
+const AUTOS = [
+  ["Toyota", "Yaris", 2021, 38000, 9890000, "#0f172a", "#475569"], ["Hyundai", "Tucson", 2022, 21000, 17490000, "#7c2d12", "#f59e0b"],
+  ["Kia", "Rio 5", 2020, 52000, 8590000, "#1e3a8a", "#38bdf8"], ["Suzuki", "Swift", 2023, 9000, 11990000, "#14532d", "#4ade80"],
+  ["Chevrolet", "Sail", 2019, 67000, 6290000, "#581c87", "#c084fc"], ["Nissan", "Qashqai", 2021, 44000, 15290000, "#334155", "#94a3b8"],
+];
+const vehs = [];
+for (const [i, [marca, modelo, anio, km, precio, c1, c2]] of AUTOS.entries()) {
+  const r = await ve(U.jefe.token, "inventario.save", { datos: { patente: `${"BCDFGH"[i]}${"KLMNPR"[i]}${"TVWXYZ"[i]}${"BCDFGH"[(i + 2) % 6]}${10 + i}`, marca, modelo, anio, km, precioLista: precio, costo: Math.round(precio * 0.84), color: ["Gris", "Rojo", "Azul", "Verde", "Morado", "Plomo"][i], transmision: i % 2 ? "Automática" : "Mecánica", combustible: "Bencina" } });
+  if (!r.vehiculo) throw new Error("No se pudo crear el vehículo de ejemplo: " + JSON.stringify(r));
+  vehs.push(r.vehiculo);
+  // Foto de ejemplo (dibujo) para ver las tarjetas con imagen.
+  db.tablas.vehiculos.find((v) => v.id === r.vehiculo.id).fotos = ["f1"];
+  db.tablas.kv_store.push({ key: `vfoto::${r.vehiculo.id}::f1`, value: foto(c1, c2), shared: true, updated_at: new Date().toISOString() });
+}
+const NOMBRES = ["Camila Soto", "Pedro Núñez", "Javiera Pino", "Rodrigo Vera", "Daniela Muñoz", "Felipe Araya", "Sofía Castro", "Tomás Herrera"];
+const leads = [];
+for (const [i, nombre] of NOMBRES.entries()) {
+  const quien = i % 2 ? U.e2 : U.e1;
+  const r = await ve(quien.token, "leads.create", { cliente: { nombre, telefono: `9${String(70000000 + i * 1137)}`, email: `c${i}@mail.cl` }, lead: { vehiculoId: vehs[i % vehs.length].id, fuente: ["Sitio web", "Instagram", "Referido", "Marketplace"][i % 4] } });
+  if (r.lead) leads.push({ lead: r.lead, quien });
+}
+for (const [i, etapa] of ["contactado", "seguimiento", "contactado"].entries()) if (leads[i]) await ve(leads[i].quien.token, "leads.mover", { id: leads[i].lead.id, etapa });
+for (const i of [0, 1, 2]) {
+  if (!leads[i]) continue;
+  await ve(leads[i].quien.token, "cotizaciones.save", { leadId: leads[i].lead.id, vehiculoId: vehs[i].id, datos: { descuento: i === 1 ? 250000 : 0 } });
+}
+
+// Servidor de la función simulada (misma dirección que la real: /functions/v1/api).
+crearHttp(async (req, res) => {
+  const trozos = [];
+  for await (const t of req) trozos.push(t);
+  const cuerpo = Buffer.concat(trozos);
+  const r = await manejar(new Request(`http://x${req.url}`, { method: req.method, headers: { ...req.headers, "x-forwarded-for": "127.0.0.1" }, body: ["GET", "HEAD", "OPTIONS"].includes(req.method) ? undefined : cuerpo }));
+  const salida = Buffer.from(await r.arrayBuffer());
+  res.writeHead(r.status, Object.fromEntries(r.headers.entries()));
+  res.end(salida);
+}).listen(PUERTO_API, "127.0.0.1");
+
+process.env.VITE_SUPABASE_URL = `http://127.0.0.1:${PUERTO_API}`;
+process.env.VITE_SUPABASE_ANON_KEY = "demo";
+const { createServer } = await import("vite");
+const vite = await createServer({ server: { port: PUERTO_WEB, host: "127.0.0.1", strictPort: true } });
+await vite.listen();
+console.log(`\nDemostración lista: http://127.0.0.1:${PUERTO_WEB}\nAdministrador: ${ADMIN_EMAIL} / ${ADMIN_PW}\nPersonas: RUT de arriba con la clave ${CLAVE}\n`);
