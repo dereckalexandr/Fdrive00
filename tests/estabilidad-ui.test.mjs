@@ -28,7 +28,7 @@ test("Los módulos usan la misma función por defecto para hablar con el servido
 
 test("Las pantallas principales están protegidas con la red de seguridad contra pantallas en blanco", () => {
   assert.match(readFileSync(join(SRC, "main.jsx"), "utf8"), /<ErrorBoundary>/);
-  assert.match(readFileSync(join(SRC, "crm-ventas.jsx"), "utf8"), /<ErrorBoundary clave=\{tab\}>/);
+  assert.match(readFileSync(join(SRC, "crm-ventas.jsx"), "utf8"), /<ErrorBoundary clave=\{tabVigente\}>/);
 });
 
 test("El sitio público y el CRM conviven: «/plataforma» y los enlaces antiguos (?vendor, ?inspector) abren el CRM", () => {
