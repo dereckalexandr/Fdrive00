@@ -177,6 +177,11 @@ export async function api(body) {
   return { status: res.status, ...(await res.json()) };
 }
 export const nuevaIp = () => { IP.n++; };
+/** GET sin cuerpo (chequeo de salud). */
+export async function obtener(ruta) {
+  const res = await handler(new Request("http://x/api" + ruta, { method: "GET" }));
+  return { status: res.status, ...(await res.json()) };
+}
 
 export async function loginAdmin() {
   const r = await api({ action: "adminLogin", email: ADMIN_EMAIL, password: ADMIN_PW });

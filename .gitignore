@@ -10,3 +10,6 @@ npm-debug.log*
 .vercel
 .env*
 !.env.example
+
+# Respaldos de datos (contienen datos personales: nunca se suben)
+respaldos/

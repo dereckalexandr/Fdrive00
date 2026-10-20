@@ -721,3 +721,15 @@ npx supabase secrets set RESEND_API_KEY=<tu clave> MAIL_FROM="Drive Futuro <avis
 | Documentos validados · documento observado o rechazado | el Ejecutivo del lead |
 
 Los textos van escapados (nada de lo que escribe una persona se interpreta como código) y los asuntos son de una sola línea. Código: `supabase/functions/api/correo.ts` (envío) y `avisos-core.js` (formato); los avisos se disparan en `ventas.ts` y `publico.ts`. Pruebas: `tests/avisos-core.test.mjs` y `tests/avisos-api.test.mjs` (envío simulado). **Límites:** no hay WhatsApp; no hay reintentos ni opción de que cada persona apague sus avisos; la confirmación al cliente usa el correo que él escribió (los frenos por IP y teléfono del sitio limitan el abuso).
+
+## Respaldos y estado del sistema
+
+**Respaldo** (`node scripts/respaldo.mjs`, en la terminal del proyecto, con la sesión de Supabase iniciada): copia **todas las tablas** del CRM (incluido el almacén de fichas y fotos) a `respaldos/AAAA-MM-DD_HHMM/`, un archivo `.jsonl` por tabla (una fila por línea) más `manifest.json` con el conteo de filas de cada una, comparado contra la base. Si alguna tabla queda incompleta lo dice y **no** lo registra como realizado. Conserva los 8 últimos (`--conservar=20` para más). Tarda unos 2 minutos. La carpeta `respaldos/` está en `.gitignore`: **contiene datos personales, nunca se sube**; guárdala como tal (idealmente copia también a un disco externo o nube privada). Recomendado: una vez por semana.
+
+**Restaurar una tabla:** cada línea es la fila completa en JSON. En el SQL Editor: `insert into tabla select * from jsonb_populate_recordset(null::tabla, '[ ...filas... ]'::jsonb);` (ordenando por dependencias: locales → usuarios → clientes → vehiculos → leads → el resto). Para una pérdida total conviene pedirme que prepare el restaurador completo.
+
+**Estado** (panel del Administrador → pestaña **Estado**): servidor y tiempo de respuesta, fecha del último respaldo (en rojo si pasó más de una semana o no hay), avisos por correo (activos, fallidos y omitidos de los últimos 7 días con el motivo), y cuántos datos hay guardados. En *Bitácora* hay filtros «Avisos» y «Respaldos».
+
+**Alerta si se cae:** la función responde `GET .../functions/v1/api?health=1` con `{"ok":true}` solo si la base contesta (503 si no; no entrega datos). Crea un monitor gratis en UptimeRobot (o similar) de tipo *keyword* sobre esa dirección buscando `"ok":true`, cada 5 minutos, con aviso a tu correo; haz otro para la dirección del sitio. La dirección exacta está en la pestaña Estado.
+
+Código: `scripts/respaldo.mjs`, `sistema.estado` y el chequeo de salud en `index.ts`, pantalla en `crm-admin.jsx`. Pruebas: `tests/estado-api.test.mjs`.

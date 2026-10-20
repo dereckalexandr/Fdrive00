@@ -404,8 +404,9 @@ const ACCIONES = {
   "usuario.desactivar": "Desactivó un usuario", "usuario.reiniciar_clave": "Reinició una clave", "usuario.cambiar_clave": "Cambió su propia clave",
   "permisos.editar_rol": "Cambió los permisos de un rol", "permisos.reiniciar_rol": "Restableció los permisos de un rol",
   "config.editar": "Cambió la configuración", "local.crear": "Creó un local", "local.editar": "Editó un local",
+  "respaldo.realizado": "Hizo un respaldo", "aviso.fallido": "Falló un aviso por correo", "aviso.omitido": "Aviso por correo omitido",
 };
-const FILTROS_BITACORA = [["", "Todo"], ["usuario.", "Usuarios"], ["permisos.", "Permisos"], ["config.", "Configuración"], ["local.", "Locales"]];
+const FILTROS_BITACORA = [["", "Todo"], ["usuario.", "Usuarios"], ["permisos.", "Permisos"], ["config.", "Configuración"], ["local.", "Locales"], ["aviso.", "Avisos"], ["respaldo.", "Respaldos"]];
 const POR_PAGINA = 50;
 const corto = (v) => { const t = typeof v === "string" ? v : JSON.stringify(v); return t && t.length > 90 ? t.slice(0, 87) + "…" : t; };
 
@@ -621,6 +622,54 @@ function LocalesPanel() {
   );
 }
 
+/* ---------- Estado del sistema: servidor, respaldo y avisos ---------- */
+const URL_SALUD = import.meta.env.VITE_SUPABASE_URL ? `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/api?health=1` : "";
+const dias = (iso) => Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
+const NOMBRES_TABLA = { usuarios: "Usuarios", locales: "Locales", clientes: "Clientes", leads: "Leads", vehiculos: "Vehículos", cierres: "Ventas cerradas", kv_store: "Fichas y fotos (almacén)" };
+
+function EstadoTab() {
+  const [v, setV] = useState(0);
+  const { cargando, error, datos } = useCarga(() => crm("sistema.estado"), [v]);
+  const Fila = ({ ok, titulo, children }) => (
+    <Tarjeta>
+      <div className="flex items-start gap-3">
+        <span className={`mt-1 inline-block w-3 h-3 rounded-full shrink-0 ${ok === true ? "bg-emerald-500" : ok === false ? "bg-rose-500" : "bg-amber-500"}`} />
+        <div className="min-w-0"><div className="font-medium text-stone-900">{titulo}</div><div className="text-sm text-stone-600 mt-1 flex flex-col gap-1">{children}</div></div>
+      </div>
+    </Tarjeta>
+  );
+  if (error && !datos) return <Aviso>{error}</Aviso>;
+  if (!datos) return <Cargando />;
+  const r = datos.respaldo;
+  const edad = r ? dias(r.en) : null;
+  const a = datos.avisos;
+  return (
+    <>
+      <div className="flex items-center gap-3"><button onClick={() => setV(v + 1)} disabled={cargando} className={BTN}>{cargando ? "Actualizando…" : "Actualizar"}</button><span className="text-xs text-stone-500">Consultado {fechaHora(datos.ahora)}</span></div>
+      <Fila ok={datos.dbMs < 1500} titulo="Servidor y base de datos">
+        <span>Responde en {datos.dbMs} ms.</span>
+        {URL_SALUD && <span className="text-xs text-stone-500">Para recibir una alerta si se cae, crea un monitor gratis (UptimeRobot u otro) que abra cada 5 minutos esta dirección: <code className="break-all bg-stone-100 px-1">{URL_SALUD}</code> (debe contener el texto <code>"ok":true</code>).</span>}
+      </Fila>
+      <Fila ok={r ? (edad <= 7) : false} titulo="Respaldo de los datos">
+        {r ? <span>Último respaldo: {fechaHora(r.en)} (hace {edad} {edad === 1 ? "día" : "días"}){r.detalle && r.detalle.filas ? ` · ${r.detalle.filas} registros` : ""}.</span> : <span>Todavía no se ha hecho ningún respaldo.</span>}
+        {(!r || edad > 7) && <span className="text-amber-700">Haz uno ahora, en la terminal del proyecto: <code className="bg-stone-100 px-1">node scripts/respaldo.mjs</code></span>}
+        <span className="text-xs text-stone-500">Se guarda en la carpeta <code>respaldos/</code> de tu computador (no sube a internet). Se recomienda hacerlo una vez por semana.</span>
+      </Fila>
+      <Fila ok={!a.activo ? null : a.fallidos7d === 0} titulo="Avisos por correo">
+        {!a.activo ? <span>Apagados (falta la clave de Resend en el servidor).</span> : <span>Activos · remitente {a.remitente || "(sin definir)"}{a.enlaceConfigurado ? "" : " · falta la dirección del sitio (APP_URL): los correos van sin botón"}.</span>}
+        {a.activo && <span>Últimos 7 días: {a.fallidos7d} {a.fallidos7d === 1 ? "fallido" : "fallidos"}, {a.omitidos7d} omitidos (la persona no tiene correo).</span>}
+        {a.ultimosFallos.map((f, i) => <span key={i} className="text-xs text-rose-700 break-words">{fechaHora(f.en)} · {f.asunto}: {f.error}</span>)}
+      </Fila>
+      <Tarjeta>
+        <div className="font-medium text-stone-900 mb-2">Datos guardados</div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+          {Object.entries(datos.conteos).map(([t, n]) => <div key={t}><div className="text-xs text-stone-500">{NOMBRES_TABLA[t] || t}</div><div className="font-mono text-stone-900">{n == null ? "—" : n.toLocaleString("es-CL")}</div></div>)}
+        </div>
+      </Tarjeta>
+    </>
+  );
+}
+
 function ConfigTab() {
   const { cargando, error, datos, recargar } = useCarga(() => crm("config.get"), []);
   const [msg, setMsg] = useState({ tipo: "", texto: "" });
@@ -798,6 +847,7 @@ export const PESTANAS_CRM = [
   ["crm-permisos", "Permisos"],
   ["crm-reportes", "Reportes"],
   ["crm-bitacora", "Bitácora"],
+  ["crm-estado", "Estado"],
   ["crm-config", "Configuración"],
 ];
 
@@ -809,6 +859,7 @@ export function AdminCrmPanel({ tab, renderEstimador, renderFichas }) {
       {tab === "crm-permisos" && <PermisosTab />}
       {tab === "crm-reportes" && <ReportesTab />}
       {tab === "crm-bitacora" && <BitacoraTab />}
+      {tab === "crm-estado" && <EstadoTab />}
       {tab === "crm-config" && <ConfigTab />}
     </>
   );

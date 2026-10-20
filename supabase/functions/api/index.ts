@@ -458,6 +458,33 @@ async function crmOp(s: Session, body: any): Promise<Response> {
     return json({ filas: data, total: count ?? 0 });
   }
 
+  /* --- estado del sistema --- */
+  if (op === "sistema.estado") {
+    const t0 = Date.now();
+    const ping = await sb.from("config_negocio").select("clave").limit(1);
+    const dbMs = Date.now() - t0;
+    if (ping.error && !isMissingTable(ping.error)) return dbFail(ping.error);
+    const conteos: Record<string, number | null> = {};
+    for (const t of ["usuarios", "locales", "clientes", "leads", "vehiculos", "cierres", "kv_store"]) {
+      const r = await sb.from(t).select("*", { count: "exact", head: true });
+      conteos[t] = r.error ? null : (r.count ?? 0);
+    }
+    const resp = await sb.from("bitacora").select("creado_en, detalle").eq("accion", "respaldo.realizado").order("creado_en", { ascending: false }).limit(1);
+    const hace7 = new Date(Date.now() - 7 * 86_400_000).toISOString();
+    const fall = await sb.from("bitacora").select("creado_en, detalle").eq("accion", "aviso.fallido").gte("creado_en", hace7).order("creado_en", { ascending: false }).limit(50);
+    const omit = await sb.from("bitacora").select("id").eq("accion", "aviso.omitido").gte("creado_en", hace7);
+    const fallidos = fall.data ?? [];
+    return json({
+      ahora: new Date().toISOString(), dbMs, conteos,
+      respaldo: (resp.data ?? [])[0] ? { en: resp.data[0].creado_en, detalle: resp.data[0].detalle ?? {} } : null,
+      avisos: {
+        activo: !!Deno.env.get("RESEND_API_KEY"), remitente: Deno.env.get("MAIL_FROM") ?? "", enlaceConfigurado: !!Deno.env.get("APP_URL"),
+        fallidos7d: fallidos.length, omitidos7d: (omit.data ?? []).length,
+        ultimosFallos: fallidos.slice(0, 3).map((f: any) => ({ en: f.creado_en, error: String(f.detalle?.error ?? "").slice(0, 200), asunto: String(f.detalle?.asunto ?? "") })),
+      },
+    });
+  }
+
   return json({ error: "unknown_op" }, 400);
 }
 
@@ -465,7 +492,7 @@ async function crmOp(s: Session, body: any): Promise<Response> {
 const cors = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "content-type, authorization, apikey, x-client-info",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 };
 const json = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { ...cors, "Content-Type": "application/json" } });
@@ -489,6 +516,15 @@ async function masterOk(email: unknown, password: unknown) {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
+  // Chequeo de salud para monitores externos (UptimeRobot y similares): responde 200 solo si la base contesta. No devuelve datos.
+  if (req.method === "GET" && new URL(req.url).searchParams.has("health")) {
+    const t0 = Date.now();
+    try {
+      const { error } = await sb.from(TABLE).select("key").limit(1);
+      if (error) throw error;
+      return json({ ok: true, ms: Date.now() - t0 });
+    } catch { return json({ ok: false }, 503); }
+  }
   if (req.method !== "POST") return json({ error: "method" }, 405);
   if (!SESSION_SECRET) return json({ error: "server_not_configured" }, 500);
 
