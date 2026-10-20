@@ -692,3 +692,9 @@ drive-futuro/
 │   └── index.css            # Estilos base + Tailwind
 └── README.md
 ```
+
+## CRM · Fichas de inspectores para el Jefe Local y el Administrador
+
+En **Comercial → Fichas de inspectores** (sin SQL nuevo) el **Jefe Local** (las de su local) y la **cuenta maestra** (las de todos los locales) ven, en **solo lectura**, el detalle completo de cada **inspección** del Inspector (checklist ítem por ítem, ficha del vehículo, fotos, observaciones, **nombre y RUN del propietario** y descarga del **PDF con el CAV**) y cada **tasación** (valorización) que el Inspector hace en su propio checklist, con sus valores y PDF. Hay pestañas Inspecciones / Tasaciones del Inspector y un buscador por inspector, patente, vehículo o propietario.
+
+Servidor: `inspecciones.fichas_equipo` (quiénes inspeccionan en el local) y una lectura (`get` / `list`) del almacén para las claves `inspeccion::`, `tasacion::` y `foto::` de personas del **mismo local** del Jefe Local; nunca escritura ni borrado. Solo incluye a los Inspectores del CRM (con RUT); los perfiles antiguos por código siguen en *Versión anterior → Inspectores (código)*. Esto reemplaza la regla anterior de que los datos del propietario eran solo del Inspector y el Administrador. Pruebas: `tests/inspecciones-api.test.mjs`.

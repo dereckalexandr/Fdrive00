@@ -3538,6 +3538,140 @@ function TasacionCompra({ inicial, onResultado } = {}) {
 }
 
 // Pestañas de la versión anterior (perfiles con código): se mantienen agrupadas mientras compras y consignaciones pasan al CRM.
+/** Fichas de inspección y valorizaciones de las personas que inspeccionan. Las ve el Jefe Local (su local) y la cuenta maestra (todos), completas, con los datos del propietario y el PDF con el CAV. Solo lectura. */
+function FichasEquipo() {
+  const [estado, setEstado] = useState({ cargando: true, error: "", inspectores: [], inspecciones: [], valorizaciones: [], pendientes: 0 });
+  const [vista, setVista] = useState("inspecciones");
+  const [abierto, setAbierto] = useState(null); // { tipo, key, data, inspectorId, inspectorNombre }
+  const [msg, setMsg] = useState("");
+  const [filtro, setFiltro] = useState("");
+
+  useEffect(() => {
+    let cancelado = false;
+    (async () => {
+      try {
+        const r = await window.auth.ventas("inspecciones.fichas_equipo", {});
+        const inspectores = r.inspectores || [];
+        const claves = [];
+        for (const i of inspectores) {
+          for (const [tipo, pref] of [["inspeccion", "inspeccion"], ["valorizacion", "tasacion"]]) {
+            try {
+              const l = await window.storage.list(pref + "::" + i.id + "::", true);
+              for (const k of (l && l.keys) || []) claves.push({ tipo, key: k, inspectorId: i.id, inspectorNombre: i.nombre });
+            } catch (e) { /* si un inspector no se puede listar, se sigue con los demás */ }
+          }
+        }
+        if (cancelado) return;
+        setEstado((x) => ({ ...x, inspectores, pendientes: claves.length }));
+        const hechas = { inspeccion: [], valorizacion: [] };
+        let cola = 0;
+        const trabajar = async () => {
+          while (cola < claves.length && !cancelado) {
+            const c = claves[cola++];
+            try {
+              const res = await window.storage.get(c.key, true);
+              if (res) {
+                const d = JSON.parse(res.value);
+                const { cavFileData, ...resumen } = d; // el PDF del CAV pesa varios MB: se vuelve a pedir solo al abrir la ficha
+                hechas[c.tipo].push({ ...c, data: resumen, tieneCav: !!cavFileData });
+              }
+            } catch (e) { /* ficha ilegible: se omite */ }
+            if (!cancelado) setEstado((x) => ({ ...x, pendientes: Math.max(0, claves.length - cola) }));
+          }
+        };
+        await Promise.all([trabajar(), trabajar(), trabajar()]);
+        const ordenar = (a) => a.sort((x, y) => String(y.data.guardadoEl || y.data.fecha || "").localeCompare(String(x.data.guardadoEl || x.data.fecha || "")));
+        if (!cancelado) setEstado((x) => ({ ...x, cargando: false, pendientes: 0, inspecciones: ordenar(hechas.inspeccion), valorizaciones: ordenar(hechas.valorizacion) }));
+      } catch (e) {
+        if (!cancelado) setEstado((x) => ({ ...x, cargando: false, error: "No se pudieron cargar las fichas. Intenta de nuevo." }));
+      }
+    })();
+    return () => { cancelado = true; };
+  }, []);
+
+  const abrir = async (fila) => {
+    setMsg("");
+    try {
+      const res = await window.storage.get(fila.key, true);
+      if (!res) { setMsg("La ficha ya no existe."); return; }
+      const data = JSON.parse(res.value);
+      setAbierto({ ...fila, data: { ...data, inspectorId: fila.inspectorId } });
+    } catch (e) { setMsg("No se pudo abrir la ficha."); }
+  };
+  const pdf = () => {
+    try {
+      const d = abierto.data;
+      if (abierto.tipo === "inspeccion") {
+        downloadPdfBytes(buildInspeccionPdf(d, { sections: CHECKLIST_SECTIONS, inspectorNombre: d.inspectorNombre || abierto.inspectorNombre }), pdfFileName("Inspeccion", d));
+      } else {
+        downloadPdfBytes(buildTasacionPdf(d, { sections: TASACION_SECTIONS, getItems: getTasacionSectionItems, fmt: clp, inspectorNombre: d.inspectorNombre || abierto.inspectorNombre }), pdfFileName("Tasacion", { ...d, inscripcion: d.patente }));
+      }
+    } catch (e) { setMsg("No se pudo generar el PDF."); }
+  };
+
+  if (abierto) {
+    const d = abierto.data;
+    return (
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-1">
+          <button onClick={() => setAbierto(null)} className="text-sm text-stone-500 hover:underline py-1.5">← Volver a las fichas</button>
+          <ActionLink onClick={pdf}>Descargar PDF{abierto.tipo === "inspeccion" ? " (con el CAV)" : ""}</ActionLink>
+          <span className="text-xs text-stone-500">Realizada por {d.inspectorNombre || abierto.inspectorNombre} · solo lectura</span>
+        </div>
+        {msg && <p className="text-xs text-stone-500">{msg}</p>}
+        {abierto.tipo === "inspeccion"
+          ? <InspeccionForm key={abierto.key} record={d} onFieldChange={() => {}} onChecklistChange={() => {}} readOnly />
+          : <TasacionForm key={abierto.key} record={d} onFieldChange={() => {}} onChecklistChange={() => {}} readOnly photos={{ viewOnly: true, inspectorId: abierto.inspectorId }} />}
+      </div>
+    );
+  }
+
+  const q = filtro.trim().toLowerCase();
+  const coincide = (f) => !q || [f.inspectorNombre, f.data.marca, f.data.modelo, f.data.inscripcion, f.data.patente, f.data.vehiculo, f.data.propietarioNombre, f.data.propietarioRun, f.data.propietario].some((v) => String(v || "").toLowerCase().includes(q));
+  const lista = (vista === "inspecciones" ? estado.inspecciones : estado.valorizaciones).filter(coincide);
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center gap-3">
+        {[["inspecciones", "Inspecciones", estado.inspecciones.length], ["valorizaciones", "Tasaciones del Inspector", estado.valorizaciones.length]].map(([id, t, n]) => (
+          <button key={id} onClick={() => setVista(id)} className={"px-3 py-1.5 text-sm border " + (vista === id ? "bg-stone-900 text-white border-stone-900" : "bg-white text-stone-700 border-stone-300")}>{t} ({n})</button>
+        ))}
+        <input value={filtro} onChange={(e) => setFiltro(e.target.value)} placeholder="Buscar por inspector, patente, vehículo o propietario" className="border border-stone-300 px-3 py-1.5 text-sm flex-1 min-w-[220px]" />
+      </div>
+      {estado.error && <p className="text-sm text-rose-600">{estado.error}</p>}
+      {msg && <p className="text-xs text-stone-500">{msg}</p>}
+      {estado.cargando && <p className="text-sm text-stone-500">Cargando fichas{estado.pendientes ? " (" + estado.pendientes + " por leer)" : ""}…</p>}
+      <div className="bg-white border border-stone-200 p-5 overflow-x-auto">
+        {!estado.cargando && lista.length === 0 ? (
+          <p className="text-sm text-stone-500">{q ? "Ninguna ficha coincide con la búsqueda." : "Aún no hay " + (vista === "inspecciones" ? "inspecciones" : "tasaciones del Inspector") + " registradas."}</p>
+        ) : (
+          <table className="w-full border-collapse text-sm">
+            <thead>
+              <tr className="text-left text-xs uppercase tracking-wide text-stone-400 border-b border-stone-200">
+                <th className="py-2 pr-2">Fecha</th><th className="py-2 pr-2">Inspector</th><th className="py-2 pr-2">Vehículo</th><th className="py-2 pr-2">Patente</th>
+                <th className="py-2 pr-2">Propietario</th>{vista === "valorizaciones" && <th className="py-2 pr-2 text-right">Valor comercial</th>}<th className="py-2 pr-2 w-10"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {lista.map((f) => (
+                <tr key={f.key} className="border-b border-stone-100">
+                  <td className="py-2 pr-2 text-stone-600">{f.data.fecha || "—"}</td>
+                  <td className="py-2 pr-2 text-stone-900">{f.inspectorNombre || "—"}</td>
+                  <td className="py-2 pr-2 text-stone-700">{vista === "inspecciones" ? ([f.data.marca, f.data.modelo].filter(Boolean).join(" ") || "—") : (f.data.vehiculo || "—")}</td>
+                  <td className="py-2 pr-2 text-stone-600 font-mono">{(vista === "inspecciones" ? f.data.inscripcion : f.data.patente) || "—"}</td>
+                  <td className="py-2 pr-2 text-stone-700">{(vista === "inspecciones" ? [f.data.propietarioNombre, f.data.propietarioRun].filter(Boolean).join(" · ") : f.data.propietario) || "—"}</td>
+                  {vista === "valorizaciones" && <td className="py-2 pr-2 text-right font-mono text-stone-900">{clp(f.data.valorComercial)}</td>}
+                  <td className="py-2 pr-2 text-right"><button onClick={() => abrir(f)} className="text-xs text-amber-700 hover:underline">Ver</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
 const PESTANAS_LEGADO = [["resumen", "Resumen mensual"], ["vendedores", "Ejecutivos (código)"], ["inspectores", "Inspectores (código)"], ["datos", "AFP y comisiones"]];
 const esLegado = (t) => PESTANAS_LEGADO.some(([id]) => id === t);
 
@@ -4202,7 +4336,7 @@ function AdminDashboard({ vendors, setVendors, inspectors, setInspectors, onExit
           </>
         )}
 
-        {tab.startsWith("crm-") && <AdminCrmPanel tab={tab} renderEstimador={(p) => <TasacionCompra {...p} />} />}
+        {tab.startsWith("crm-") && <AdminCrmPanel tab={tab} renderEstimador={(p) => <TasacionCompra {...p} />} renderFichas={() => <FichasEquipo />} />}
 
         {tab === "datos" && (
           <div className="bg-white border border-stone-200 p-5">
@@ -4453,7 +4587,7 @@ function AppRoutes() {
             <button onClick={() => setScreen("estacion")} className="border border-stone-700 px-3 py-1.5 text-sm text-stone-300 hover:bg-stone-800">Volver</button>
           </div>
         </div>
-        <div className="max-w-6xl mx-auto px-6 mt-6"><ModuloVentas permisos={me.permisos} renderEstimador={(p) => <TasacionCompra {...p} />} /></div>
+        <div className="max-w-6xl mx-auto px-6 mt-6"><ModuloVentas permisos={me.permisos} renderEstimador={(p) => <TasacionCompra {...p} />} renderFichas={() => <FichasEquipo />} /></div>
       </div>
     );
   }

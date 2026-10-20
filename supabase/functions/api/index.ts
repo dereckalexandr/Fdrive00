@@ -78,7 +78,7 @@ async function hmacKey() {
   return crypto.subtle.importKey("raw", enc.encode(SESSION_SECRET), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
 }
 
-type Session = { role: "admin" | "vendor" | "inspector" | "user"; id: string; exp: number; perms?: string[] };
+type Session = { role: "admin" | "vendor" | "inspector" | "user"; id: string; exp: number; perms?: string[]; localId?: string | null };
 
 async function signSession(role: Session["role"], id: string, ttl: number) {
   const body = b64url(enc.encode(JSON.stringify({ role, id, exp: Math.floor(Date.now() / 1000) + ttl })));
@@ -195,6 +195,16 @@ function canKv(s: Session, op: string, key: string): boolean {
   // El inspector puede eliminar SUS PROPIAS inspecciones y tasaciones (no las de otros, ni los ejecutivos nada).
   if (op === "delete" && (s.role === "inspector" || s.role === "user")) return ownPrefixes(s).some((p) => key.startsWith(p));
   return false;
+}
+
+/** El supervisor (Jefe Local) puede LEER las inspecciones, valorizaciones y fotos de las personas de su propio local. Nunca escribir ni borrar. */
+async function supervisorLee(s: Session, claveOPrefijo: string): Promise<boolean> {
+  if (s.role !== "user" || !(s.perms ?? []).includes("leads.asignar") || !s.localId) return false;
+  const m = /^(inspeccion|tasacion|foto)::([0-9a-f-]{36})::/i.exec(claveOPrefijo);
+  if (!m) return false;
+  const { data, error } = await sb.from("usuarios").select("local_id").eq("id", m[2]).maybeSingle();
+  if (error) throw error;
+  return !!data && data.local_id === s.localId;
 }
 
 function canList(s: Session, prefix: string): boolean {
@@ -652,12 +662,13 @@ Deno.serve(async (req) => {
         const vivo = await liveUser(s.id);
         if (!vivo) return json({ error: "unauthorized" }, 401);
         s.perms = vivo.permisos;
+        s.localId = vivo.localId;
       }
       const op = body.op;
 
       if (op === "list") {
         const prefix = String(body.prefix ?? "");
-        if (!canList(s, prefix)) return json({ error: "forbidden" }, 403);
+        if (!canList(s, prefix) && !(await supervisorLee(s, prefix))) return json({ error: "forbidden" }, 403);
         const esc = prefix.replace(/[\\%_]/g, (m) => `\\${m}`);
         const { data, error } = await sb.from(TABLE).select("key").like("key", `${esc}%`);
         if (error) throw error;
@@ -666,7 +677,7 @@ Deno.serve(async (req) => {
       }
 
       const key = String(body.key ?? "");
-      if (!key || key.length > 300 || !canKv(s, op, key)) return json({ error: "forbidden" }, 403);
+      if (!key || key.length > 300 || !(canKv(s, op, key) || (op === "get" && await supervisorLee(s, key)))) return json({ error: "forbidden" }, 403);
 
       if (op === "get") {
         const value = await dbGet(key);

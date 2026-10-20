@@ -1467,6 +1467,20 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       return json({ inspeccion: (await enriquecer([x]))[0], puedeGestionar: esSupervisor, puedeRealizar: realiza, esMia: !ctx.esAdmin && x.inspector_id === userId, esSolicitante: !ctx.esAdmin && x.solicitante_id === userId });
     }
 
+    // Quiénes pueden tener fichas e inspecciones en el almacén: el supervisor ve las de su local; la cuenta maestra, las de todos los locales.
+    if (op === "inspecciones.fichas_equipo") {
+      if (!esSupervisor) return err("forbidden", 403);
+      const overrides = await ctx.rolePermOverrides();
+      let q = sb.from("usuarios").select("id, nombre, rut, roles, permisos_extra, activo, local_id");
+      if (!ctx.esAdmin) q = q.eq("local_id", localId);
+      const { data, error } = await q;
+      if (error) return fallar(error);
+      const inspectores = (data ?? [])
+        .filter((u: any) => { const p = permisosEfectivos(u.roles ?? [], overrides, u.permisos_extra); return p.includes("inspecciones.usar") || p.includes("tasaciones.usar") || p.includes("inspecciones.realizar"); })
+        .map((u: any) => ({ id: u.id, nombre: u.nombre, activo: !!u.activo }));
+      return json({ inspectores });
+    }
+
     if (op === "inspecciones.tomar") {
       if (!realiza || ctx.esAdmin) return err("forbidden", 403);
       const x = await cargarInspeccion(String(body.id ?? ""));

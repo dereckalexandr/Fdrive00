@@ -666,7 +666,7 @@ function Inicio({ api, catalogos, abrirLead, irA, version, onCambio }) {
 /* =========================================================
    ENTRADA DEL MÓDULO
 ========================================================= */
-export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador }) {
+export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador, renderFichas }) {
   const can = (p) => esAdmin || permisos.includes(p);
   const usaLeads = can("leads.propios") || can("leads.local") || can("leads.asignar");
   const [localSel, setLocalSel] = useState("");
@@ -706,6 +706,7 @@ export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador }
   if (puedeAprobar) opciones.push(["gestion", "Gestión"], ["tasaciones", "Tasaciones"], ["aprobaciones", "Aprobaciones", pend.datos || 0]);
   if (usaLeads && puedeCompras) opciones.push(["compras", "Compras y consignaciones"]);
   if (catalogos.puedeInspecciones) opciones.push(["inspecciones", "Inspecciones"]);
+  if (puedeAprobar && renderFichas) opciones.push(["fichas", "Fichas de inspectores"]);
   if (puedeAprobar) opciones.push(["validaciones", "Validaciones"], ["anuncios", "Avisos"], ["marketing", "Marketing"]);
   opciones.push(["inventario", "Inventario"]);
   if (usaLeads) opciones.push(["clientes", "Clientes"]);
@@ -727,6 +728,7 @@ export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador }
       {tab === "anuncios" && <ModuloAnuncios api={api} permisos={permisos} esAdmin={esAdmin} />}
       {tab === "validaciones" && <ModuloValidaciones api={api} permisos={permisos} esAdmin={esAdmin} />}
       {tab === "inspecciones" && <ModuloInspecciones api={api} permisos={permisos} esAdmin={esAdmin} />}
+      {tab === "fichas" && renderFichas && renderFichas()}
       {tab === "gestion" && <Gestion api={api} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
       {tab === "ventas" && <Ventas api={api} catalogos={catalogos} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
       {tab === "aprobaciones" && <AprobacionesTodo api={api} version={version} abrirLead={setLeadAbierto} onCambio={subir} />}

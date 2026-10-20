@@ -266,11 +266,42 @@ test("Fotos del resultado: las sube quien inspecciona; las ven quienes piden o m
   assert.equal((await kv(U.e1.token, "set", key, { value: "x" })).status, 403);
   assert.equal((await kv(U.e1.token, "delete", key)).status, 403);
   assert.equal((await kv(U.i1.token, "delete", key)).status, 200);
-  // La ficha completa sigue siendo solo del Inspector.
+  // La ficha completa es del Inspector y, solo para leer, del Jefe Local de su mismo local.
   assert.equal((await kv(U.i1.token, "set", U.key1, { value: "{}" })).status, 200);
-  assert.equal((await kv(U.jefe.token, "get", U.key1)).status, 403);
   assert.equal((await kv(U.e1.token, "get", U.key1)).status, 403);
   assert.equal((await kv(U.i2.token, "get", U.key1)).status, 403);
+});
+
+test("Fichas de inspectores: el Jefe Local de su local las lee completas (solo lectura); otro local, ejecutivos y demás no", async () => {
+  const ficha = `inspeccion::${U.i1.id}::f1`;
+  const val = `tasacion::${U.i1.id}::v1`;
+  const foto = `foto::${U.i1.id}::p1`;
+  for (const k of [ficha, val, foto]) assert.equal((await kv(U.i1.token, "set", k, { value: JSON.stringify({ propietarioNombre: "Don Pedro", propietarioRun: "1-9" }) })).status, 200);
+  for (const k of [ficha, val, foto]) {
+    assert.equal((await kv(U.jefe.token, "get", k)).status, 200, `jefe lee ${k}`);
+    assert.equal((await kv(U.jefeSur.token, "get", k)).status, 403, "el Jefe de otro local no");
+    assert.equal((await kv(U.e1.token, "get", k)).status, 403, "el ejecutivo no");
+    assert.equal((await kv(U.mkt.token, "get", k)).status, 403);
+    assert.equal((await kv(U.jefe.token, "set", k, { value: "x" })).status, 403, "solo lectura");
+    assert.equal((await kv(U.jefe.token, "delete", k)).status, 403, "no borra");
+  }
+  assert.equal((await kv(U.jefe.token, "get", `inspeccion::${U.iSur.id}::f1`)).status, 403, "ficha de otro local");
+  const l = await api({ action: "kv", token: U.jefe.token, op: "list", prefix: `inspeccion::${U.i1.id}::` });
+  assert.equal(l.status, 200);
+  assert.ok(l.keys.includes(ficha));
+  assert.equal((await api({ action: "kv", token: U.jefe.token, op: "list", prefix: `inspeccion::${U.iSur.id}::` })).status, 403);
+  assert.equal((await api({ action: "kv", token: U.jefe.token, op: "list", prefix: "inspeccion::" })).status, 403, "no se lista todo");
+  const eq = await ve(U.jefe.token, "inspecciones.fichas_equipo");
+  assert.equal(eq.status, 200);
+  const ids = eq.inspectores.map((x) => x.id);
+  assert.ok(ids.includes(U.i1.id) && ids.includes(U.i2.id));
+  assert.ok(!ids.includes(U.iSur.id), "solo su local");
+  assert.ok(!ids.includes(U.e1.id), "los ejecutivos no inspeccionan");
+  assert.equal((await ve(U.e1.token, "inspecciones.fichas_equipo")).status, 403);
+  assert.equal((await ve(U.i1.token, "inspecciones.fichas_equipo")).status, 403);
+  const todos = await ve(admin, "inspecciones.fichas_equipo");
+  assert.equal(todos.status, 200);
+  assert.ok(todos.inspectores.map((x) => x.id).includes(U.iSur.id), "la cuenta maestra ve todos los locales");
 });
 
 test("Resumen y comisión: tramos de inspecciones del mes ($35.000 c/u por defecto, o tramos propios)", async () => {

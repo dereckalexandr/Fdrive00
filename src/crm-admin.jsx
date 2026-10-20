@@ -801,11 +801,11 @@ export const PESTANAS_CRM = [
   ["crm-config", "Configuración"],
 ];
 
-export function AdminCrmPanel({ tab, renderEstimador }) {
+export function AdminCrmPanel({ tab, renderEstimador, renderFichas }) {
   return (
     <>
       {tab === "crm-usuarios" && <UsuariosTab />}
-      {tab === "crm-ventas" && <ModuloVentas esAdmin renderEstimador={renderEstimador} />}
+      {tab === "crm-ventas" && <ModuloVentas esAdmin renderEstimador={renderEstimador} renderFichas={renderFichas} />}
       {tab === "crm-permisos" && <PermisosTab />}
       {tab === "crm-reportes" && <ReportesTab />}
       {tab === "crm-bitacora" && <BitacoraTab />}
