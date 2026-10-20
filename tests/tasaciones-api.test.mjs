@@ -299,7 +299,7 @@ test("Tasación directa: el Tasador la crea y la toma; sin lead ni ejecutivo", a
 
 test("Inspecciones del mismo vehículo: se encuentran por patente y nunca se muestran datos del propietario", async () => {
   db.tablas.kv_store.push(
-    { key: "inspeccion::INS001::abc", value: JSON.stringify({ inscripcion: "ABCD.12-3", marca: "Toyota", modelo: "Yaris", anio: "2018", fecha: "2026-10-06", inspectorNombre: "Ivo Inspector", propietarioNombre: "JUAN PEREZ GONZALEZ", propietarioRun: "12.345.678-5", cavFileData: "data:application/pdf;base64,AAAA" }) },
+    { key: "inspeccion::INS001::abc", value: JSON.stringify({ inscripcion: "ABCD.12-3", marca: "Toyota", modelo: "Yaris", anio: "2018", fecha: "2026-10-06", inspectorNombre: "Ivo Inspector", propietarioNombre: "JUAN PEREZ GONZALEZ", propietarioRun: "12.345.678-5", cavFileData: "data:application/pdf;base64,AAAA", fotosEquipo: ["fa1", "fa2"] }) },
     { key: "inspeccion::INS001::def", value: JSON.stringify({ inscripcion: "WXYZ.99-1", marca: "Kia", modelo: "Rio", fecha: "2026-09-01", propietarioNombre: "OTRA PERSONA" }) },
     { key: "inspeccion::INS002::ghi", value: JSON.stringify({ inscripcion: "ABCD.12-3", marca: "Toyota", modelo: "Yaris", anio: "2018", fecha: "2026-08-01", inspectorNombre: "Otro Inspector" }) },
   );
@@ -309,6 +309,8 @@ test("Inspecciones del mismo vehículo: se encuentran por patente y nunca se mue
   const texto = JSON.stringify(r);
   for (const prohibido of ["JUAN", "PEREZ", "12.345.678-5", "OTRA PERSONA", "cavFileData", "base64"]) assert.ok(!texto.includes(prohibido), `no debe aparecer «${prohibido}»`);
   assert.equal(r.inspecciones[0].inspector, "Ivo Inspector");
+  assert.deepEqual(r.inspecciones[0].fotos, ["fa1", "fa2"], "salen solo los ids de las fotos del inspector");
+  assert.deepEqual(r.inspecciones[1].fotos, []);
   assert.equal((await ve(U.t1.token, "tasaciones.inspecciones", { patente: "QQQQ77" })).inspecciones.length, 0);
   assert.equal((await ve(U.t1.token, "tasaciones.inspecciones", { patente: "12" })).error, "patente_invalida");
   assert.equal((await ve(U.e1.token, "tasaciones.inspecciones", { patente: "ABCD12" })).status, 403);
@@ -319,6 +321,11 @@ test("Inspecciones del mismo vehículo: se encuentran por patente y nunca se mue
   await ve(U.t1.token, "tasaciones.guardar", { id: t.id, borrador: { inspeccion: { ...r.inspecciones[0], propietarioNombre: "JUAN" } } });
   assert.equal(fila(t.id).inspeccion.key, "inspeccion::INS001::abc");
   assert.equal(fila(t.id).inspeccion.propietarioNombre, undefined);
+  // Al abrir la tasación, se ven las fotos que sacó el Inspector en esa inspección (solo ids; nada del propietario).
+  const det = await ve(U.t1.token, "tasaciones.get", { id: t.id });
+  assert.deepEqual(det.tasacion.inspeccion.fotos, ["fa1", "fa2"]);
+  for (const prohibido of ["JUAN", "12.345.678-5", "cavFileData", "base64"]) assert.ok(!JSON.stringify(det).includes(prohibido), `no debe aparecer «${prohibido}»`);
+  assert.deepEqual((await ve(U.e1.token, "tasaciones.get", { id: t.id })).tasacion.inspeccion.fotos, ["fa1", "fa2"], "quien la pidió también las ve");
   await ve(U.t1.token, "tasaciones.cancelar", { id: t.id, motivo: "Solo era una prueba" });
 });
 

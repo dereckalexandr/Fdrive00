@@ -485,6 +485,15 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       return !!l && puedeVer(l);
     }
     /** Agrega los nombres para mostrar (cliente, solicitante, tasador). */
+    /** Ids de las fotos para el equipo de una ficha de inspección (nunca el resto de la ficha). */
+    async function fotosDeFicha(clave: unknown): Promise<string[]> {
+      if (typeof clave !== "string" || !/^inspeccion::[A-Za-z0-9_-]+::[A-Za-z0-9_-]+$/.test(clave)) return [];
+      try {
+        const g = await sb.from("kv_store").select("value").eq("key", clave).maybeSingle();
+        const d = JSON.parse(g.data ? g.data.value : "{}");
+        return (Array.isArray(d.fotosEquipo) ? d.fotosEquipo : []).filter((x: unknown) => typeof x === "string" && /^[A-Za-z0-9_-]{1,60}$/.test(x)).slice(0, 24);
+      } catch { return []; }
+    }
     async function enriquecer(filas: any[]) {
       const leads = await porIds("leads", filas.map((t) => t.lead_id));
       const clientes = await porIds("clientes", leads.map((l: any) => l.cliente_id));
@@ -568,7 +577,9 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     if (op === "tasaciones.get") {
       const t = await cargarTasacion(String(body.id ?? ""));
       if (!t || !(await veTasacion(t))) return err("no_existe", 404);
-      return json({ tasacion: (await enriquecer([t]))[0], puedeEditar: t.estado === "en_proceso" && (t.tasador_id === userId), puedeGestionar: esSupervisor, puedeRealizar: realiza });
+      const detalle: any = (await enriquecer([t]))[0];
+      if (detalle.inspeccion && detalle.inspeccion.key) detalle.inspeccion = { ...detalle.inspeccion, fotos: await fotosDeFicha(detalle.inspeccion.key) };
+      return json({ tasacion: detalle, puedeEditar: t.estado === "en_proceso" && (t.tasador_id === userId), puedeGestionar: esSupervisor, puedeRealizar: realiza });
     }
 
     if (op === "tasaciones.tomar") {
@@ -688,7 +699,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
         try {
           const d = JSON.parse(g.data ? g.data.value : "{}");
           if (String(d.inscripcion ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "").startsWith(pat)) {
-            out.push({ key, fecha: d.fecha ?? null, inspector: d.inspectorNombre ?? null, patente: pat, marca: d.marca ?? null, modelo: d.modelo ?? null, anio: d.anio ?? null });
+            out.push({ key, fecha: d.fecha ?? null, inspector: d.inspectorNombre ?? null, patente: pat, marca: d.marca ?? null, modelo: d.modelo ?? null, anio: d.anio ?? null, fotos: (Array.isArray(d.fotosEquipo) ? d.fotosEquipo : []).filter((x: unknown) => typeof x === "string" && /^[A-Za-z0-9_-]{1,60}$/.test(x)).slice(0, 24) });
           }
         } catch (e) { /* registro ilegible: se ignora */ }
       }

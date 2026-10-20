@@ -15,7 +15,7 @@ import { mesChile } from "../supabase/functions/api/ventas-core.js";
 import { tasacionNombre, validarVehiculoTasacion, validarTasacionDirecta, MAX_FOTOS_TASACION } from "../supabase/functions/api/tasaciones-core.js";
 import { compressImage, makePhotoId } from "./photos.js";
 import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, useCarga, mensajeError, CamposVehiculo, aVehiculoForm, VEH_VACIO, apiPorDefecto } from "./crm-ui.jsx";
-import { SeccionInspeccion } from "./crm-inspecciones.jsx";
+import { SeccionInspeccion, Miniatura as MiniaturaInspeccion } from "./crm-inspecciones.jsx";
 import { SeccionValidacion } from "./crm-validaciones.jsx";
 
 const COLOR = { pendiente: "bg-amber-100 text-amber-800", en_proceso: "bg-sky-100 text-sky-800", completada: "bg-emerald-100 text-emerald-800", cancelada: "bg-stone-200 text-stone-600" };
@@ -230,6 +230,14 @@ function TasacionDetalle({ api, id, renderEstimador, onCerrar, onCambio }) {
       <Tarjeta titulo="Inspección">
         {editable ? <BuscadorInspecciones api={api} patente={f.vehiculo.patente} actual={f.inspeccion} onElegir={(i) => set("inspeccion", i)} />
           : f.inspeccion && f.inspeccion.key ? <p className="text-sm text-stone-700">Inspección del {f.inspeccion.fecha || "—"} · hecha por {f.inspeccion.inspector || "—"}</p> : <p className="text-sm text-stone-500">Sin inspección vinculada.</p>}
+        {f.inspeccion && f.inspeccion.key && (
+          <div className="mt-3">
+            <p className="text-sm text-stone-700 mb-2">Fotos tomadas por el inspector ({(f.inspeccion.fotos || []).length})</p>
+            {(f.inspeccion.fotos || []).length === 0
+              ? <p className="text-xs text-stone-500">El inspector no adjuntó fotos en esa inspección.</p>
+              : <div className="flex flex-wrap gap-2">{f.inspeccion.fotos.map((fid) => <MiniaturaInspeccion key={fid} fichaId={f.inspeccion.key.split("::").pop()} fotoId={fid} />)}</div>}
+          </div>
+        )}
       </Tarjeta>
 
       <Tarjeta titulo={`Fotos (${total}/${MAX_FOTOS_TASACION})`}>

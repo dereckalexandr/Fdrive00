@@ -78,6 +78,18 @@ for (const i of [0, 1, 2]) {
   }));
 }
 
+// Una inspección con fotos vinculada a una tasación en curso (para ver las fotos del inspector desde Tasaciones).
+{
+  const kvI = (key, value) => api({ action: "kv", token: U.insp.token, op: "set", key, value });
+  await kvI(`inspeccion::${U.insp.id}::i1`, JSON.stringify({ inscripcion: "BKTD.10-1", marca: "Toyota", modelo: "Yaris", anio: "2021", fecha: "2026-10-18", inspectorNombre: "Ivo Inspector", guardadoEl: new Date().toISOString(), fotosEquipo: ["a1", "a2", "a3"] }));
+  await kvI("ifoto::i1::a1", foto("#0f172a", "#475569"));
+  await kvI("ifoto::i1::a2", foto("#14532d", "#4ade80"));
+  await kvI("ifoto::i1::a3", foto("#581c87", "#c084fc"));
+  const t = (await ve(U.e1.token, "tasaciones.pedir", { leadId: leads[0].lead.id, datos: { vehiculo: { patente: "BKTD10", marca: "Toyota", modelo: "Yaris", anio: 2021, km: 38000 } } })).tasacion;
+  await ve(U.tasador.token, "tasaciones.tomar", { id: t.id });
+  await ve(U.tasador.token, "tasaciones.guardar", { id: t.id, borrador: { inspeccion: { key: `inspeccion::${U.insp.id}::i1`, fecha: "2026-10-18", inspector: "Ivo Inspector", patente: "BKTD10", marca: "Toyota", modelo: "Yaris", anio: "2021" } } });
+}
+
 // Servidor de la función simulada (misma dirección que la real: /functions/v1/api).
 crearHttp(async (req, res) => {
   const trozos = [];
