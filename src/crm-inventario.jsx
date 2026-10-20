@@ -196,7 +196,7 @@ export function Inventario({ api, onCambio }) {
         <table className="w-full border-collapse text-sm">
           <thead>
             <tr className="text-left text-xs uppercase tracking-wide text-stone-400 border-b border-stone-200">
-              <th className="py-3 px-4">Vehículo</th><th className="py-3 px-4 text-right">Km</th><th className="py-3 px-4 text-right">Precio</th>
+              <th className="py-3 px-4">Vehículo</th><th className="py-3 px-4 text-right hidden md:table-cell">Km</th><th className="py-3 px-4 text-right">Precio</th>
               {puedeEditar && <th className="py-3 px-4 text-right">Margen</th>}<th className="py-3 px-4">Estado</th>{puedeEditar && <th className="py-3 px-4">Acciones</th>}
             </tr>
           </thead>
@@ -214,7 +214,7 @@ export function Inventario({ api, onCambio }) {
                     </div>
                   </div>
                 </td>
-                <td className="py-3 px-4 text-right font-mono whitespace-nowrap">{Number(v.km).toLocaleString("es-CL")}</td>
+                <td className="py-3 px-4 text-right font-mono whitespace-nowrap hidden md:table-cell">{Number(v.km).toLocaleString("es-CL")}</td>
                 <td className="py-3 px-4 text-right font-mono whitespace-nowrap">{clp(v.precio_lista)}</td>
                 {puedeEditar && <td className="py-3 px-4 text-right font-mono whitespace-nowrap">{v.costo != null && v.precio_lista != null ? clp(v.precio_lista - v.costo) : "—"}</td>}
                 <td className="py-3 px-4">

@@ -2565,7 +2565,7 @@ function InspectorDashboard({ inspector, onExit, crm }) {
   const tabBtn = (id, label) => (
     <button
       onClick={() => setTab(id)}
-      className={`px-4 py-3 text-sm whitespace-nowrap ${tab === id ? "text-amber-400 border-b-2 border-amber-400" : "text-stone-400"}`}
+      className={`px-3.5 py-2 text-sm rounded-lg shrink-0 whitespace-nowrap ${tab === id ? "bg-white/15 text-amber-300 font-medium" : "text-stone-300 hover:text-white hover:bg-white/10"}`}
     >
       {label}
     </button>
@@ -2580,13 +2580,13 @@ function InspectorDashboard({ inspector, onExit, crm }) {
           <div>
             <p className="text-xs uppercase tracking-widest text-stone-400 mb-1">Panel del inspector</p>
             <h1 className="font-serif text-2xl md:text-3xl">{inspector.nombre}</h1>
-            <p className="text-xs text-stone-400 mt-1 capitalize">
+            <p className="text-xs text-stone-400 mt-1 first-letter:uppercase">
               {new Date().toLocaleDateString("es-CL", { weekday: "long", day: "2-digit", month: "long", year: "numeric" })}
             </p>
           </div>
           <button onClick={onExit} className="self-start md:self-auto border border-stone-700 px-3 py-2 text-sm text-stone-300 hover:bg-stone-800">Salir</button>
         </div>
-        <div className="max-w-5xl mx-auto px-4 md:px-6 flex gap-2 border-t border-stone-800 overflow-x-auto">
+        <div className="pestanas-scroll max-w-5xl mx-auto px-4 md:px-6 py-2 flex gap-1 border-t border-white/10 overflow-x-auto">
           {crmRealiza && tabBtn("solicitudes", "Solicitudes y agenda")}
           {tabBtn("inspeccion", "Inspección")}
           {tabBtn("tasaciones", "Tasaciones")}
@@ -2865,9 +2865,9 @@ function VendorDashboard({ vendor, onExit }) {
           </div>
           <button onClick={onExit} className="self-start md:self-auto border border-stone-700 px-3 py-1.5 text-sm text-stone-300 hover:bg-stone-800">Salir</button>
         </div>
-        <div className="max-w-5xl mx-auto px-6 flex gap-2 border-t border-stone-800">
-          <button onClick={() => setTab("mes")} className={`px-4 py-3 text-sm ${tab === "mes" ? "text-amber-400 border-b-2 border-amber-400" : "text-stone-400"}`}>Producción del mes</button>
-          <button onClick={() => setTab("anual")} className={`px-4 py-3 text-sm ${tab === "anual" ? "text-amber-400 border-b-2 border-amber-400" : "text-stone-400"}`}>Mi dashboard anual</button>
+        <div className="pestanas-scroll max-w-5xl mx-auto px-4 md:px-6 py-2 flex gap-1 border-t border-white/10 overflow-x-auto">
+          <button onClick={() => setTab("mes")} className={`px-3.5 py-2 text-sm rounded-lg shrink-0 ${tab === "mes" ? "bg-white/15 text-amber-300 font-medium" : "text-stone-300 hover:text-white hover:bg-white/10"}`}>Producción del mes</button>
+          <button onClick={() => setTab("anual")} className={`px-3.5 py-2 text-sm rounded-lg shrink-0 ${tab === "anual" ? "bg-white/15 text-amber-300 font-medium" : "text-stone-300 hover:text-white hover:bg-white/10"}`}>Mi dashboard anual</button>
         </div>
       </div>
 

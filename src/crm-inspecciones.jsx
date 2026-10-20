@@ -160,7 +160,7 @@ export function InspeccionDetalle({ api, id, onCerrar, onCambio, onRealizar, onV
       </div>
       <div className="bg-white border border-stone-200 p-4 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
         <div><p className="text-xs uppercase tracking-wide text-stone-400">Vehículo</p><p className="text-stone-900">{nombreVeh(x.vehiculo)}</p>{x.vehiculo.km != null && <p className="text-xs text-stone-500">{Number(x.vehiculo.km).toLocaleString("es-CL")} km</p>}</div>
-        <div><p className="text-xs uppercase tracking-wide text-stone-400">Cuándo</p><p className="text-stone-900 capitalize">{cuando(x.agendada_para)}</p></div>
+        <div><p className="text-xs uppercase tracking-wide text-stone-400">Cuándo</p><p className="text-stone-900 first-letter:uppercase">{cuando(x.agendada_para)}</p></div>
         <div><p className="text-xs uppercase tracking-wide text-stone-400">Dónde</p><p className="text-stone-900">{x.direccion}</p>{x.contacto_lugar && <p className="text-xs text-stone-500">Coordinar con: {x.contacto_lugar}</p>}</div>
         <div><p className="text-xs uppercase tracking-wide text-stone-400">Inspector</p><p className="text-stone-900">{x.inspector || "Esperando que lo tome un Inspector"}</p></div>
         {x.notas_solicitud && <div className="md:col-span-2"><p className="text-xs uppercase tracking-wide text-stone-400">Nota</p><p className="text-stone-700">{x.notas_solicitud}</p></div>}

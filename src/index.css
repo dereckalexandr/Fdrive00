@@ -98,3 +98,9 @@ body {
     min-height: 44px;
   }
 }
+
+/* Celular: las tablas usan menos margen interno para que quepan más columnas. */
+@media (max-width: 767px) {
+  table :is(th, td)[class*="px-4"] { padding-left: 0.625rem; padding-right: 0.625rem; }
+  table :is(th, td)[class*="px-3"] { padding-left: 0.5rem; padding-right: 0.5rem; }
+}

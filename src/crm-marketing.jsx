@@ -108,7 +108,7 @@ function Calendario({ api, puedeGestionar, version, onCambio, campanias, vehicul
               const atrasada = p.estado === "programada" && p.fecha_programada && Date.parse(p.fecha_programada) < Date.now();
               return (
                 <tr key={p.id} className="border-b border-stone-100 align-top">
-                  <td className={`py-2.5 px-4 whitespace-nowrap capitalize ${atrasada ? "text-rose-700" : "text-stone-700"}`}>{fechaDia(p.fecha_programada)}{atrasada ? " · atrasada" : ""}</td>
+                  <td className={`py-2.5 px-4 whitespace-nowrap first-letter:uppercase ${atrasada ? "text-rose-700" : "text-stone-700"}`}>{fechaDia(p.fecha_programada)}{atrasada ? " · atrasada" : ""}</td>
                   <td className="py-2.5 px-4 text-stone-900">{p.titulo}<div className="text-xs text-stone-500">{p.folio} · {tipoPublicacionNombre(p.tipo)}</div></td>
                   <td className="py-2.5 px-4 text-stone-700">{canalNombre(p.red)}</td>
                   <td className="py-2.5 px-4 text-xs text-stone-600">{p.campania || "—"}{p.vehiculo ? <div>{p.vehiculo}</div> : null}</td>
