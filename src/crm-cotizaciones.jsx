@@ -8,6 +8,7 @@
  * ----------------------------------------------------------------
  */
 import React, { useState, useEffect } from "react";
+import { InputDinero } from "./campo-dinero.jsx";
 import { calcularCotizacion, validarCotizacion, validarReserva, cotizacionNombre, COTIZACION_ENTREGABLE, ESTADOS_FINANCIAMIENTO, MEDIOS_PAGO, textoVencimiento } from "../supabase/functions/api/ventas-core.js";
 import { buildCotizacionPdf } from "./pdf-report.js";
 import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, hace, Aviso, Cargando, Tarjeta, Campo, Modal, useCarga, mensajeError } from "./crm-ui.jsx";
@@ -95,7 +96,7 @@ function FormCotizacion({ api, lead, cotizacion, catalogos, tope, onCerrar, onGu
           </Campo>
           <Campo etiqueta="Precio de lista"><input value={veh ? clp(veh.precio_lista) : "—"} disabled className={`${INPUT} bg-stone-100 font-mono`} /></Campo>
           <Campo etiqueta="Descuento ($)" ayuda={calc && Number(descuento) > 0 ? `${calc.descuentoPct.toLocaleString("es-CL")}% del precio de lista` : ""}>
-            <input type="number" min="0" value={descuento} onChange={(e) => setDescuento(e.target.value)} className={INPUT} placeholder="0" />
+            <InputDinero value={descuento} onChange={(e) => setDescuento(e.target.value)} className={INPUT} placeholder="0" />
           </Campo>
         </div>
         {requiereAprobacion && <div className="mt-3"><Aviso tipo="info">Todo descuento lo aprueba el Jefe Local. Podrás guardar la cotización, pero <strong>no podrás entregar el PDF ni reservar</strong> hasta que lo apruebe.</Aviso></div>}
@@ -111,13 +112,13 @@ function FormCotizacion({ api, lead, cotizacion, catalogos, tope, onCerrar, onGu
             <Campo etiqueta="Modelo"><input value={pp.modelo} onChange={(e) => setPp({ ...pp, modelo: e.target.value })} className={INPUT} /></Campo>
             <Campo etiqueta="Año"><input type="number" value={pp.anio} onChange={(e) => setPp({ ...pp, anio: e.target.value })} className={INPUT} /></Campo>
             <Campo etiqueta="Kilometraje"><input type="number" value={pp.km} onChange={(e) => setPp({ ...pp, km: e.target.value })} className={INPUT} /></Campo>
-            <Campo etiqueta="Valor que se le reconoce ($)" ayuda={tope ? `Máximo según la tasación: ${clp(tope)}. Para subirlo, pide una nueva tasación.` : ""}><input type="number" max={tope || undefined} value={pp.valor} onChange={(e) => setPp({ ...pp, valor: e.target.value })} className={INPUT} /></Campo>
+            <Campo etiqueta="Valor que se le reconoce ($)" ayuda={tope ? `Máximo según la tasación: ${clp(tope)}. Para subirlo, pide una nueva tasación.` : ""}><InputDinero value={pp.valor} onChange={(e) => setPp({ ...pp, valor: e.target.value })} className={INPUT} /></Campo>
           </div>
         )}
         <label className="flex items-center gap-2 text-sm text-stone-800 mt-4"><input type="checkbox" checked={quiereFin} onChange={(e) => setQuiereFin(e.target.checked)} /> Necesita financiamiento</label>
         {quiereFin && (
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-3">
-            <Campo etiqueta="Pie ($)"><input type="number" value={fin.pie} onChange={(e) => setFin({ ...fin, pie: e.target.value })} className={INPUT} /></Campo>
+            <Campo etiqueta="Pie ($)"><InputDinero value={fin.pie} onChange={(e) => setFin({ ...fin, pie: e.target.value })} className={INPUT} /></Campo>
             <Campo etiqueta="Plazo (meses)"><input type="number" min="1" max="120" value={fin.plazoMeses} onChange={(e) => setFin({ ...fin, plazoMeses: e.target.value })} className={INPUT} /></Campo>
             <Campo etiqueta="Tasa mensual referencial (%)" ayuda="Opcional; solo para estimar la cuota."><input type="number" step="0.01" min="0" value={fin.tasaMensualPct} onChange={(e) => setFin({ ...fin, tasaMensualPct: e.target.value })} className={INPUT} /></Campo>
             <Campo etiqueta="Banco / financiera"><input value={fin.banco} onChange={(e) => setFin({ ...fin, banco: e.target.value })} className={INPUT} /></Campo>
@@ -175,7 +176,7 @@ function FormReserva({ api, cotizacion, catalogos, onCerrar, onGuardado }) {
         <p className="text-stone-900">{snap.marca} {snap.modelo} {snap.anio} · <span className="font-mono">{snap.patente}</span></p>
         <p className="text-stone-600">Cotización {folio(cotizacion.numero)} · precio final {clp(cotizacion.precio_final)}</p>
       </div>
-      <Campo etiqueta="Monto de la reserva ($)"><input type="number" min="1" value={f.monto} onChange={(e) => set("monto", e.target.value)} className={INPUT} autoFocus /></Campo>
+      <Campo etiqueta="Monto de la reserva ($)"><InputDinero value={f.monto} onChange={(e) => set("monto", e.target.value)} className={INPUT} autoFocus /></Campo>
       <div className="grid grid-cols-2 gap-3">
         <Campo etiqueta="Días de reserva" ayuda={`Por defecto ${catalogos.dias_reserva || 3}.`}><input type="number" min="1" max="30" value={f.dias} onChange={(e) => set("dias", e.target.value)} className={INPUT} /></Campo>
         <Campo etiqueta="Medio de pago"><select value={f.medioPago} onChange={(e) => set("medioPago", e.target.value)} className={INPUT}>{MEDIOS_PAGO.map((m) => <option key={m}>{m}</option>)}</select></Campo>

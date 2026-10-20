@@ -11,6 +11,7 @@
  * ----------------------------------------------------------------
  */
 import React, { useState, useEffect, useMemo, useRef } from "react";
+import { InputDinero } from "./campo-dinero.jsx";
 import { PLAZOS_FINANCIAMIENTO, MENSAJES_WEB } from "../supabase/functions/api/publico-core.js";
 
 const URL_FUNCION = import.meta.env.VITE_SUPABASE_URL ? `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/api` : "";
@@ -171,7 +172,7 @@ function Formulario({ tipo, vehiculo, locales = [], empresa, onCerrar }) {
       {tipo === "visita" && <Campo etiqueta="¿Cuándo te acomoda venir?" ayuda="Es una preferencia: te confirmaremos el horario."><input type="datetime-local" value={f.fechaHora} onChange={(e) => set("fechaHora", e.target.value)} className={INPUT} required /></Campo>}
       {tipo === "financiamiento" && (
         <div className="grid grid-cols-2 gap-3">
-          <Campo etiqueta="Pie que puedes dar ($)" ayuda="Si no tienes, escribe 0."><input type="number" min="0" value={f.pie} onChange={(e) => set("pie", e.target.value)} className={INPUT} required /></Campo>
+          <Campo etiqueta="Pie que puedes dar ($)" ayuda="Si no tienes, escribe 0."><InputDinero value={f.pie} onChange={(e) => set("pie", e.target.value)} className={INPUT} required /></Campo>
           <Campo etiqueta="Plazo"><select value={f.plazo} onChange={(e) => set("plazo", e.target.value)} className={INPUT}>{PLAZOS_FINANCIAMIENTO.map((p) => <option key={p} value={p}>{p} cuotas</option>)}</select></Campo>
         </div>
       )}
@@ -265,7 +266,7 @@ function Catalogo({ datos, ir }) {
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar marca o modelo" className={`${INPUT} col-span-2`} aria-label="Buscar" />
           <select value={marca} onChange={(e) => setMarca(e.target.value)} className={INPUT} aria-label="Marca"><option value="">Todas las marcas</option>{marcas.map((m) => <option key={m}>{m}</option>)}</select>
           <select value={trans} onChange={(e) => setTrans(e.target.value)} className={INPUT} aria-label="Transmisión"><option value="">Cualquier transmisión</option><option>Automática</option><option>Mecánica</option></select>
-          <input type="number" min="0" value={tope} onChange={(e) => setTope(e.target.value)} placeholder="Precio máximo" className={INPUT} aria-label="Precio máximo" />
+          <InputDinero value={tope} onChange={(e) => setTope(e.target.value)} placeholder="Precio máximo" className={INPUT} aria-label="Precio máximo" />
           <select value={orden} onChange={(e) => setOrden(e.target.value)} className={INPUT} aria-label="Ordenar"><option value="nuevos">Más recientes</option><option value="precio_asc">Menor precio</option><option value="precio_desc">Mayor precio</option><option value="anio">Año más nuevo</option><option value="km">Menor kilometraje</option></select>
         </div>
         <p className="text-sm text-stone-600">{lista.length} vehículo{lista.length === 1 ? "" : "s"}</p>

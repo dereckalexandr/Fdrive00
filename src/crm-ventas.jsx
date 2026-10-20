@@ -8,6 +8,7 @@
  * ----------------------------------------------------------------
  */
 import React, { useState, useEffect, useMemo, useCallback } from "react";
+import { InputDinero } from "./campo-dinero.jsx";
 import {
   ETAPAS, ETAPAS_ACTIVAS, TIPOS_CONTACTO, TIPOS_TAREA, ESTADOS_FINANCIAMIENTO,
   agruparTareas, claseTarea, textoVencimiento, contarPorEtapa, leadsPorAtender, etapaNombre, soloDigitos, validarCliente, validarLead, validarTarea,
@@ -385,13 +386,13 @@ function FormLead({ api, catalogos, lead, onCerrar, onGuardado }) {
             <Campo etiqueta="Modelo"><input value={f.pp.modelo} onChange={(e) => set("pp", { ...f.pp, modelo: e.target.value })} className={INPUT} /></Campo>
             <Campo etiqueta="Año"><input type="number" value={f.pp.anio} onChange={(e) => set("pp", { ...f.pp, anio: e.target.value })} className={INPUT} /></Campo>
             <Campo etiqueta="Kilometraje"><input type="number" value={f.pp.km} onChange={(e) => set("pp", { ...f.pp, km: e.target.value })} className={INPUT} /></Campo>
-            <Campo etiqueta="Valor estimado ($)"><input type="number" value={f.pp.valor} onChange={(e) => set("pp", { ...f.pp, valor: e.target.value })} className={INPUT} /></Campo>
+            <Campo etiqueta="Valor estimado ($)"><InputDinero value={f.pp.valor} onChange={(e) => set("pp", { ...f.pp, valor: e.target.value })} className={INPUT} /></Campo>
           </div>
         )}
         <label className="flex items-center gap-2 text-sm text-stone-800 mt-4"><input type="checkbox" checked={f.quiereFin} onChange={(e) => set("quiereFin", e.target.checked)} /> Necesita financiamiento</label>
         {f.quiereFin && (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
-            <Campo etiqueta="Pie ($)"><input type="number" value={f.fin.pie} onChange={(e) => set("fin", { ...f.fin, pie: e.target.value })} className={INPUT} /></Campo>
+            <Campo etiqueta="Pie ($)"><InputDinero value={f.fin.pie} onChange={(e) => set("fin", { ...f.fin, pie: e.target.value })} className={INPUT} /></Campo>
             <Campo etiqueta="Banco / financiera"><input value={f.fin.banco} onChange={(e) => set("fin", { ...f.fin, banco: e.target.value })} className={INPUT} /></Campo>
             <Campo etiqueta="Estado de la evaluación">
               <select value={f.fin.estado} onChange={(e) => set("fin", { ...f.fin, estado: e.target.value })} className={INPUT}>{ESTADOS_FINANCIAMIENTO.filter((e) => e.id !== "no_aplica").map((e) => <option key={e.id} value={e.id}>{e.nombre}</option>)}</select>

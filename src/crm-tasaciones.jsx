@@ -10,6 +10,7 @@
  * ----------------------------------------------------------------
  */
 import React, { useState, useEffect } from "react";
+import { InputDinero } from "./campo-dinero.jsx";
 import { mesChile } from "../supabase/functions/api/ventas-core.js";
 import { tasacionNombre, validarVehiculoTasacion, validarTasacionDirecta, MAX_FOTOS_TASACION } from "../supabase/functions/api/tasaciones-core.js";
 import { compressImage, makePhotoId } from "./photos.js";
@@ -210,8 +211,8 @@ function TasacionDetalle({ api, id, renderEstimador, onCerrar, onCambio }) {
 
       <Tarjeta titulo="Valores" ayuda={t.tipo === "parte_pago" ? "El valor de compra es lo que se le reconoce al cliente por su vehículo y queda como tope en el lead." : "El valor de compra es lo que se ofrece pagar."}>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
-          <Campo etiqueta="Valor de compra ($)"><input type="number" min="0" value={f.valorCompra} disabled={!editable} onChange={(e) => set("valorCompra", e.target.value)} className={`${INPUT} font-mono`} /></Campo>
-          <Campo etiqueta="Valor de venta esperado ($)"><input type="number" min="0" value={f.valorVenta} disabled={!editable} onChange={(e) => set("valorVenta", e.target.value)} className={`${INPUT} font-mono`} /></Campo>
+          <Campo etiqueta="Valor de compra ($)"><InputDinero value={f.valorCompra} disabled={!editable} onChange={(e) => set("valorCompra", e.target.value)} className={`${INPUT} font-mono`} /></Campo>
+          <Campo etiqueta="Valor de venta esperado ($)"><InputDinero value={f.valorVenta} disabled={!editable} onChange={(e) => set("valorVenta", e.target.value)} className={`${INPUT} font-mono`} /></Campo>
           <div className="text-sm"><p className="text-xs text-stone-500">Margen esperado</p><p className={`font-mono text-lg ${margen < 0 ? "text-rose-600" : "text-stone-900"}`}>{f.valorCompra !== "" && f.valorVenta !== "" ? clp(margen) : "—"}</p></div>
         </div>
         {editable && f.estimacion.compra && (

@@ -9,6 +9,7 @@
  * ----------------------------------------------------------------
  */
 import React, { useState } from "react";
+import { InputDinero } from "./campo-dinero.jsx";
 import { MEDIOS_PAGO } from "../supabase/functions/api/ventas-core.js";
 import { compraNombre, consignacionNombre, COMPRA_ABIERTA, CONSIGNACION_ABIERTA, validarOferta, validarConsignacion } from "../supabase/functions/api/compras-core.js";
 import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, hace, Aviso, Cargando, Tarjeta, Campo, Pestanas, useCarga, mensajeError } from "./crm-ui.jsx";
@@ -66,7 +67,7 @@ function Compra({ api, c, puedeOperar, puedeAprobar, cerrado, onCambio, avisar }
 
       {modo === "pago" && (
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end border-t border-stone-100 pt-3">
-          <Campo etiqueta="Monto a pagar ($)" ayuda={`Hasta ${clp(c.monto_oferta)}`}><input type="number" min="1" max={c.monto_oferta} value={pago.montoFinal} onChange={(e) => setPago({ ...pago, montoFinal: e.target.value })} className={`${INPUT} font-mono`} /></Campo>
+          <Campo etiqueta="Monto a pagar ($)" ayuda={`Hasta ${clp(c.monto_oferta)}`}><InputDinero value={pago.montoFinal} onChange={(e) => setPago({ ...pago, montoFinal: e.target.value })} className={`${INPUT} font-mono`} /></Campo>
           <Campo etiqueta="Medio de pago"><select value={pago.medioPago} onChange={(e) => setPago({ ...pago, medioPago: e.target.value })} className={INPUT}>{MEDIOS_PAGO.map((m) => <option key={m}>{m}</option>)}</select></Campo>
           <Campo etiqueta="Fecha del pago"><input type="date" value={pago.fechaPago} onChange={(e) => setPago({ ...pago, fechaPago: e.target.value })} className={INPUT} /></Campo>
           <div className="flex gap-2"><button disabled={ocupado} onClick={() => correr("compras.solicitarPago", { datos: pago })} className={BTN_PRIMARIO}>Solicitar</button><button onClick={() => setModo("")} className={BTN}>Volver</button></div>
@@ -130,7 +131,7 @@ export function SeccionCompra({ api, lead, datos, onCambio, avisar }) {
               <p className="text-xs uppercase tracking-wide text-stone-400">2 · Oferta al cliente</p>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
                 {completas.length > 1 && <Campo etiqueta="Tasación"><select value={oferta.tasacionId || completas[0].id} onChange={(e) => setOferta({ ...oferta, tasacionId: e.target.value })} className={INPUT}>{completas.map((t) => <option key={t.id} value={t.id}>{t.folio} · {clp(t.valor_compra)}</option>)}</select></Campo>}
-                <Campo etiqueta="Monto ofrecido ($)" ayuda={`Máximo ${clp(elegida.valor_compra)}`}><input type="number" min="1" max={elegida.valor_compra} value={oferta.monto === "" ? elegida.valor_compra : oferta.monto} onChange={(e) => setOferta({ ...oferta, monto: e.target.value })} className={`${INPUT} font-mono`} /></Campo>
+                <Campo etiqueta="Monto ofrecido ($)" ayuda={`Máximo ${clp(elegida.valor_compra)}`}><InputDinero value={oferta.monto === "" ? elegida.valor_compra : oferta.monto} onChange={(e) => setOferta({ ...oferta, monto: e.target.value })} className={`${INPUT} font-mono`} /></Campo>
                 <Campo etiqueta="Nota (opcional)"><input value={oferta.notas} maxLength={300} onChange={(e) => setOferta({ ...oferta, notas: e.target.value })} className={INPUT} /></Campo>
               </div>
               {error && <Aviso>{error}</Aviso>}
@@ -217,8 +218,8 @@ export function SeccionConsignacion({ api, lead, datos, onCambio, avisar }) {
         <div className="border border-stone-200 bg-stone-50 p-3 flex flex-col gap-3">
           <p className="text-xs uppercase tracking-wide text-stone-400">Contrato de consignación</p>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <Campo etiqueta="Precio piso ($)" ayuda="Lo mínimo que quiere recibir el dueño."><input type="number" min="1" value={f.precioPiso} onChange={(e) => setF({ ...f, precioPiso: e.target.value })} className={`${INPUT} font-mono`} /></Campo>
-            <Campo etiqueta="Precio de publicación ($)" ayuda="No puede ser menor que el piso."><input type="number" min="1" value={f.precioPublicacion} onChange={(e) => setF({ ...f, precioPublicacion: e.target.value })} className={`${INPUT} font-mono`} /></Campo>
+            <Campo etiqueta="Precio piso ($)" ayuda="Lo mínimo que quiere recibir el dueño."><InputDinero value={f.precioPiso} onChange={(e) => setF({ ...f, precioPiso: e.target.value })} className={`${INPUT} font-mono`} /></Campo>
+            <Campo etiqueta="Precio de publicación ($)" ayuda="No puede ser menor que el piso."><InputDinero value={f.precioPublicacion} onChange={(e) => setF({ ...f, precioPublicacion: e.target.value })} className={`${INPUT} font-mono`} /></Campo>
             <Campo etiqueta="Plazo (días)"><input type="number" min="15" max="365" value={f.plazoDias} onChange={(e) => setF({ ...f, plazoDias: e.target.value })} className={`${INPUT} font-mono`} /></Campo>
             <Campo etiqueta="Nota (opcional)"><input value={f.notas} maxLength={300} onChange={(e) => setF({ ...f, notas: e.target.value })} className={INPUT} /></Campo>
           </div>

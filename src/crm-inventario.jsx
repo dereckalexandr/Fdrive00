@@ -7,6 +7,7 @@
  * ----------------------------------------------------------------
  */
 import React, { useState, useEffect, useMemo } from "react";
+import { InputDinero } from "./campo-dinero.jsx";
 import { ESTADOS_VEHICULO, TRANSMISIONES, COMBUSTIBLES, validarVehiculo, validarCliente, textoVencimiento } from "../supabase/functions/api/ventas-core.js";
 import { compressImage, makePhotoId } from "./photos.js";
 import { SeccionInspeccion } from "./crm-inspecciones.jsx";
@@ -112,8 +113,8 @@ function FormVehiculo({ api, vehiculo, puedeCosto, onCerrar, onGuardado }) {
         <Campo etiqueta="Combustible">
           <select value={f.combustible} onChange={(e) => set("combustible", e.target.value)} className={INPUT}><option value="">—</option>{COMBUSTIBLES.map((t) => <option key={t}>{t}</option>)}</select>
         </Campo>
-        <Campo etiqueta="Precio de lista ($)"><input type="number" min="0" value={f.precioLista} onChange={(e) => set("precioLista", e.target.value)} className={INPUT} /></Campo>
-        {puedeCosto && <Campo etiqueta="Costo ($)" ayuda="Solo lo ven quienes editan el inventario."><input type="number" min="0" value={f.costo} onChange={(e) => set("costo", e.target.value)} className={INPUT} /></Campo>}
+        <Campo etiqueta="Precio de lista ($)"><InputDinero value={f.precioLista} onChange={(e) => set("precioLista", e.target.value)} className={INPUT} /></Campo>
+        {puedeCosto && <Campo etiqueta="Costo ($)" ayuda="Solo lo ven quienes editan el inventario."><InputDinero value={f.costo} onChange={(e) => set("costo", e.target.value)} className={INPUT} /></Campo>}
       </div>
       <Campo etiqueta="Notas"><textarea rows={2} value={f.notas} onChange={(e) => set("notas", e.target.value)} className={INPUT} /></Campo>
 

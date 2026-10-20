@@ -11,6 +11,7 @@ import { buildBookmarkletHref } from "./chileautos-bookmarklet.js";
 import { buildPatenteBookmarkletHref } from "./patente-bookmarklet.js";
 import { AdminCrmPanel, PESTANAS_CRM } from "./crm-admin.jsx";
 import { ModuloVentas } from "./crm-ventas.jsx";
+import { InputDinero } from "./campo-dinero.jsx";
 import { ModuloTasaciones } from "./crm-tasaciones.jsx";
 import { ModuloValidaciones } from "./crm-validaciones.jsx";
 import { ModuloAnuncios } from "./crm-anuncios.jsx";
@@ -789,8 +790,7 @@ function NumberField({ value, onChange, readOnly = false, disabled = false }) {
     return <div className="w-full px-2 py-1.5 text-right font-mono text-sm text-stone-700">{(value || 0).toLocaleString("es-CL")}</div>;
   }
   return (
-    <input
-      type="number" min="0"
+    <InputDinero
       value={value === 0 ? "" : value}
       placeholder="0"
       disabled={disabled}

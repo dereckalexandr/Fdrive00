@@ -9,6 +9,7 @@
  * ----------------------------------------------------------------
  */
 import React, { useState } from "react";
+import { InputDinero } from "./campo-dinero.jsx";
 import { MODULOS_COMISION, getTramo, etiquetaTramo } from "../supabase/functions/api/comisiones-core.js";
 import { calcularCotizacion, validarCierre, cierreNombre, mesChile, FINANCIERAS } from "../supabase/functions/api/ventas-core.js";
 import { Aprobaciones, topeTasado } from "./crm-cotizaciones.jsx";
@@ -59,16 +60,16 @@ function FormCierre({ api, lead, cotizacion, reserva, catalogos, tope, onCerrar,
       <Tarjeta titulo="Precio y forma de pago">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <Campo etiqueta="Precio final de venta ($)" ayuda={menosQueCotizacion ? `Es ${clp(Number(cotizacion.precio_final) - precio)} menos que la cotización: el Jefe Local lo verá al aprobar.` : ""}>
-            <input type="number" min="1" value={f.precioFinal} onChange={(e) => set("precioFinal", e.target.value)} className={INPUT} />
+            <InputDinero value={f.precioFinal} onChange={(e) => set("precioFinal", e.target.value)} className={INPUT} />
           </Campo>
-          <Campo etiqueta="Vehículo recibido en parte de pago ($)" ayuda={tope ? `Máximo según la tasación: ${clp(tope)}.` : ""}><input type="number" min="0" max={tope || undefined} value={f.montoParteDePago} onChange={(e) => set("montoParteDePago", e.target.value)} className={INPUT} /></Campo>
-          <Campo etiqueta="Monto financiado ($)"><input type="number" min="0" value={f.montoFinanciado} onChange={(e) => set("montoFinanciado", e.target.value)} className={INPUT} /></Campo>
+          <Campo etiqueta="Vehículo recibido en parte de pago ($)" ayuda={tope ? `Máximo según la tasación: ${clp(tope)}.` : ""}><InputDinero value={f.montoParteDePago} onChange={(e) => set("montoParteDePago", e.target.value)} className={INPUT} /></Campo>
+          <Campo etiqueta="Monto financiado ($)"><InputDinero value={f.montoFinanciado} onChange={(e) => set("montoFinanciado", e.target.value)} className={INPUT} /></Campo>
           {financia && (
             <>
               <Campo etiqueta="Financiera">
                 <select value={f.financiera} onChange={(e) => set("financiera", e.target.value)} className={INPUT}><option value="">Elegir…</option>{FINANCIERAS.map((x) => <option key={x}>{x}</option>)}</select>
               </Campo>
-              <Campo etiqueta="Comisión que paga la financiera ($)" ayuda="Es la base de tu comisión por créditos."><input type="number" min="0" value={f.comisionFinanciera} onChange={(e) => set("comisionFinanciera", e.target.value)} className={INPUT} /></Campo>
+              <Campo etiqueta="Comisión que paga la financiera ($)" ayuda="Es la base de tu comisión por créditos."><InputDinero value={f.comisionFinanciera} onChange={(e) => set("comisionFinanciera", e.target.value)} className={INPUT} /></Campo>
             </>
           )}
         </div>

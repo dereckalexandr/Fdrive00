@@ -7,6 +7,7 @@
  * ----------------------------------------------------------------
  */
 import React from "react";
+import { InputDinero } from "./campo-dinero.jsx";
 import { MODULOS_COMISION, TRAMOS_ESTANDAR, etiquetaTramo } from "../supabase/functions/api/comisiones-core.js";
 
 const INPUT = "border border-stone-300 bg-white px-2 py-1.5 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-amber-500";
@@ -39,7 +40,9 @@ export function TramosEditor({ valor, onChange }) {
                     <span className="text-stone-500">hasta</span>
                     <input type="number" min="1" value={f.max} placeholder="sin tope" onChange={(e) => poner(m.key, filas.map((x, k) => (k === i ? { ...x, max: e.target.value } : x)))} className={`${INPUT} w-24`} />
                     <span className="text-stone-500">unidades →</span>
-                    <input type="number" min="0" step={m.tipo === "porcentaje" ? "0.5" : "1000"} value={f.rate} onChange={(e) => poner(m.key, filas.map((x, k) => (k === i ? { ...x, rate: e.target.value } : x)))} className={`${INPUT} w-28 text-right font-mono`} />
+                    {m.tipo === "porcentaje"
+                      ? <input type="number" min="0" step={m.tipo === "porcentaje" ? "0.5" : "1000"} value={f.rate} onChange={(e) => poner(m.key, filas.map((x, k) => (k === i ? { ...x, rate: e.target.value } : x)))} className={`${INPUT} w-28 text-right font-mono`} />
+                      : <InputDinero value={f.rate} onChange={(e) => poner(m.key, filas.map((x, k) => (k === i ? { ...x, rate: e.target.value } : x)))} className={`${INPUT} w-28 text-right font-mono`} />}
                     <span className="text-stone-500">{m.tipo === "porcentaje" ? "%" : "$ c/u"}</span>
                     <button type="button" onClick={() => { const sig = filas.filter((_, k) => k !== i); poner(m.key, sig.length ? sig : []); }} className="text-rose-500 px-1" aria-label="Quitar tramo">✕</button>
                   </div>

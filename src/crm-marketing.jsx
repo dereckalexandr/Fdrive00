@@ -10,6 +10,7 @@
  * ----------------------------------------------------------------
  */
 import React, { useState } from "react";
+import { InputDinero } from "./campo-dinero.jsx";
 import { mesChile } from "../supabase/functions/api/ventas-core.js";
 import {
   CANALES, TIPOS_PUBLICACION, ESTADOS_PUBLICACION, TIPOS_MATERIAL, ESTADOS_MATERIAL, canalNombre, tipoPublicacionNombre, publicacionNombre,
@@ -152,7 +153,7 @@ function FormCampania({ api, camp, onCerrar, onGuardada }) {
       <Campo etiqueta="Nombre"><input value={f.nombre} maxLength={80} onChange={(e) => set("nombre", e.target.value)} className={INPUT} /></Campo>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <Campo etiqueta="Canal"><select value={f.canal} onChange={(e) => set("canal", e.target.value)} className={INPUT}>{CANALES.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}</select></Campo>
-        <Campo etiqueta="Presupuesto ($)" ayuda={aviso}><input type="number" min="0" value={f.presupuesto} onChange={(e) => set("presupuesto", e.target.value)} className={`${INPUT} font-mono`} /></Campo>
+        <Campo etiqueta="Presupuesto ($)" ayuda={aviso}><InputDinero value={f.presupuesto} onChange={(e) => set("presupuesto", e.target.value)} className={`${INPUT} font-mono`} /></Campo>
         <Campo etiqueta="Desde"><input type="date" value={f.desde} onChange={(e) => set("desde", e.target.value)} className={INPUT} /></Campo>
         <Campo etiqueta="Hasta"><input type="date" value={f.hasta} onChange={(e) => set("hasta", e.target.value)} className={INPUT} /></Campo>
       </div>
@@ -177,7 +178,7 @@ function FormResultados({ api, camp, onCerrar, onGuardada }) {
     <Modal titulo={`Resultados de ${camp.nombre}`} onCerrar={onCerrar} ancho="max-w-lg">
       <p className="text-sm text-stone-600">Anota lo que muestran las plataformas. Los leads y las ventas los cuenta el CRM solo. Presupuesto aprobado: <strong className="font-mono">{clp(camp.presupuesto_aprobado)}</strong>.</p>
       <div className="grid grid-cols-2 gap-3">
-        <Campo etiqueta="Gasto real ($)"><input type="number" min="0" value={f.gasto} onChange={(e) => set("gasto", e.target.value)} className={`${INPUT} font-mono`} /></Campo>
+        <Campo etiqueta="Gasto real ($)"><InputDinero value={f.gasto} onChange={(e) => set("gasto", e.target.value)} className={`${INPUT} font-mono`} /></Campo>
         <Campo etiqueta="Alcance (personas)"><input type="number" min="0" value={f.alcance} onChange={(e) => set("alcance", e.target.value)} className={`${INPUT} font-mono`} /></Campo>
         <Campo etiqueta="Impresiones"><input type="number" min="0" value={f.impresiones} onChange={(e) => set("impresiones", e.target.value)} className={`${INPUT} font-mono`} /></Campo>
         <Campo etiqueta="Clics"><input type="number" min="0" value={f.clics} onChange={(e) => set("clics", e.target.value)} className={`${INPUT} font-mono`} /></Campo>
