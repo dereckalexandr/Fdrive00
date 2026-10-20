@@ -1527,6 +1527,58 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       return json({ inspectores });
     }
 
+    // El supervisor corrige los PRECIOS de una valorización del Inspector (valor comercial y valores del checklist). Nada más de la ficha cambia.
+    if (op === "inspecciones.valorizacion_ajustar") {
+      if (!esSupervisor) return err("forbidden", 403);
+      const clave = String(body.key ?? "");
+      const m = /^tasacion::([0-9a-f-]{36})::[A-Za-z0-9_-]{1,80}$/i.exec(clave);
+      if (!m) return err("clave_invalida");
+      const dueno = await sb.from("usuarios").select("local_id, nombre").eq("id", m[1]).maybeSingle();
+      if (dueno.error) return fallar(dueno.error);
+      if (!dueno.data || (!ctx.esAdmin && dueno.data.local_id !== localId)) return err("no_existe", 404);
+      const entero = (v: unknown) => (typeof v === "number" || typeof v === "string") && String(v).trim() !== "" && Number.isFinite(Number(v)) && Number(v) >= 0 && Number(v) <= 10_000_000_000 ? Math.round(Number(v)) : null;
+      const pedidos: Record<string, number> = {};
+      let comercial: number | null = null;
+      if (body.valorComercial !== undefined && body.valorComercial !== null) {
+        comercial = entero(body.valorComercial);
+        if (comercial === null) return err("valor_invalido");
+      }
+      if (body.items !== undefined && (typeof body.items !== "object" || body.items === null || Array.isArray(body.items))) return err("valor_invalido");
+      for (const [id, v] of Object.entries((body.items ?? {}) as Record<string, unknown>)) {
+        const n = entero(v);
+        if (n === null) return err("valor_invalido");
+        pedidos[String(id).slice(0, 80)] = n;
+      }
+      if (comercial === null && Object.keys(pedidos).length === 0) return err("sin_cambio");
+      const fila = await sb.from("kv_store").select("value").eq("key", clave).maybeSingle();
+      if (fila.error) return fallar(fila.error);
+      if (!fila.data) return err("no_existe", 404);
+      let rec: any;
+      try { rec = JSON.parse(fila.data.value); } catch { return err("ficha_ilegible", 422); }
+      if (!rec || typeof rec !== "object") return err("ficha_ilegible", 422);
+      rec.checklist = rec.checklist && typeof rec.checklist === "object" ? rec.checklist : {};
+      const cambios: any[] = [];
+      const ahora = new Date().toISOString();
+      if (comercial !== null && Number(rec.valorComercial ?? 0) !== comercial) {
+        cambios.push({ campo: "Valor comercial estimado", antes: Number(rec.valorComercial ?? 0), despues: comercial });
+        rec.valorComercial = comercial;
+      }
+      for (const [id, n] of Object.entries(pedidos)) {
+        const it = rec.checklist[id];
+        if (!it || typeof it !== "object") return err("item_invalido");
+        if (Number(it.valor ?? 0) !== n) {
+          cambios.push({ campo: String(it.nombre || id), item: id, antes: Number(it.valor ?? 0), despues: n });
+          it.valor = n;
+        }
+      }
+      if (cambios.length === 0) return err("sin_cambio");
+      rec.ajustes = [...(Array.isArray(rec.ajustes) ? rec.ajustes : []), ...cambios.map((c) => ({ ...c, por: userName, en: ahora }))].slice(-60);
+      const up = await sb.from("kv_store").upsert({ key: clave, value: JSON.stringify(rec), shared: true, updated_at: ahora }, { onConflict: "key" });
+      if (up.error) return fallar(up.error);
+      await audit(ctx.actor, "valorizacion.ajustar", "valorizacion", clave, { inspector: dueno.data.nombre, patente: rec.patente ?? null, cambios: cambios.map((c) => ({ campo: c.campo, antes: c.antes, despues: c.despues })) });
+      return json({ ok: true, cambios: cambios.length, ajustes: rec.ajustes });
+    }
+
     if (op === "inspecciones.tomar") {
       if (!realiza || ctx.esAdmin) return err("forbidden", 403);
       const x = await cargarInspeccion(String(body.id ?? ""));

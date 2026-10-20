@@ -743,3 +743,11 @@ Al refrescar (F5) ya no se vuelve al ingreso: la sesión se guarda en `sessionSt
 ## Campos de dinero con puntos de miles
 
 Todo campo en pesos del CRM y del sitio público (precios, costos, descuentos, pie, reservas, ofertas, pagos, presupuestos, valores de tasación, precio piso y de publicación, comisiones fijas por tramo, precio máximo del catálogo, y los campos de las pantallas anteriores) muestra los puntos de miles mientras se escribe: `12480000` queda `12.480.000`. El cursor se mantiene donde estaba al escribir en medio del número. Por dentro el valor sigue siendo el número limpio (`12480000`), así que el servidor no cambia. Componente: `InputDinero` en `src/campo-dinero.jsx`; formato en `src/dinero.js` (pruebas en `tests/dinero.test.mjs`). Quedan como números normales los que no son dinero (año, kilometraje, días, plazos, porcentajes y el valor de la UF, que lleva decimales).
+
+## Fichas de inspectores: fotos y ajuste de precios (Jefe Local y Administrador)
+
+En *Comercial → Fichas de inspectores*:
+- **Fotos:** cada valorización y cada inspección muestra arriba una galería con **todas las fotos tomadas por el inspector** (en la valorización, agrupadas por pieza y en tamaño grande; se abren a pantalla completa). Las fotos de las inspecciones son las «fotos para el equipo».
+- **Ajustar precios:** en una valorización, el Jefe Local (de su local) y el Administrador pueden **corregir el valor comercial estimado y la valorización de cada pieza**. Se ve de inmediato el total y el valor final (valor comercial − valorizaciones) contra el anterior. El resto de la ficha (datos, estados, fotos, observaciones) **no se modifica**. Cada cambio queda guardado en la propia ficha (*Historial de ajustes*, con quién, cuándo y de cuánto a cuánto) y en la *Bitácora* (`valorizacion.ajustar`); el Inspector ve los precios corregidos al abrir su ficha.
+- Servidor: `inspecciones.valorizacion_ajustar` (solo supervisor, solo valorizaciones de personas de su local, valores enteros de 0 a 10.000 millones, solo ítems que ya existen en la ficha). Pruebas: `tests/inspecciones-api.test.mjs`.
+- **Límite:** si el Inspector tiene esa misma ficha abierta en su pantalla y la guarda después, sus precios antiguos pueden pisar los corregidos; conviene avisarle antes.

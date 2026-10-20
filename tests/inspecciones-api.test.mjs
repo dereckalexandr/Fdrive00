@@ -370,3 +370,44 @@ test("La cuenta maestra ve todo pero no inspecciona", async () => {
   const res = await ve(admin, "inspecciones.resumen", { localId: L1 });
   assert.equal(res.status, 200);
 });
+
+test("Valorización del Inspector: el Jefe Local corrige los precios de las de su local, con registro; nada más cambia", async () => {
+  const key = `tasacion::${U.i1.id}::v9`;
+  const base = { propietario: "Don Pedro", patente: "ABCD12", valorComercial: 8900000, observaciones: "Original", checklist: { parachoques_delantero: { estado: "Repintado", valor: 150000, fotos: ["f1"] }, techo: { estado: "Golpe", valor: 200000 } } };
+  assert.equal((await kv(U.i1.token, "set", key, { value: JSON.stringify(base) })).status, 200);
+  const ajustar = (token, extra, k = key) => ve(token, "inspecciones.valorizacion_ajustar", { key: k, ...extra });
+
+  // Permisos: el ejecutivo y el inspector no; el Jefe de otro local, tampoco.
+  assert.equal((await ajustar(U.e1.token, { valorComercial: 1 })).status, 403);
+  assert.equal((await ajustar(U.i1.token, { valorComercial: 1 })).status, 403);
+  assert.equal((await ajustar(U.jefeSur.token, { valorComercial: 1 })).status, 404);
+
+  // Validaciones.
+  assert.equal((await ajustar(U.jefe.token, {})).error, "sin_cambio");
+  assert.equal((await ajustar(U.jefe.token, { valorComercial: -5 })).error, "valor_invalido");
+  assert.equal((await ajustar(U.jefe.token, { valorComercial: "abc" })).error, "valor_invalido");
+  assert.equal((await ajustar(U.jefe.token, { items: { parachoques_delantero: "x" } })).error, "valor_invalido");
+  assert.equal((await ajustar(U.jefe.token, { items: { inventado: 5 } })).error, "item_invalido");
+  assert.equal((await ajustar(U.jefe.token, { valorComercial: 8900000 })).error, "sin_cambio", "mismo valor: nada que guardar");
+  assert.equal((await ajustar(U.jefe.token, { valorComercial: 1 }, "inspeccion::" + U.i1.id + "::x")).error, "clave_invalida", "solo valorizaciones");
+  assert.equal((await ajustar(U.jefe.token, { valorComercial: 1 }, `tasacion::${U.iSur.id}::v9`)).status, 404, "inspector de otro local");
+
+  // Cambio correcto: valor comercial y un ítem.
+  const r = await ajustar(U.jefe.token, { valorComercial: 9200000, items: { parachoques_delantero: 120000 } });
+  assert.equal(r.status, 200, JSON.stringify(r));
+  assert.equal(r.cambios, 2);
+  const leido = JSON.parse((await kv(U.jefe.token, "get", key)).value);
+  assert.equal(leido.valorComercial, 9200000);
+  assert.equal(leido.checklist.parachoques_delantero.valor, 120000);
+  assert.equal(leido.checklist.techo.valor, 200000, "lo que no se tocó queda igual");
+  assert.deepEqual(leido.checklist.parachoques_delantero.fotos, ["f1"], "las fotos no se pierden");
+  assert.equal(leido.observaciones, "Original");
+  assert.equal(leido.ajustes.length, 2);
+  assert.equal(leido.ajustes[0].por, "Julia Jefa");
+  assert.equal(leido.ajustes[0].antes, 8900000);
+  assert.ok(db.tablas.bitacora.some((b) => b.accion === "valorizacion.ajustar"), "queda en la bitácora");
+  // El inspector sigue pudiendo leer su ficha con los cambios.
+  assert.equal(JSON.parse((await kv(U.i1.token, "get", key)).value).valorComercial, 9200000);
+  // La cuenta maestra también puede.
+  assert.equal((await ve(admin, "inspecciones.valorizacion_ajustar", { key, items: { techo: 180000 } })).status, 200);
+});

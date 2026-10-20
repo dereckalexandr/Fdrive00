@@ -1127,7 +1127,7 @@ function InspeccionForm({ record, onFieldChange, onChecklistChange, readOnly = f
 /* ---------- Fotos de la tasación: botón (+) por caja, miniaturas y visor ---------- */
 const photoCache = new Map(); // id -> data URL (evita volver a descargar la misma foto)
 
-function PhotoThumb({ inspectorId, photoId, onOpen }) {
+function PhotoThumb({ inspectorId, photoId, onOpen, tam = "w-14 h-14" }) {
   const [src, setSrc] = useState(photoCache.get(photoId) || null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
@@ -1145,7 +1145,7 @@ function PhotoThumb({ inspectorId, photoId, onOpen }) {
       type="button"
       onClick={() => src && onOpen(photoId)}
       aria-label="Ver foto"
-      className="w-14 h-14 shrink-0 border border-stone-300 bg-stone-100 overflow-hidden flex items-center justify-center text-xs text-stone-400"
+      className={`${tam} shrink-0 border border-stone-300 bg-stone-100 overflow-hidden flex items-center justify-center text-xs text-stone-400`}
     >
       {src ? <img src={src} alt="Foto de la pieza" className="w-full h-full object-cover" /> : failed ? "!" : "…"}
     </button>
@@ -3538,6 +3538,129 @@ function TasacionCompra({ inicial, onResultado } = {}) {
 }
 
 // Pestañas de la versión anterior (perfiles con código): se mantienen agrupadas mientras compras y consignaciones pasan al CRM.
+/** Todas las fotos de una valorización, agrupadas por pieza, en grande (vista del Jefe Local y del Administrador). */
+function GaleriaValorizacion({ data, inspectorId }) {
+  const [abierta, setAbierta] = useState(null);
+  const grupos = [];
+  for (const sec of TASACION_SECTIONS) {
+    for (const it of getTasacionSectionItems(sec)) {
+      const st = (data.checklist || {})[it.id];
+      if (st && Array.isArray(st.fotos) && st.fotos.length) grupos.push({ id: it.id, label: sec.type === "dynamic" ? (st.nombre || sec.title) : it.label, estado: st.estado || "", fotos: st.fotos });
+    }
+  }
+  const total = grupos.reduce((n, g) => n + g.fotos.length, 0);
+  return (
+    <div className="bg-white border border-stone-200 p-5">
+      <h3 className="font-serif text-lg text-stone-900">Fotos tomadas por el inspector ({total})</h3>
+      {total === 0 ? <p className="text-sm text-stone-500 mt-2">El inspector no adjuntó fotos en esta valorización.</p> : (
+        <div className="mt-3 flex flex-col gap-4">
+          {grupos.map((g) => (
+            <div key={g.id}>
+              <p className="text-sm text-stone-700 mb-1.5">{g.label}{g.estado ? <span className="text-stone-400"> · {g.estado}</span> : null}</p>
+              <div className="flex flex-wrap gap-2">{g.fotos.map((f) => <PhotoThumb key={f} inspectorId={inspectorId} photoId={f} onOpen={setAbierta} tam="w-28 h-28" />)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {abierta && <PhotoLightbox photoId={abierta} onClose={() => setAbierta(null)} />}
+    </div>
+  );
+}
+
+/** El Jefe Local (o el Administrador) corrige los precios de una valorización: valor comercial y valor de cada pieza. Queda registrado con su nombre. */
+function AjusteValorizacion({ registro, onGuardado }) {
+  const d = registro.data;
+  const items = [];
+  for (const sec of TASACION_SECTIONS) {
+    for (const it of getTasacionSectionItems(sec)) {
+      const st = (d.checklist || {})[it.id];
+      if (st && (toNum(st.valor) > 0 || st.estado || st.nombre)) items.push({ id: it.id, label: sec.type === "dynamic" ? (st.nombre || sec.title) : it.label, estado: st.estado || "" });
+    }
+  }
+  const inicial = () => ({ comercial: String(toNum(d.valorComercial)), valores: Object.fromEntries(items.map((i) => [i.id, String(toNum(d.checklist[i.id].valor))])) });
+  const [f, setF] = useState(inicial);
+  const [guardando, setGuardando] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const cl = { ...(d.checklist || {}) };
+  for (const i of items) cl[i.id] = { ...cl[i.id], valor: toNum(f.valores[i.id]) };
+  const totales = computeTasacionTotals(cl, TASACION_SECTIONS, getTasacionSectionItems);
+  const vf = computeValorFinal(f.comercial, totales.total);
+  const original = inicial();
+  const sucio = f.comercial !== original.comercial || items.some((i) => f.valores[i.id] !== original.valores[i.id]);
+
+  const guardar = async () => {
+    setGuardando(true); setMsg(null);
+    try {
+      const cambiados = Object.fromEntries(items.filter((i) => f.valores[i.id] !== original.valores[i.id]).map((i) => [i.id, Number(f.valores[i.id] || 0)]));
+      const r = await window.auth.ventas("inspecciones.valorizacion_ajustar", { key: registro.key, ...(f.comercial !== original.comercial ? { valorComercial: Number(f.comercial || 0) } : {}), items: cambiados });
+      onGuardado({ ...d, valorComercial: Number(f.comercial || 0), checklist: cl, ajustes: r.ajustes });
+    } catch (e) { setMsg({ ok: false, texto: e && e.message === "sin_cambio" ? "No hay cambios que guardar." : "No se pudo guardar. Inténtalo de nuevo." }); }
+    setGuardando(false);
+  };
+
+  return (
+    <div className="bg-white border border-stone-200 p-5 flex flex-col gap-4">
+      <div>
+        <h3 className="font-serif text-lg text-stone-900">Ajustar precios de la valorización</h3>
+        <p className="text-xs text-stone-500 mt-1">Puedes corregir el valor comercial y la valorización de cada pieza. El resto de la ficha no se modifica y cada cambio queda registrado.</p>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+        <label className="text-xs text-stone-500 flex flex-col gap-1 md:col-span-1">Valor comercial estimado
+          <InputDinero value={f.comercial} onChange={(e) => setF({ ...f, comercial: e.target.value })} className="w-full border border-stone-300 bg-white px-3 py-2 text-sm font-mono text-right focus:outline-none focus:ring-2 focus:ring-amber-500" />
+        </label>
+        <div className="md:col-span-2 grid grid-cols-3 gap-3 text-sm">
+          <div><p className="text-xs text-stone-500">Total valorizaciones</p><p className="font-mono">{clp(totales.total)}</p></div>
+          <div><p className="text-xs text-stone-500">Valor final</p><p className={`font-mono font-semibold ${vf.final < 0 ? "text-rose-700" : "text-stone-900"}`}>{clp(vf.final)}</p></div>
+          <div><p className="text-xs text-stone-500">Antes</p><p className="font-mono text-stone-500">{clp(computeValorFinal(d.valorComercial, computeTasacionTotals(d.checklist, TASACION_SECTIONS, getTasacionSectionItems).total).final)}</p></div>
+        </div>
+      </div>
+      {items.length > 0 && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead><tr className="text-left text-xs uppercase tracking-wide text-stone-400 border-b border-stone-200"><th className="py-2 pr-2">Pieza o ítem</th><th className="py-2 pr-2">Estado</th><th className="py-2 pr-2 text-right w-44">Valorización</th></tr></thead>
+            <tbody>
+              {items.map((i) => (
+                <tr key={i.id} className="border-b border-stone-100">
+                  <td className="py-1.5 pr-2 text-stone-800">{i.label}</td>
+                  <td className="py-1.5 pr-2 text-stone-500">{i.estado || "—"}</td>
+                  <td className="py-1.5 pr-2"><InputDinero value={f.valores[i.id]} onChange={(e) => setF({ ...f, valores: { ...f.valores, [i.id]: e.target.value } })} className="w-full border border-stone-300 bg-white px-2 py-1.5 text-sm font-mono text-right focus:outline-none focus:ring-2 focus:ring-amber-500" /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {msg && <p className={`text-sm ${msg.ok ? "text-emerald-700" : "text-rose-700"}`}>{msg.texto}</p>}
+      <div className="flex items-center gap-3">
+        <button onClick={guardar} disabled={!sucio || guardando} className="bg-stone-900 text-white px-4 py-2 text-sm font-medium hover:bg-stone-700 disabled:opacity-50">{guardando ? "Guardando…" : "Guardar precios"}</button>
+        {sucio && <button onClick={() => setF(inicial())} className="text-sm text-stone-600 hover:underline">Deshacer</button>}
+      </div>
+      {Array.isArray(d.ajustes) && d.ajustes.length > 0 && (
+        <details className="text-sm">
+          <summary className="cursor-pointer text-stone-600">Historial de ajustes ({d.ajustes.length})</summary>
+          <ul className="mt-2 flex flex-col gap-1 text-xs text-stone-600">
+            {d.ajustes.slice().reverse().map((a, i) => <li key={i}>{new Date(a.en).toLocaleString("es-CL", { dateStyle: "short", timeStyle: "short" })} · {a.por}: {(items.find((i) => i.id === a.item) || {}).label || a.campo} de {clp(a.antes)} a {clp(a.despues)}</li>)}
+          </ul>
+        </details>
+      )}
+    </div>
+  );
+}
+
+/** Fotos para el equipo que el Inspector sacó en una inspección. */
+function GaleriaInspeccion({ registro }) {
+  const fichaId = recordIdFromKey(registro.key);
+  const fotos = registro.data.fotosEquipo || [];
+  return (
+    <div className="bg-white border border-stone-200 p-5">
+      <h3 className="font-serif text-lg text-stone-900">Fotos tomadas por el inspector ({fotos.length})</h3>
+      {fotos.length === 0 ? <p className="text-sm text-stone-500 mt-2">El inspector no adjuntó fotos en esta inspección.</p> : (
+        <div className="mt-3 flex flex-wrap gap-2">{fotos.map((f) => <MiniaturaEquipo key={f} fichaId={fichaId} fotoId={f} />)}</div>
+      )}
+    </div>
+  );
+}
+
 /** Fichas de inspección y valorizaciones de las personas que inspeccionan. Las ve el Jefe Local (su local) y la cuenta maestra (todos), completas, con los datos del propietario y el PDF con el CAV. Solo lectura. */
 function FichasEquipo() {
   const [estado, setEstado] = useState({ cargando: true, error: "", inspectores: [], inspecciones: [], valorizaciones: [], pendientes: 0 });
@@ -3616,12 +3739,25 @@ function FichasEquipo() {
         <div className="flex flex-wrap items-center gap-x-5 gap-y-1">
           <button onClick={() => setAbierto(null)} className="text-sm text-stone-500 hover:underline py-1.5">← Volver a las fichas</button>
           <ActionLink onClick={pdf}>Descargar PDF{abierto.tipo === "inspeccion" ? " (con el CAV)" : ""}</ActionLink>
-          <span className="text-xs text-stone-500">Realizada por {d.inspectorNombre || abierto.inspectorNombre} · solo lectura</span>
+          <span className="text-xs text-stone-500">Realizada por {d.inspectorNombre || abierto.inspectorNombre}{abierto.tipo === "inspeccion" ? " · solo lectura" : ""}</span>
         </div>
-        {msg && <p className="text-xs text-stone-500">{msg}</p>}
-        {abierto.tipo === "inspeccion"
-          ? <InspeccionForm key={abierto.key} record={d} onFieldChange={() => {}} onChecklistChange={() => {}} readOnly />
-          : <TasacionForm key={abierto.key} record={d} onFieldChange={() => {}} onChecklistChange={() => {}} readOnly photos={{ viewOnly: true, inspectorId: abierto.inspectorId }} />}
+        {msg && <p className={`text-sm ${/^Precios actualizados/.test(msg) ? "text-emerald-700" : "text-stone-500"}`}>{msg}</p>}
+        {abierto.tipo === "inspeccion" ? (
+          <>
+            <GaleriaInspeccion registro={abierto} />
+            <InspeccionForm key={abierto.key} record={d} onFieldChange={() => {}} onChecklistChange={() => {}} readOnly />
+          </>
+        ) : (
+          <>
+            <GaleriaValorizacion data={d} inspectorId={abierto.inspectorId} />
+            <AjusteValorizacion key={abierto.key + (d.ajustes ? d.ajustes.length : 0)} registro={abierto} onGuardado={(nuevo) => {
+              setAbierto({ ...abierto, data: nuevo });
+              setMsg("Precios actualizados. Quedó registrado con tu nombre.");
+              setEstado((x) => ({ ...x, valorizaciones: x.valorizaciones.map((v) => (v.key === abierto.key ? { ...v, data: { ...v.data, valorComercial: nuevo.valorComercial } } : v)) }));
+            }} />
+            <TasacionForm key={abierto.key + "-" + toNum(d.valorComercial)} record={d} onFieldChange={() => {}} onChecklistChange={() => {}} readOnly photos={{ viewOnly: true, inspectorId: abierto.inspectorId }} />
+          </>
+        )}
       </div>
     );
   }

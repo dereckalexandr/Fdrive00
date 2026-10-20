@@ -66,6 +66,18 @@ for (const i of [0, 1, 2]) {
   await ve(leads[i].quien.token, "cotizaciones.save", { leadId: leads[i].lead.id, vehiculoId: vehs[i].id, datos: { descuento: i === 1 ? 250000 : 0 } });
 }
 
+// Una valorización del Inspector con fotos (para ver la ficha de inspectores del Jefe Local).
+{
+  const kv = (op, key, value) => api({ action: "kv", token: U.insp.token, op, key, ...(value ? { value } : {}) });
+  await kv("set", `foto::${U.insp.id}::pf1`, foto("#7c2d12", "#f59e0b"));
+  await kv("set", `foto::${U.insp.id}::pf2`, foto("#1e3a8a", "#38bdf8"));
+  await kv("set", `tasacion::${U.insp.id}::t1`, JSON.stringify({
+    fecha: "2026-10-19", propietario: "Don Pedro Soto", vehiculo: "Toyota Yaris 2019", patente: "BKTD10", anio: "2019", kilometraje: "52000", valorComercial: 8900000, estadoGeneral: "Bueno",
+    observaciones: "Pintura con detalles.", inspectorNombre: "Ivo Inspector", guardadoEl: new Date().toISOString(),
+    checklist: { parachoques_delantero: { estado: "Repintado", valor: 150000, fotos: ["pf1"] }, tapabarro_delantero_izquierdo: { estado: "Golpe", valor: 200000, fotos: ["pf2"] } },
+  }));
+}
+
 // Servidor de la función simulada (misma dirección que la real: /functions/v1/api).
 crearHttp(async (req, res) => {
   const trozos = [];
