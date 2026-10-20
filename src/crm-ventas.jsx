@@ -25,7 +25,7 @@ import { ErrorBoundary } from "./error-boundary.jsx";
 import { SeccionCompra, SeccionConsignacion, ModuloCompras } from "./crm-compras.jsx";
 import { etapaDeOperacion, tipoLeadNombre, TIPOS_LEAD, validarVehiculoOfrecido } from "../supabase/functions/api/compras-core.js";
 import {
-  INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, NavegacionLateral, useCarga, mensajeError, CamposVehiculo, aVehiculoForm,
+  INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, NavegacionLateral, useGuardado, useCarga, mensajeError, CamposVehiculo, aVehiculoForm,
 } from "./crm-ui.jsx";
 
 const COLOR_ETAPA = {
@@ -670,7 +670,7 @@ export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador, 
   const can = (p) => esAdmin || permisos.includes(p);
   const usaLeads = can("leads.propios") || can("leads.local") || can("leads.asignar");
   const [localSel, setLocalSel] = useState("");
-  const [tab, setTab] = useState(usaLeads ? "inicio" : "inventario");
+  const [tab, setTab] = useGuardado(esAdmin ? "ventas-admin" : "ventas", usaLeads ? "inicio" : "inventario", ["inicio", "leads", "agenda", "ventas", "gestion", "tasaciones", "aprobaciones", "compras", "inspecciones", "fichas", "validaciones", "anuncios", "marketing", "inventario", "clientes"]);
   const [version, setVersion] = useState(0);
   const [leadAbierto, setLeadAbierto] = useState(null);
   const [leadEditando, setLeadEditando] = useState(null);
@@ -711,6 +711,8 @@ export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador, 
   opciones.push(["inventario", "Inventario"]);
   if (usaLeads) opciones.push(["clientes", "Clientes"]);
 
+  // Si la pestaña recordada ya no está disponible para esta persona, se usa la primera.
+  const tabVigente = opciones.some((o) => o[0] === tab) ? tab : (opciones[0] || [])[0];
   const GRUPOS = [
     { titulo: "Trabajo diario", ids: ["inicio", "leads", "agenda", "clientes", "inventario"] },
     { titulo: "Comercial", ids: ["ventas", "gestion", "aprobaciones", "compras", "tasaciones", "inspecciones", "fichas"] },
@@ -719,30 +721,30 @@ export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador, 
 
   return (
     <div className="lg:grid lg:grid-cols-[13.5rem_minmax(0,1fr)] lg:gap-6 lg:items-start">
-      <aside className="hidden lg:block lg:sticky lg:top-4"><NavegacionLateral valor={tab} onCambio={setTab} opciones={opciones} grupos={GRUPOS} /></aside>
+      <aside className="hidden lg:block lg:sticky lg:top-4"><NavegacionLateral valor={tabVigente} onCambio={setTab} opciones={opciones} grupos={GRUPOS} /></aside>
     <div className="flex flex-col gap-5 min-w-0">
       {esAdmin && locales.length > 1 && (
         <div className="flex items-center gap-3 text-sm text-stone-700">Local:
           <select value={localSel} onChange={(e) => setLocalSel(e.target.value)} className={`${INPUT} md:w-64`}>{locales.filter((l) => l.activo).map((l) => <option key={l.id} value={l.id}>{l.nombre}</option>)}</select>
         </div>
       )}
-      <div className="lg:hidden"><Pestanas valor={tab} onCambio={setTab} opciones={opciones} /></div>
-      <ErrorBoundary clave={tab}>
-      {tab === "inicio" && <Inicio api={api} catalogos={catalogos} abrirLead={setLeadAbierto} irA={setTab} version={version} onCambio={subir} />}
-      {tab === "leads" && <Leads api={api} catalogos={catalogos} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
-      {tab === "tasaciones" && <ModuloTasaciones api={api} permisos={permisos} esAdmin={esAdmin} renderEstimador={renderEstimador} />}
-      {tab === "compras" && <ModuloCompras api={api} permisos={permisos} esAdmin={esAdmin} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
-      {tab === "marketing" && <ModuloMarketing api={api} permisos={permisos} esAdmin={esAdmin} />}
-      {tab === "anuncios" && <ModuloAnuncios api={api} permisos={permisos} esAdmin={esAdmin} />}
-      {tab === "validaciones" && <ModuloValidaciones api={api} permisos={permisos} esAdmin={esAdmin} />}
-      {tab === "inspecciones" && <ModuloInspecciones api={api} permisos={permisos} esAdmin={esAdmin} />}
-      {tab === "fichas" && renderFichas && renderFichas()}
-      {tab === "gestion" && <Gestion api={api} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
-      {tab === "ventas" && <Ventas api={api} catalogos={catalogos} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
-      {tab === "aprobaciones" && <AprobacionesTodo api={api} version={version} abrirLead={setLeadAbierto} onCambio={subir} />}
-      {tab === "agenda" && <Agenda api={api} catalogos={catalogos} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
-      {tab === "inventario" && <Inventario api={api} onCambio={subir} />}
-      {tab === "clientes" && <Clientes api={api} />}
+      <div className="lg:hidden"><Pestanas valor={tabVigente} onCambio={setTab} opciones={opciones} /></div>
+      <ErrorBoundary clave={tabVigente}>
+      {tabVigente === "inicio" && <Inicio api={api} catalogos={catalogos} abrirLead={setLeadAbierto} irA={setTab} version={version} onCambio={subir} />}
+      {tabVigente === "leads" && <Leads api={api} catalogos={catalogos} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
+      {tabVigente === "tasaciones" && <ModuloTasaciones api={api} permisos={permisos} esAdmin={esAdmin} renderEstimador={renderEstimador} />}
+      {tabVigente === "compras" && <ModuloCompras api={api} permisos={permisos} esAdmin={esAdmin} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
+      {tabVigente === "marketing" && <ModuloMarketing api={api} permisos={permisos} esAdmin={esAdmin} />}
+      {tabVigente === "anuncios" && <ModuloAnuncios api={api} permisos={permisos} esAdmin={esAdmin} />}
+      {tabVigente === "validaciones" && <ModuloValidaciones api={api} permisos={permisos} esAdmin={esAdmin} />}
+      {tabVigente === "inspecciones" && <ModuloInspecciones api={api} permisos={permisos} esAdmin={esAdmin} />}
+      {tabVigente === "fichas" && renderFichas && renderFichas()}
+      {tabVigente === "gestion" && <Gestion api={api} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
+      {tabVigente === "ventas" && <Ventas api={api} catalogos={catalogos} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
+      {tabVigente === "aprobaciones" && <AprobacionesTodo api={api} version={version} abrirLead={setLeadAbierto} onCambio={subir} />}
+      {tabVigente === "agenda" && <Agenda api={api} catalogos={catalogos} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
+      {tabVigente === "inventario" && <Inventario api={api} onCambio={subir} />}
+      {tabVigente === "clientes" && <Clientes api={api} />}
       </ErrorBoundary>
 
       {leadAbierto && !leadEditando && (

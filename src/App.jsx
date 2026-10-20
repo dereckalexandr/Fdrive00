@@ -17,7 +17,7 @@ import { ModuloAnuncios } from "./crm-anuncios.jsx";
 import { ModuloMarketing } from "./crm-marketing.jsx";
 import { ModuloInspecciones, Miniatura as MiniaturaEquipo, fotoKeyInspeccion, guardarCacheFoto } from "./crm-inspecciones.jsx";
 import { resumirInspeccion, MAX_FOTOS_INSPECCION } from "../supabase/functions/api/inspecciones-core.js";
-import { mensajeError as mensajeCrm } from "./crm-ui.jsx";
+import { useGuardado, mensajeError as mensajeCrm } from "./crm-ui.jsx";
 import { LoginPersonal, CambioClaveObligatorio, EstacionTrabajo } from "./crm-estacion.jsx";
 import { photoKey, photoPrefix, makePhotoId, compressImage, collectPhotoIds, diffIds, MAX_PHOTOS_PER_ITEM, MAX_PHOTOS_PER_TASACION } from "./photos.js";
 
@@ -3676,7 +3676,7 @@ const PESTANAS_LEGADO = [["resumen", "Resumen mensual"], ["vendedores", "Ejecuti
 const esLegado = (t) => PESTANAS_LEGADO.some(([id]) => id === t);
 
 function AdminDashboard({ vendors, setVendors, inspectors, setInspectors, onExit }) {
-  const [tab, setTab] = useState("crm-reportes");
+  const [tab, setTab] = useGuardado("admin", "crm-reportes", [...PESTANAS_CRM.map(([id]) => id), ...PESTANAS_LEGADO.map(([id]) => id)]);
   const [selectedYM, setSelectedYM] = useState(currentYM());
   const [monthlyTotals, setMonthlyTotals] = useState({});
   const [loadingTotals, setLoadingTotals] = useState(true);
@@ -4499,6 +4499,8 @@ export default function App() {
   );
 }
 
+const PANTALLAS_PERSONALES = ["estacion", "ventasPersonal", "marketingPersonal", "anunciosPersonal", "validacionPersonal", "tasacionesPersonal", "compraPersonal", "inspectorPersonal"];
+
 function AppRoutes() {
   const [vendors, setVendors] = useState([]);
   const [inspectors, setInspectors] = useState([]);
@@ -4512,6 +4514,23 @@ function AppRoutes() {
   useEffect(() => {
     (async () => {
       try {
+        // Si la persona ya había ingresado en esta pestaña (y recargó la página), se retoma su sesión y la pantalla en que estaba.
+        const r = window.auth.restaurar ? await window.auth.restaurar() : null;
+        if (r) {
+          let pantalla = "";
+          try { pantalla = sessionStorage.getItem("df-pantalla") || ""; } catch (e) { /* sin almacenamiento */ }
+          if (r.tipo === "user") {
+            setMe(r.me);
+            setScreen(r.me.debeCambiarClave ? "cambioClave" : PANTALLAS_PERSONALES.includes(pantalla) ? pantalla : "estacion");
+          } else if (r.tipo === "admin") {
+            setVendors(await loadVendors());
+            setInspectors(await loadInspectors());
+            setScreen("admin");
+          } else if (r.tipo === "vendor") { setActiveVendor(r.profile); setScreen("vendor"); }
+          else if (r.tipo === "inspector") { setActiveInspector(r.profile); setScreen("inspector"); }
+          setReady(true);
+          return;
+        }
         const params = new URLSearchParams(window.location.search);
         const vendorCode = params.get("vendor");
         const inspectorCode = params.get("inspector");
@@ -4526,6 +4545,11 @@ function AppRoutes() {
       setReady(true);
     })();
   }, []);
+
+  // Se recuerda la pantalla de la persona (estación, ventas, marketing…) para volver a ella al recargar.
+  useEffect(() => {
+    try { if (me && PANTALLAS_PERSONALES.includes(screen)) sessionStorage.setItem("df-pantalla", screen); } catch (e) { /* sin almacenamiento */ }
+  }, [me, screen]);
 
   const exitToLanding = () => {
     try { window.auth.logout(); } catch (e) {}

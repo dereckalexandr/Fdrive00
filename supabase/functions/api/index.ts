@@ -640,6 +640,16 @@ Deno.serve(async (req) => {
       return json({ token: await signSession("user", u.id, USER_TTL_S), me: await meOf(u) });
     }
 
+    // Al recargar la página: confirma que la sesión sigue vigente y devuelve los datos y permisos ACTUALES de la persona.
+    if (action === "userMe") {
+      const s = await readSession(body.token);
+      if (!s || s.role !== "user") return json({ error: "unauthorized" }, 401);
+      const { data: u, error } = await sb.from("usuarios").select("*").eq("id", s.id).maybeSingle();
+      if (error) throw error;
+      if (!u || !u.activo) return json({ error: "unauthorized" }, 401);
+      return json({ me: await meOf(u) });
+    }
+
     if (action === "userChangePassword") {
       const s = await readSession(body.token);
       if (!s || s.role !== "user") return json({ error: "unauthorized" }, 401);

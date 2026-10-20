@@ -21,6 +21,15 @@ export function hasSupabaseConfig() {
 
 let sessionToken = null;
 
+// La sesión se guarda en sessionStorage: sobrevive a recargar la página, pero se borra al cerrar la pestaña o el navegador
+// (no queda guardada de forma permanente en el dispositivo). El token vence solo en el servidor (8 a 12 horas).
+const CLAVE_SESION = "df-sesion";
+const guardarSesion = (datos) => { try { sessionStorage.setItem(CLAVE_SESION, JSON.stringify(datos)); } catch (e) { /* modo privado o sin almacenamiento: se pide ingresar de nuevo al recargar */ } };
+const leerSesion = () => { try { return JSON.parse(sessionStorage.getItem(CLAVE_SESION) || "null"); } catch (e) { return null; } };
+export function olvidarSesion() {
+  try { sessionStorage.removeItem(CLAVE_SESION); sessionStorage.removeItem("df-pantalla"); Object.keys(sessionStorage).filter((k) => k.startsWith("df-tab-")).forEach((k) => sessionStorage.removeItem(k)); } catch (e) { /* nada que borrar */ }
+}
+
 const TIEMPO_MAX_MS = 45_000;
 
 async function call(payload) {
@@ -67,6 +76,7 @@ async function kv(op, extra, retry = true) {
           return await kv(op, extra, false);
         } catch (e2) { /* sigue abajo: se avisa que la sesión venció */ }
       }
+      olvidarSesion();
       window.dispatchEvent(new Event("df-session-expired"));
     }
     throw e;
@@ -125,6 +135,7 @@ const supabaseAuth = {
   async adminLogin(email, password) {
     const { token } = await call({ action: "adminLogin", email, password });
     sessionToken = token;
+    guardarSesion({ tipo: "admin", token });
   },
   async adminSetup({ masterEmail, masterPassword, email, password }) {
     return (await call({ action: "adminSetup", masterEmail, masterPassword, email, password })).recoveryCode;
@@ -140,6 +151,7 @@ const supabaseAuth = {
     const { token, profile } = await call({ action: "profileLogin", role, code });
     sessionToken = token;
     lastProfileLogin = { role, code };
+    guardarSesion({ tipo: role, token, code });
     return profile;
   },
   // Personas del CRM: ingresan con RUT y clave. Devuelve sus datos y permisos.
@@ -148,7 +160,36 @@ const supabaseAuth = {
     const { token, me } = await call({ action: "userLogin", rut, password });
     sessionToken = token;
     lastProfileLogin = null;
+    guardarSesion({ tipo: "user", token });
     return me;
+  },
+  /**
+   * Al abrir o recargar la página: retoma la sesión guardada si el servidor la sigue aceptando.
+   * Devuelve { tipo, me | profile } o null (entonces se muestra el ingreso).
+   */
+  async restaurar() {
+    const g = leerSesion();
+    if (!g || !g.token || !g.tipo) return null;
+    sessionToken = g.token;
+    try {
+      if (g.tipo === "user") {
+        const { me } = await call({ action: "userMe", token: g.token });
+        return { tipo: "user", me };
+      }
+      if (g.tipo === "admin") {
+        await call({ action: "crm", token: g.token, op: "locales.list" });
+        return { tipo: "admin" };
+      }
+      if ((g.tipo === "vendor" || g.tipo === "inspector") && g.code) {
+        const profile = await supabaseAuth.profileLogin(g.tipo, g.code);
+        return { tipo: g.tipo, profile };
+      }
+    } catch (e) {
+      // Sesión vencida o rechazada: se descarta. Si solo fue un corte de red, se conserva para el siguiente intento.
+      if (e && e.status === 401) { sessionToken = null; olvidarSesion(); }
+      else sessionToken = null;
+    }
+    return null;
   },
   async userChangePassword(actual, nueva) {
     return (await call({ action: "userChangePassword", token: sessionToken, actual, nueva })).me;
@@ -158,7 +199,7 @@ const supabaseAuth = {
     try {
       return await call({ action: "crm", token: sessionToken, op, ...params });
     } catch (e) {
-      if (e.status === 401) window.dispatchEvent(new Event("df-session-expired"));
+      if (e.status === 401) { olvidarSesion(); window.dispatchEvent(new Event("df-session-expired")); }
       throw e;
     }
   },
@@ -176,11 +217,11 @@ const supabaseAuth = {
         }
       }
     } catch (e) {
-      if (e.status === 401) window.dispatchEvent(new Event("df-session-expired"));
+      if (e.status === 401) { olvidarSesion(); window.dispatchEvent(new Event("df-session-expired")); }
       throw e;
     }
   },
-  logout() { sessionToken = null; lastProfileLogin = null; },
+  logout() { sessionToken = null; lastProfileLogin = null; olvidarSesion(); },
 };
 
 export function installSupabaseStorage() {

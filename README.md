@@ -733,3 +733,9 @@ Los textos van escapados (nada de lo que escribe una persona se interpreta como 
 **Alerta si se cae:** la función responde `GET .../functions/v1/api?health=1` con `{"ok":true}` solo si la base contesta (503 si no; no entrega datos). Crea un monitor gratis en UptimeRobot (o similar) de tipo *keyword* sobre esa dirección buscando `"ok":true`, cada 5 minutos, con aviso a tu correo; haz otro para la dirección del sitio. La dirección exacta está en la pestaña Estado.
 
 Código: `scripts/respaldo.mjs`, `sistema.estado` y el chequeo de salud en `index.ts`, pantalla en `crm-admin.jsx`. Pruebas: `tests/estado-api.test.mjs`.
+
+## Sesión que sobrevive a recargar la página
+
+Al refrescar (F5) ya no se vuelve al ingreso: la sesión se guarda en `sessionStorage` del navegador y, al abrir la página, se confirma con el servidor (`userMe` para las personas del CRM; una consulta de prueba para la cuenta maestra; un nuevo ingreso con el código para los perfiles antiguos). También se recuerdan la pantalla (estación, ventas, marketing…) y la pestaña en que estabas.
+- **Seguridad:** `sessionStorage` se borra al cerrar la pestaña o el navegador (nunca queda guardada de forma permanente) y el token sigue venciendo en el servidor (8 h personas y perfiles por código, 12 h cuenta maestra). **Salir** y cualquier sesión rechazada por el servidor la borran. Si la persona fue desactivada, o le cambiaron los permisos, al recargar se aplican los actuales (o se pide ingresar de nuevo).
+- **Límite:** al cerrar la pestaña hay que ingresar otra vez; si el navegador bloquea el almacenamiento (modo privado estricto), vuelve a pedirlo al recargar.

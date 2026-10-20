@@ -237,6 +237,17 @@ export function useCarga(fn, deps) {
   return { ...estado, recargar };
 }
 
+/** Estado que sobrevive a recargar la página (sessionStorage: se borra al cerrar la pestaña). `validos` descarta valores que ya no existen. */
+export function useGuardado(clave, inicial, validos) {
+  const k = "df-tab-" + clave;
+  const [valor, setValor] = useState(() => {
+    try { const g = sessionStorage.getItem(k); if (g && (!validos || validos.includes(g))) return g; } catch (e) { /* sin almacenamiento */ }
+    return inicial;
+  });
+  const poner = useCallback((v) => { setValor(v); try { sessionStorage.setItem(k, v); } catch (e) { /* sin almacenamiento */ } }, [k]);
+  return [valor, poner];
+}
+
 /** Pestañas horizontales con el estilo del panel. */
 export function Pestanas({ valor, onCambio, opciones }) {
   return (
