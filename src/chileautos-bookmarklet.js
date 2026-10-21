@@ -15,7 +15,9 @@
  *    ancestro más cercano que contiene un precio y no es toda la página;
  *  - los avisos pagados para aparecer arriba traen "rankingType=" en su enlace;
  *  - si no hay avisos exactos para el filtro, el sitio muestra "Vehículos parecidos
- *    a lo que buscas" y esos avisos NO corresponden a la búsqueda.
+ *    a lo que buscas" y esos avisos NO corresponden a la búsqueda;
+ *  - quién publica se lee de la tarjeta: "Particular", o "<nombre de la automotora> / Vehículo Usado"
+ *    (también "Nuevo"); ese texto va justo antes de la región y de "Contactar vendedor".
  * ----------------------------------------------------------------
  */
 import { armarMarcador } from "./bookmarklet-core.js";
@@ -57,6 +59,17 @@ export function extractChileautosListings(doc, loc) {
       if (!transmision && /^(?:Manual|Autom[aá]tic[ao]|Secuencial|CVT)$/i.test(p)) transmision = p;
       if (!combustible && /^(?:Bencina|Di[eé]sel|H[ií]brido[A-Za-zÁ-ú ]*|El[eé]ctrico|Gas|GLP|GNC)$/i.test(p)) combustible = p;
     }
+    let vendedorTipo = "";
+    let vendedorNombre = "";
+    let condicion = "";
+    for (let k = 0; k < partes.length; k++) {
+      const p = partes[k].trim();
+      if (vendedorTipo) break;
+      if (/^Particular$/i.test(p)) { vendedorTipo = "particular"; continue; }
+      const mv = p.match(/^(.+?)\s*\/\s*Veh[ií]culo\s+(Usado|Nuevo|Seminuevo)\s*$/i);
+      if (mv) { vendedorTipo = "automotora"; vendedorNombre = mv[1].slice(0, 60); condicion = mv[2]; continue; }
+      if (/^(?:Automotora|Concesionari[oa]|Comercial|Tienda|Importadora|Distribuidora)\b/i.test(p) && p.length < 80) { vendedorTipo = "automotora"; vendedorNombre = p.slice(0, 60); }
+    }
     const anioTxt = (ti >= 0 && titulo.match(/^((?:19|20)\d{2})/)) || slug.match(/(?:^|-)((?:19|20)\d{2})(?:-|$)/);
     const ranking = href.match(/rankingType=([A-Za-z]+)/);
     listings.push({
@@ -69,6 +82,9 @@ export function extractChileautosListings(doc, loc) {
       km: km ? toInt(km[1]) : 0,
       precio: precio ? toInt(precio[1]) : 0,
       destacado: !!ranking,
+      vendedorTipo: vendedorTipo,
+      vendedorNombre: vendedorNombre,
+      condicion: condicion,
       href: href.split("?")[0],
     });
   }

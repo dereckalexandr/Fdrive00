@@ -678,3 +678,21 @@ test("MARCA: la lista de palabras es configurable", () => {
   assert.equal(marcaParaChileautos("KIA MOTORS", []), "KIA MOTORS");
   assert.equal(marcaParaChileautos("Ford Company", ["Company"]), "Ford");
 });
+
+test("estimarCompra conserva quién publica cada aviso (particular o automotora), usados y descartados", () => {
+  const avisos = [
+    { id: "A", titulo: "2019 Yaris", anio: 2019, km: 50000, precio: 8000000, vendedorTipo: "particular", vendedorNombre: "", condicion: "" },
+    { id: "B", titulo: "2019 Yaris", anio: 2019, km: 60000, precio: 8200000, vendedorTipo: "automotora", vendedorNombre: "Automotora X", condicion: "Usado" },
+    { id: "C", titulo: "2019 Yaris", anio: 2019, km: 55000, precio: 8400000, vendedorTipo: "particular" },
+    { id: "D", titulo: "2019 Yaris", anio: 2019, km: 56000, precio: 111111, vendedorTipo: "automotora", vendedorNombre: "Automotora Y", condicion: "Usado" },
+    { id: "E", titulo: "2019 Yaris", anio: 2019, km: 57000, precio: 8600000 },
+  ];
+  const r = estimarCompra(avisos, { anioMin: 2018, anioMax: 2020, kmMin: 0, kmMax: 80000 });
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.validos.map((v) => [v.id, v.vendedorTipo || ""]), [["A", "particular"], ["B", "automotora"], ["C", "particular"], ["E", ""]]);
+  assert.equal(r.validos.find((v) => v.id === "B").vendedorNombre, "Automotora X");
+  const d = r.descartados.find((x) => x.id === "D");
+  assert.equal(d.motivo, "Precio simbólico");
+  assert.equal(d.vendedorTipo, "automotora", "también se ve quién publicó los avisos descartados");
+  assert.deepEqual(parseAvisosPegados(JSON.stringify({ fuente: "chileautos", listings: avisos })).data.listings[1].vendedorTipo, "automotora");
+});

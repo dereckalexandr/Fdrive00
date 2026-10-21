@@ -22,6 +22,7 @@ test("extrae año, versión, precio, km, id y enlace de una tarjeta real", () =>
     id: "CP-AD-8561346", titulo: "2019 Toyota Yaris", version: "1.5 GLI 4X2 MT 4P",
     transmision: "Manual", combustible: "Bencina",
     anio: 2019, km: 84000, precio: 8200000, destacado: false,
+    vendedorTipo: "automotora", vendedorNombre: "Automotora X", condicion: "",
     href: "/vehiculos/detalles/2019-toyota-yaris-1-5-gli-4x2-mt-4p/CP-AD-8561346/",
   });
   assert.equal(r.sinResultados, false);
@@ -109,4 +110,24 @@ test("buildBookmarkletHref genera un 'javascript:' ejecutable que copia el JSON"
   const data = JSON.parse(copiado);
   assert.equal(data.fuente, "chileautos");
   assert.equal(data.listings[0].precio, 8200000);
+});
+
+test("lee quién publica: particular o automotora (con su nombre y si el vehículo es usado o nuevo)", () => {
+  const base = "2019 Toyota Yaris\n1.5 GLI\n$8.200.000 CLP\nSedán\nManual\nBencina\n84.000 km\n";
+  const casos = [
+    ["Particular\nValparaíso", "particular", "", ""],
+    ["Automotora EXPOAUTOS / Vehículo Nuevo\nMetropolitana de Santiago", "automotora", "Automotora EXPOAUTOS", "Nuevo"],
+    ["Automotora Nijomasa / Vehículo Usado\nMetropolitana de Santiago", "automotora", "Automotora Nijomasa", "Usado"],
+    ["Grupo Sur Autos / Vehículo Usado\nBío Bío", "automotora", "Grupo Sur Autos", "Usado"],
+    ["Concesionario Kaufmann\nMaule", "automotora", "Concesionario Kaufmann", ""],
+    ["Metropolitana de Santiago", "", "", ""],
+  ];
+  const r = extractChileautosListings(doc(casos.map(([v], i) => tarjeta({ texto: base + v + "\nContactar vendedor\nVer detalles", href: `/vehiculos/detalles/2019-toyota-yaris/CL-AD-${i}7/` }))), loc);
+  assert.deepEqual(r.listings.map((l) => [l.vendedorTipo, l.vendedorNombre, l.condicion]), casos.map(([, t, n, c]) => [t, n, c]));
+});
+
+test("el marcador, armado como código, sigue sin comentarios ni referencias externas (lee al vendedor)", () => {
+  const href = decodeURIComponent(buildBookmarkletHref().replace(/^javascript:/, ""));
+  assert.ok(href.includes("vendedorTipo"));
+  assert.ok(!/\/\/ /.test(href.replace(/https?:\/\//g, "")), "sin comentarios // dentro del código");
 });

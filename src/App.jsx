@@ -3500,11 +3500,12 @@ function TasacionCompra({ inicial, onResultado } = {}) {
 
           <details className="bg-white border border-stone-200 p-4 text-sm">
             <summary className="cursor-pointer text-stone-700">Ver el detalle del cálculo ({calculo.validos.length} usados, {calculo.descartados.length} descartados)</summary>
+            <ResumenVendedores validos={calculo.validos} primeros={calculo.primeros} />
             <div className="overflow-x-auto mt-3">
               <table className="w-full border-collapse text-xs">
                 <thead>
                   <tr className="text-left uppercase tracking-wide text-stone-400 border-b border-stone-200">
-                    <th className="py-1.5 pr-2">Aviso</th><th className="py-1.5 pr-2">Año</th><th className="py-1.5 pr-2 text-right">Km</th><th className="py-1.5 pr-2 text-right">Precio</th><th className="py-1.5 pr-2">Estado</th>
+                    <th className="py-1.5 pr-2">Aviso</th><th className="py-1.5 pr-2">Año</th><th className="py-1.5 pr-2 text-right">Km</th><th className="py-1.5 pr-2 text-right">Precio</th><th className="py-1.5 pr-2">Vendedor</th><th className="py-1.5 pr-2">Estado</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -3514,6 +3515,7 @@ function TasacionCompra({ inicial, onResultado } = {}) {
                       <td className="py-1.5 pr-2">{v.anio || "—"}</td>
                       <td className="py-1.5 pr-2 text-right font-mono">{v.km ? v.km.toLocaleString("es-CL") : "—"}</td>
                       <td className="py-1.5 pr-2 text-right font-mono">{clp(v.precio)}</td>
+                      <td className="py-1.5 pr-2"><VendedorAviso v={v} /></td>
                       <td className="py-1.5 pr-2 text-stone-600">{i < calculo.primeros.length ? "Entra al promedio" : "Válido, fuera del promedio"}</td>
                     </tr>
                   ))}
@@ -3523,6 +3525,7 @@ function TasacionCompra({ inicial, onResultado } = {}) {
                       <td className="py-1.5 pr-2">{d.anio || "—"}</td>
                       <td className="py-1.5 pr-2 text-right font-mono">{d.km ? d.km.toLocaleString("es-CL") : "—"}</td>
                       <td className="py-1.5 pr-2 text-right font-mono">{d.precio ? clp(d.precio) : "—"}</td>
+                      <td className="py-1.5 pr-2"><VendedorAviso v={d} /></td>
                       <td className="py-1.5 pr-2 text-rose-600">Descartado: {d.motivo}</td>
                     </tr>
                   ))}
@@ -3805,6 +3808,34 @@ function FichasEquipo() {
         )}
       </div>
     </div>
+  );
+}
+
+/** Quién publica un aviso de Chileautos: particular o automotora (con su nombre). Los avisos copiados antes de esta mejora no lo traen. */
+function VendedorAviso({ v }) {
+  if (v && v.vendedorTipo === "particular") return <span className="inline-block px-1.5 py-0.5 text-[11px] bg-sky-100 text-sky-800">Particular</span>;
+  if (v && v.vendedorTipo === "automotora") {
+    return (
+      <span className="inline-flex flex-col">
+        <span className="inline-block self-start px-1.5 py-0.5 text-[11px] bg-violet-100 text-violet-800">Automotora</span>
+        {(v.vendedorNombre || v.condicion) && <span className="text-[11px] text-stone-500 mt-0.5">{[String(v.vendedorNombre || "").replace(/^Automotora\s+/i, ""), v.condicion].filter(Boolean).join(" · ")}</span>}
+      </span>
+    );
+  }
+  return <span className="text-stone-400" title="Esta copia de los avisos no trae el dato: vuelve a copiarlos con el marcador">—</span>;
+}
+
+/** Cuántos de los avisos usados (y de los que entran al promedio) son de particulares y cuántos de automotoras. */
+function ResumenVendedores({ validos, primeros }) {
+  const cuenta = (lista) => ({ p: lista.filter((x) => x.vendedorTipo === "particular").length, a: lista.filter((x) => x.vendedorTipo === "automotora").length, n: lista.filter((x) => !x.vendedorTipo).length });
+  const u = cuenta(validos);
+  const e = cuenta(primeros);
+  if (u.p + u.a === 0) return <p className="text-xs text-stone-500 mt-3">Esta copia de los avisos no indica si son de particulares o automotoras: vuelve a copiarlos con el marcador para verlo.</p>;
+  return (
+    <p className="text-xs text-stone-600 mt-3">
+      Avisos usados: <strong>{u.p}</strong> de particulares y <strong>{u.a}</strong> de automotoras{u.n ? ` (${u.n} sin dato)` : ""}.
+      {" "}Los {primeros.length} que entran al promedio: <strong>{e.p}</strong> de particulares y <strong>{e.a}</strong> de automotoras.
+    </p>
   );
 }
 
