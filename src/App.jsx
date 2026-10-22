@@ -18,7 +18,7 @@ import { ModuloAnuncios } from "./crm-anuncios.jsx";
 import { ModuloMarketing } from "./crm-marketing.jsx";
 import { ModuloInspecciones, Miniatura as MiniaturaEquipo, fotoKeyInspeccion, guardarCacheFoto } from "./crm-inspecciones.jsx";
 import { resumirInspeccion, MAX_FOTOS_INSPECCION } from "../supabase/functions/api/inspecciones-core.js";
-import { useGuardado, mensajeError as mensajeCrm } from "./crm-ui.jsx";
+import { useGuardado, mensajeError as mensajeCrm, BuscarPatente } from "./crm-ui.jsx";
 import { LoginPersonal, CambioClaveObligatorio, EstacionTrabajo } from "./crm-estacion.jsx";
 import { photoKey, photoPrefix, makePhotoId, compressImage, collectPhotoIds, diffIds, MAX_PHOTOS_PER_ITEM, MAX_PHOTOS_PER_TASACION } from "./photos.js";
 
@@ -3323,6 +3323,18 @@ function TasacionCompra({ inicial, onResultado } = {}) {
             <input type="text" value={patente} onChange={(e) => setPatente(normalizePatente(e.target.value))} placeholder="Ej. TTHY51" maxLength={6}
               className="w-full border border-stone-300 bg-white px-2 py-1.5 text-sm font-mono uppercase focus:outline-none focus:ring-2 focus:ring-amber-500" />
             {patente.length === 6 && !patenteOk && <p className="text-xs text-rose-600 mt-1">Formato no válido (4 letras y 2 números, o 2 letras y 4 números).</p>}
+            <BuscarPatente patente={patente} className="mt-1.5" onDatos={(c) => {
+              const llenados = [];
+              if (c.marca) { setMarca(c.marca); llenados.push("marca"); }
+              if (c.modelo) { setModelo(c.modelo); llenados.push("modelo"); }
+              if (c.anio) { setAnio(c.anio); llenados.push("anio"); }
+              if (c.version) { setVersion(c.version); llenados.push("version"); }
+              const tr = TRANSMISIONES.find((t) => t.label === c.transmision);
+              if (tr) { setTransmision(tr.value); llenados.push("transmision"); }
+              const co = COMBUSTIBLES.find((x) => x.label === c.combustible);
+              if (co) { setCombustible(co.value); llenados.push("combustible"); }
+              return llenados;
+            }} />
           </div>
           <div>
             <label className="text-xs text-stone-500 block mb-1">Kilometraje *</label>

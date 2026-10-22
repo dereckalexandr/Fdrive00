@@ -3,6 +3,7 @@
  */
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { TRANSMISIONES, COMBUSTIBLES } from "../supabase/functions/api/ventas-core.js";
+import { camposDesdePatente, aplicarCampos, NOMBRE_CAMPO } from "./datos-patente.js";
 
 export const INPUT = "border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-amber-500 w-full";
 export const BTN = "px-3 py-1.5 text-sm font-medium border border-stone-300 bg-white text-stone-700 hover:bg-stone-50 disabled:opacity-50";
@@ -157,6 +158,11 @@ const MENSAJES = {
   tipo_material_invalido: "Elige el tipo de material.",
   estado_material_invalido: "Ese estado de material no es válido.",
   timeout: "El servidor tardó demasiado en responder. Inténtalo de nuevo en unos segundos.",
+  no_configurado: "La consulta por patente todavía no está activada. Completa los datos a mano.",
+  no_encontrada: "No encontramos datos para esa patente. Completa los datos a mano.",
+  cupo_agotado: "Se agotó el cupo de consultas por patente de hoy. Completa los datos a mano; mañana vuelve a funcionar.",
+  demasiadas_consultas: "Hiciste muchas consultas seguidas. Espera un minuto e inténtalo de nuevo.",
+  servicio_no_disponible: "El servicio de patentes no responde en este momento. Completa los datos a mano.",
   "Failed to fetch": "No se pudo conectar con el servidor. Revisa tu conexión e inténtalo de nuevo.",
   tramos_invalidos: "Los tramos no son válidos: no pueden superponerse y solo el último puede quedar sin tope.",
 };
@@ -288,12 +294,41 @@ export function NavegacionLateral({ valor, onCambio, opciones, grupos }) {
 }
 
 /* --- Datos de un vehículo (tasaciones e inspecciones) --- */
+/** ¿La patente tiene el formato chileno (4 letras + 2 dígitos, o 2 letras + 4 dígitos)? */
+export const patenteConFormato = (p) => /^([A-Z]{4}\d{2}|[A-Z]{2}\d{4})$/.test(String(p || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6)) && String(p || "").replace(/[^A-Za-z0-9]/g, "").length === 6;
+
+/**
+ * Botón «Buscar datos» junto a una patente: pide al servidor marca, modelo y año y los entrega a `onDatos(campos)`.
+ * `api` es la función del módulo (por defecto la misma de todo el CRM). Siempre quedan editables: se pide revisarlos.
+ */
+export function BuscarPatente({ patente, onDatos, api = apiPorDefecto, className = "" }) {
+  const [estado, setEstado] = useState({ buscando: false, msg: null });
+  const ok = patenteConFormato(patente);
+  const buscar = async () => {
+    setEstado({ buscando: true, msg: null });
+    try {
+      const r = await api("vehiculos.patente", { patente: String(patente).toUpperCase().replace(/[^A-Z0-9]/g, "") });
+      const llenados = onDatos(camposDesdePatente(r.vehiculo)) || [];
+      setEstado({ buscando: false, msg: { ok: true, texto: llenados.length ? `Se completaron: ${llenados.map((k) => NOMBRE_CAMPO[k] || k).join(", ")}. Revísalos antes de seguir.` : "Los datos de la patente coinciden con lo que ya escribiste." } });
+    } catch (e) { setEstado({ buscando: false, msg: { ok: false, texto: mensajeError(e) } }); }
+  };
+  return (
+    <div className={className}>
+      <button type="button" onClick={buscar} disabled={!ok || estado.buscando} title={ok ? "Completa marca, modelo y año con los datos de la patente" : "Escribe una patente válida"} className={BTN}>{estado.buscando ? "Buscando…" : "Buscar datos"}</button>
+      {estado.msg && <p className={`text-xs mt-1 ${estado.msg.ok ? "text-emerald-700" : "text-rose-700"}`}>{estado.msg.texto}</p>}
+    </div>
+  );
+}
+
 export const VEH_VACIO = { patente: "", marca: "", modelo: "", version: "", anio: "", km: "", color: "", transmision: "", combustible: "" };
 
 export function CamposVehiculo({ v, set, bloqueado = false }) {
   return (
     <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-      <Campo etiqueta="Patente"><input value={v.patente} disabled={bloqueado} onChange={(e) => set({ ...v, patente: e.target.value.toUpperCase() })} className={`${INPUT} font-mono`} placeholder="ABCD12" /></Campo>
+      <div>
+        <Campo etiqueta="Patente"><input value={v.patente} disabled={bloqueado} onChange={(e) => set({ ...v, patente: e.target.value.toUpperCase() })} className={`${INPUT} font-mono`} placeholder="ABCD12" /></Campo>
+        {!bloqueado && <BuscarPatente patente={v.patente} className="mt-1.5" onDatos={(campos) => { const r = aplicarCampos(v, campos, { pisar: true }); set(r.valores); return r.llenados; }} />}
+      </div>
       <Campo etiqueta="Marca"><input value={v.marca} disabled={bloqueado} onChange={(e) => set({ ...v, marca: e.target.value })} className={INPUT} /></Campo>
       <Campo etiqueta="Modelo"><input value={v.modelo} disabled={bloqueado} onChange={(e) => set({ ...v, modelo: e.target.value })} className={INPUT} /></Campo>
       <Campo etiqueta="Versión (opcional)"><input value={v.version || ""} disabled={bloqueado} onChange={(e) => set({ ...v, version: e.target.value })} className={INPUT} /></Campo>

@@ -660,6 +660,12 @@ function EstadoTab() {
         {a.activo && <span>Últimos 7 días: {a.fallidos7d} {a.fallidos7d === 1 ? "fallido" : "fallidos"}, {a.omitidos7d} omitidos (la persona no tiene correo).</span>}
         {a.ultimosFallos.map((f, i) => <span key={i} className="text-xs text-rose-700 break-words">{fechaHora(f.en)} · {f.asunto}: {f.error}</span>)}
       </Fila>
+      {datos.patentes && (
+        <Fila ok={!datos.patentes.activa ? null : datos.patentes.usadasHoy < datos.patentes.limite} titulo="Datos del vehículo por patente">
+          {!datos.patentes.activa ? <span>Apagado (falta la clave de la API de patentes en el servidor).</span> : <span>Activo · consultas reales de hoy: {datos.patentes.usadasHoy} de {datos.patentes.limite}. Cada patente se consulta una sola vez (se guarda 60 días).</span>}
+          {datos.patentes.activa && datos.patentes.usadasHoy >= datos.patentes.limite && <span className="text-amber-700">Se agotó el cupo de hoy: se pide marca, modelo y año a mano hasta mañana.</span>}
+        </Fila>
+      )}
       <Tarjeta>
         <div className="font-medium text-stone-900 mb-2">Datos guardados</div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">

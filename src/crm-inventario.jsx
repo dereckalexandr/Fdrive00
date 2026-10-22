@@ -12,7 +12,8 @@ import { ESTADOS_VEHICULO, TRANSMISIONES, COMBUSTIBLES, validarVehiculo, validar
 import { compressImage, makePhotoId } from "./photos.js";
 import { SeccionInspeccion } from "./crm-inspecciones.jsx";
 import { SeccionValidacion } from "./crm-validaciones.jsx";
-import { INPUT, BTN, BTN_PRIMARIO, clp, Aviso, Cargando, Campo, Modal, Tarjeta, useCarga, mensajeError, fechaCorta } from "./crm-ui.jsx";
+import { INPUT, BTN, BTN_PRIMARIO, clp, Aviso, Cargando, Campo, Modal, Tarjeta, useCarga, mensajeError, fechaCorta, BuscarPatente } from "./crm-ui.jsx";
+import { aplicarCampos } from "./datos-patente.js";
 
 const MAX_FOTOS = 6;
 const fotoKey = (vehiculoId, fotoId) => `vfoto::${vehiculoId}::${fotoId}`;
@@ -97,7 +98,10 @@ function FormVehiculo({ api, vehiculo, puedeCosto, onCerrar, onGuardado }) {
   return (
     <Modal titulo={f.id ? `Editar ${f.patente}` : "Nuevo vehículo"} onCerrar={onCerrar}>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Campo etiqueta="Patente"><input value={f.patente} onChange={(e) => set("patente", e.target.value.toUpperCase())} className={`${INPUT} font-mono`} placeholder="ABCD12" /></Campo>
+        <div>
+          <Campo etiqueta="Patente"><input value={f.patente} onChange={(e) => set("patente", e.target.value.toUpperCase())} className={`${INPUT} font-mono`} placeholder="ABCD12" /></Campo>
+          <BuscarPatente patente={f.patente} className="mt-1.5" onDatos={(campos) => { const r = aplicarCampos(f, campos, { pisar: true }); setF(r.valores); return r.llenados; }} />
+        </div>
         <Campo etiqueta="Marca"><input value={f.marca} onChange={(e) => set("marca", e.target.value)} className={INPUT} /></Campo>
         <Campo etiqueta="Modelo"><input value={f.modelo} onChange={(e) => set("modelo", e.target.value)} className={INPUT} /></Campo>
         <Campo etiqueta="Versión (opcional)" className="md:col-span-2"><input value={f.version} onChange={(e) => set("version", e.target.value)} className={INPUT} /></Campo>

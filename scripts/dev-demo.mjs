@@ -8,7 +8,7 @@
 //   Jefe Local 12.345.678-5 · Ejecutivo 6.000.000-K · Tasador 5.555.555-9 · Inspector 12.000.000-4
 //   Validador 13.000.000-2 · Anunciante 14.000.000-0 · Marketing 10.000.013-K
 import { createServer as crearHttp } from "node:http";
-import { iniciarFuncion, api, nuevaIp, loginAdmin, crm, manejar, db, ADMIN_EMAIL, ADMIN_PW } from "../tests/helpers/api-env.mjs";
+import { iniciarFuncion, api, nuevaIp, loginAdmin, crm, manejar, db, boostr, ADMIN_EMAIL, ADMIN_PW } from "../tests/helpers/api-env.mjs";
 
 const CLAVE = "Prueba12345";
 const PUERTO_API = 54321;
@@ -34,6 +34,10 @@ await crear("insp", "Ivo Inspector", "12.000.000-4", ["inspector"]);
 await crear("val", "Vera Validadora", "13.000.000-2", ["validador"]);
 await crear("anu", "Ana Anunciante", "14.000.000-0", ["anunciante"]);
 await crear("mkt", "Marta Marketing", "10.000.013-K", ["marketing"]);
+
+// Patentes de ejemplo para la consulta de datos por patente (la API real está simulada).
+boostr.respuestas.GPDD74 = { status: "success", data: { plate: "GPDD74", dv: "8", make: "SUBARU", model: "NEW WRX S AWD CVT 2.0T", year: 2014, type: "AUTOMOVIL", engine: "H983322" } };
+boostr.respuestas.BCYT91 = { status: "success", data: { plate: "BCYT91", dv: "1", make: "TOYOTA", model: "YARIS 1.5 GLI", year: 2019, type: "AUTOMOVIL", engine: "1NZ123" } };
 
 // En la demostración nadie debe cambiar su clave al entrar.
 for (const u of db.tablas.usuarios) u.debe_cambiar_clave = false;

@@ -146,6 +146,10 @@ let handler;
 export let db;
 /** Correos que la función habría enviado (uno por destinatario). */
 export const correos = [];
+/** Respuestas simuladas de la API de patentes (Boostr): `respuestas[PATENTE]` = JSON, un número de estado HTTP o un Error. */
+export const boostr = { llamadas: [], respuestas: {} };
+/** Variables de entorno de la función simulada (las pruebas pueden cambiarlas). */
+export let entorno = {};
 const IP = { n: 1 };
 
 export const iniciarFuncion = async () => {
@@ -155,14 +159,23 @@ export const iniciarFuncion = async () => {
   writeFileSync(fake, "export const createClient = () => globalThis.__baseFalsa.cliente;\n");
   const core = pathToFileURL(resolve("supabase/functions/api/crm-core.js")).href;
   let src = readFileSync("supabase/functions/api/index.ts", "utf8");
-  src = src.replace("npm:@supabase/supabase-js@2", pathToFileURL(fake).href).replace("./crm-core.js", core).replace("./ventas.ts", pathToFileURL(resolve("supabase/functions/api/ventas.ts")).href).replace("./publico.ts", pathToFileURL(resolve("supabase/functions/api/publico.ts")).href);
+  src = src.replace("npm:@supabase/supabase-js@2", pathToFileURL(fake).href).replace("./crm-core.js", core).replace("./ventas.ts", pathToFileURL(resolve("supabase/functions/api/ventas.ts")).href).replace("./publico.ts", pathToFileURL(resolve("supabase/functions/api/publico.ts")).href).replace("./patentes-core.js", pathToFileURL(resolve("supabase/functions/api/patentes-core.js")).href);
   const archivo = join(dir, "index.mts");
   writeFileSync(archivo, src);
   globalThis.__baseFalsa = db;
-  const env = { SUPABASE_URL: "http://x", SUPABASE_SERVICE_ROLE_KEY: "k", SESSION_SECRET, ADMIN_EMAIL, ADMIN_PASSWORD_HASH: hashPw(ADMIN_PW), RESEND_API_KEY: "re_prueba", MAIL_FROM: "Drive Futuro <avisos@prueba.cl>", APP_URL: "https://app.prueba.cl" };
+  const env = { SUPABASE_URL: "http://x", SUPABASE_SERVICE_ROLE_KEY: "k", SESSION_SECRET, ADMIN_EMAIL, ADMIN_PASSWORD_HASH: hashPw(ADMIN_PW), RESEND_API_KEY: "re_prueba", MAIL_FROM: "Drive Futuro <avisos@prueba.cl>", APP_URL: "https://app.prueba.cl", BOOSTR_API_KEY: "clave_prueba", BOOSTR_LIMITE_DIARIO: "5" };
+  entorno = env;
   // Los avisos por correo no salen a internet: se guardan para revisarlos.
   const fetchReal = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
+    if (String(url).startsWith("https://api.boostr.cl/vehicle/")) {
+      const placa = String(url).split("/vehicle/")[1].replace(".json", "").split("?")[0];
+      boostr.llamadas.push({ placa, clave: init && init.headers && init.headers["x-api-key"], url: String(url) });
+      const r = boostr.respuestas[placa];
+      if (r instanceof Error) throw r;
+      if (typeof r === "number") return new Response("{}", { status: r });
+      return new Response(JSON.stringify(r !== undefined ? r : { status: "error", data: "", code: "V-02", message: "No encontramos datos asociados a la patente ingresada" }), { status: 200 });
+    }
     if (String(url).startsWith("https://api.resend.com/")) { correos.push(JSON.parse(init.body)); return new Response("{}", { status: 200 }); }
     return fetchReal(url, init);
   };

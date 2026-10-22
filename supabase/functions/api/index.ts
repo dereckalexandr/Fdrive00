@@ -22,6 +22,7 @@ import {
   normalizarRut, validarRut, claveValida, claveProvisoria, validarUsuario, validarConfig, configCompleta, ROLES_ASIGNABLES,
 } from "./crm-core.js";
 import { ventasOp } from "./ventas.ts";
+import { limiteDiario } from "./patentes-core.js";
 import { publicOp } from "./publico.ts";
 
 const sb = createClient(
@@ -474,7 +475,10 @@ async function crmOp(s: Session, body: any): Promise<Response> {
     const fall = await sb.from("bitacora").select("creado_en, detalle").eq("accion", "aviso.fallido").gte("creado_en", hace7).order("creado_en", { ascending: false }).limit(50);
     const omit = await sb.from("bitacora").select("id").eq("accion", "aviso.omitido").gte("creado_en", hace7);
     const fallidos = fall.data ?? [];
+    let patentesHoy = 0;
+    try { patentesHoy = Number.parseInt((await dbGet(`patente_uso::${new Date().toLocaleDateString("en-CA", { timeZone: "America/Santiago" })}`)) ?? "0", 10) || 0; } catch { /* sin dato */ }
     return json({
+      patentes: { activa: !!Deno.env.get("BOOSTR_API_KEY"), usadasHoy: patentesHoy, limite: limiteDiario(Deno.env.get("BOOSTR_LIMITE_DIARIO")) },
       ahora: new Date().toISOString(), dbMs, conteos,
       respaldo: (resp.data ?? [])[0] ? { en: resp.data[0].creado_en, detalle: resp.data[0].detalle ?? {} } : null,
       avisos: {
