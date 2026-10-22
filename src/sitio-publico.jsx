@@ -13,6 +13,7 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { InputDinero } from "./campo-dinero.jsx";
 import { PLAZOS_FINANCIAMIENTO, MENSAJES_WEB } from "../supabase/functions/api/publico-core.js";
+import { camposDesdePatente } from "./datos-patente.js";
 
 const URL_FUNCION = import.meta.env.VITE_SUPABASE_URL ? `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/api` : "";
 const CLAVE_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
@@ -115,7 +116,21 @@ function Formulario({ tipo, vehiculo, locales = [], empresa, onCerrar }) {
   const [f, setF] = useState({ nombre: "", telefono: "", email: "", mensaje: "", fechaHora: mananaALas11(), pie: "", plazo: 48, patente: "", marca: "", modelo: "", anio: "", km: "", modalidad: "vender", localId: locales.length === 1 ? locales[0].id : "", acepta: false, web: "" });
   const [estado, setEstado] = useState({ enviando: false, error: "", listo: null });
   const [verPrivacidad, setVerPrivacidad] = useState(false);
+  const [buscandoPatente, setBuscandoPatente] = useState(false);
+  const [msgPatente, setMsgPatente] = useState(null);
   const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
+
+  // Completa marca, modelo y año con los datos de la patente; la persona los revisa y agrega el kilometraje.
+  const buscarPatente = async () => {
+    setBuscandoPatente(true); setMsgPatente(null);
+    try {
+      const r = await llamar("patente", { patente: f.patente.replace(/[^A-Z0-9]/g, "") });
+      const c = camposDesdePatente(r.vehiculo);
+      setF((x) => ({ ...x, marca: c.marca || x.marca, modelo: c.modelo || x.modelo, anio: c.anio || x.anio }));
+      setMsgPatente({ ok: true, texto: "Completamos la marca, el modelo y el año. Revísalos y agrega el kilometraje." });
+    } catch (e) { setMsgPatente({ ok: false, texto: textoError(e) }); }
+    setBuscandoPatente(false);
+  };
 
   const enviar = async (ev) => {
     ev.preventDefault();
@@ -155,7 +170,11 @@ function Formulario({ tipo, vehiculo, locales = [], empresa, onCerrar }) {
         <>
           <div className="grid grid-cols-2 gap-3">
             <Campo etiqueta="¿Qué prefieres?"><select value={f.modalidad} onChange={(e) => set("modalidad", e.target.value)} className={INPUT}><option value="vender">Vender mi auto</option><option value="consignar">Consignarlo</option></select></Campo>
-            <Campo etiqueta="Patente"><input value={f.patente} onChange={(e) => set("patente", e.target.value.toUpperCase())} className={`${INPUT} font-mono`} placeholder="ABCD12" required /></Campo>
+            <div>
+              <Campo etiqueta="Patente"><input value={f.patente} onChange={(e) => set("patente", e.target.value.toUpperCase())} className={`${INPUT} font-mono`} placeholder="ABCD12" required /></Campo>
+              <button type="button" onClick={buscarPatente} disabled={buscandoPatente || !/^([A-Z]{4}\d{2}|[A-Z]{2}\d{4})$/.test(f.patente.replace(/[^A-Z0-9]/g, ""))} className="mt-1.5 text-sm text-amber-700 underline underline-offset-2 disabled:text-stone-400 disabled:no-underline">{buscandoPatente ? "Buscando…" : "Buscar los datos de mi auto"}</button>
+              {msgPatente && <p className={`text-xs mt-1 ${msgPatente.ok ? "text-emerald-700" : "text-rose-700"}`}>{msgPatente.texto}</p>}
+            </div>
             <Campo etiqueta="Marca"><input value={f.marca} onChange={(e) => set("marca", e.target.value)} className={INPUT} required /></Campo>
             <Campo etiqueta="Modelo"><input value={f.modelo} onChange={(e) => set("modelo", e.target.value)} className={INPUT} required /></Campo>
             <Campo etiqueta="Año"><input type="number" value={f.anio} onChange={(e) => set("anio", e.target.value)} className={INPUT} required /></Campo>

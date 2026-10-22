@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { normalizarPatente, patenteValida, marcaLegible, combustibleLegible, transmisionLegible, normalizarRespuestaBoostr, cacheVigente, limiteDiario } from "../supabase/functions/api/patentes-core.js";
+import { normalizarPatente, patenteValida, marcaLegible, combustibleLegible, transmisionLegible, normalizarRespuestaBoostr, limiteDiario, limiteWeb } from "../supabase/functions/api/patentes-core.js";
 
 test("Patente: se normaliza y se valida (formato actual y antiguo)", () => {
   assert.equal(normalizarPatente(" gp-dd.74 "), "GPDD74");
@@ -59,18 +59,6 @@ test("Respuesta de Boostr: no encontrada, inválida o con datos incompletos", ()
   assert.equal(normalizarRespuestaBoostr({ status: "success", data: { make: "KIA", model: "RIO", year: 3000 } }, "GPDD74").vehiculo.anio, null, "un año imposible no se acepta");
 });
 
-test("Caché: vigente por 60 días, no con fechas futuras ni datos dañados", () => {
-  const ahora = Date.parse("2026-10-22T12:00:00Z");
-  const reg = (d) => ({ vehiculo: { marca: "Kia" }, consultadoEn: new Date(ahora - d * 86_400_000).toISOString() });
-  assert.ok(cacheVigente(reg(1), ahora));
-  assert.ok(cacheVigente(reg(59), ahora));
-  assert.ok(!cacheVigente(reg(61), ahora));
-  assert.ok(!cacheVigente({ vehiculo: {}, consultadoEn: "no es fecha" }, ahora));
-  assert.ok(!cacheVigente(null, ahora));
-  assert.ok(!cacheVigente({ consultadoEn: new Date(ahora).toISOString() }, ahora), "sin datos del vehículo");
-  assert.ok(!cacheVigente({ vehiculo: {}, consultadoEn: new Date(ahora + 5 * 86_400_000).toISOString() }, ahora), "fecha futura");
-});
-
 test("Cupo diario: el configurado si es válido; si no, el del plan gratuito", () => {
   assert.equal(limiteDiario("50"), 50);
   assert.equal(limiteDiario(undefined), 5);
@@ -78,4 +66,11 @@ test("Cupo diario: el configurado si es válido; si no, el del plan gratuito", (
   assert.equal(limiteDiario("0"), 5);
   assert.equal(limiteDiario("-3"), 5);
   assert.equal(limiteDiario("999999"), 5);
+});
+
+test("Sitio web: puede gastar la mitad del cupo diario (mínimo 1)", () => {
+  assert.equal(limiteWeb(5), 2);
+  assert.equal(limiteWeb(50), 25);
+  assert.equal(limiteWeb(1), 1);
+  assert.equal(limiteWeb(2), 1);
 });

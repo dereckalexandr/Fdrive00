@@ -662,7 +662,8 @@ function EstadoTab() {
       </Fila>
       {datos.patentes && (
         <Fila ok={!datos.patentes.activa ? null : datos.patentes.usadasHoy < datos.patentes.limite} titulo="Datos del vehículo por patente">
-          {!datos.patentes.activa ? <span>Apagado (falta la clave de la API de patentes en el servidor).</span> : <span>Activo · consultas reales de hoy: {datos.patentes.usadasHoy} de {datos.patentes.limite}. Cada patente se consulta una sola vez (se guarda 60 días).</span>}
+          {!datos.patentes.activa ? <span>Apagado (falta la clave de la API de patentes en el servidor).</span> : <span>Activo · consultas nuevas de hoy: {datos.patentes.usadasHoy} de {datos.patentes.limite} (el sitio web usó {datos.patentes.usadasWebHoy} de las {datos.patentes.limiteWeb} que puede gastar).</span>}
+          <span>{datos.patentes.guardadas == null ? "Falta crear la tabla de patentes guardadas (ejecutar supabase-crm-patentes.sql)." : `Patentes guardadas para siempre: ${datos.patentes.guardadas.toLocaleString("es-CL")}. Cada patente nueva se consulta una sola vez; las ya guardadas no usan cupo.`}</span>
           {datos.patentes.activa && datos.patentes.usadasHoy >= datos.patentes.limite && <span className="text-amber-700">Se agotó el cupo de hoy: se pide marca, modelo y año a mano hasta mañana.</span>}
         </Fila>
       )}

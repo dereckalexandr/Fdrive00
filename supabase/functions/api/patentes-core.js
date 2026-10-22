@@ -5,8 +5,6 @@ export const normalizarPatente = (s) => String(s || "").toUpperCase().replace(/[
 /** Patente chilena: 4 letras + 2 dígitos (actual) o 2 letras + 4 dígitos (antigua). */
 export const patenteValida = (p) => /^([A-Z]{4}\d{2}|[A-Z]{2}\d{4})$/.test(String(p || ""));
 
-/** Cuánto tiempo se reutiliza una consulta ya hecha (la marca, el modelo y el año de un vehículo no cambian). */
-export const DIAS_CACHE = 60;
 /** Cupo diario por defecto de consultas reales a Boostr (el plan gratuito permite 5 al día). */
 export const LIMITE_DIARIO_DEFECTO = 5;
 /** Consultas por minuto que puede hacer una misma persona (frena el uso abusivo del cupo). */
@@ -77,15 +75,13 @@ export function normalizarRespuestaBoostr(json, patente) {
   return { ok: true, vehiculo: v };
 }
 
-/** ¿Sigue vigente una consulta guardada? */
-export function cacheVigente(registro, ahora = Date.now()) {
-  if (!registro || typeof registro !== "object" || !registro.consultadoEn || !registro.vehiculo) return false;
-  const t = Date.parse(registro.consultadoEn);
-  return Number.isFinite(t) && ahora - t < DIAS_CACHE * 86_400_000 && ahora >= t - 60_000;
-}
-
 /** Límite diario efectivo a partir de lo configurado (texto del secreto): entero entre 1 y 10.000; si no es válido, el del plan gratuito. */
 export function limiteDiario(valor) {
   const n = Number.parseInt(String(valor ?? ""), 10);
   return Number.isFinite(n) && n >= 1 && n <= 10_000 ? n : LIMITE_DIARIO_DEFECTO;
 }
+
+/** Cuántas consultas nuevas al día puede gastar el sitio web: la mitad del cupo (mínimo 1), para no dejar sin consultas al personal. */
+export const limiteWeb = (total) => Math.max(1, Math.floor(Number(total) / 2));
+/** Consultas por hora por dirección IP en el sitio web (incluye las que se responden desde lo guardado). */
+export const LIMITE_WEB_IP_HORA = 12;

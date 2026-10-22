@@ -9,6 +9,8 @@ import { permisoDeTipo } from "./compras-core.js";
 import { validarVehiculoTasacion } from "./tasaciones-core.js";
 import { sugerirAviso } from "./anuncios-core.js";
 import { enviarAviso, enSegundoPlano, correoActivo } from "./correo.ts";
+import { consultarPatente } from "./patentes.ts";
+import { LIMITE_WEB_IP_HORA } from "./patentes-core.js";
 import {
   visibleEnCatalogo, vehiculoPublico, validarSolicitudWeb, cuotaReferencial, tipoLeadDe, resumenSolicitud, FUENTE_WEB,
   LIMITE_IP_HORA, LIMITE_TELEFONO_HORA, LIMITE_LOCAL_HORA, ESTADOS_VISIBLES,
@@ -34,6 +36,16 @@ function superaLimiteIp(ip: string) {
 }
 
 const UNA_HORA = 3_600_000;
+
+// Consultas de patente por dirección IP y hora (por instancia de la función: es un freno, no una garantía).
+const patentesPorIp = new Map<string, { n: number; reset: number }>();
+function superaLimitePatentes(ip: string) {
+  const ahora = Date.now();
+  const a = patentesPorIp.get(ip);
+  if (!a || a.reset < ahora) { patentesPorIp.set(ip, { n: 1, reset: ahora + 3_600_000 }); return false; }
+  a.n++;
+  return a.n > LIMITE_WEB_IP_HORA;
+}
 
 const QUE_PIDIO: Record<string, string> = { consulta: "una consulta", visita: "una visita", financiamiento: "una simulación de financiamiento", vender: "vender o consignar tu vehículo" };
 
@@ -115,6 +127,17 @@ export async function publicOp(ctx: CtxPublico, body: any): Promise<Response> {
     if (!aq.error) { const a = (aq.data ?? []).find((x: any) => x.estado !== "baja"); if (a && a.descripcion) descripcion = a.descripcion; }
     const [cfg, lq] = await Promise.all([config(), v.local_id ? sb.from("locales").select("nombre, direccion").eq("id", v.local_id).maybeSingle() : Promise.resolve({ data: null })]);
     return json({ vehiculo: { ...vehiculoPublico(v), descripcion }, local: lq.data ? { nombre: lq.data.nombre, direccion: lq.data.direccion || null } : null, empresa: datosEmpresa(cfg) });
+  }
+
+  /* ---------- datos de un vehículo por patente (para el formulario «vende tu auto») ---------- */
+  // Solo entrega marca, modelo y año. Lo ya consultado se responde desde la base de datos sin gastar cupo; el sitio web puede gastar
+  // como máximo la mitad del cupo diario (el resto queda para el personal). Ver patentes.ts.
+  if (op === "patente") {
+    if (superaLimitePatentes(ctx.ip)) return err("demasiadas_solicitudes", 429);
+    const r = await consultarPatente(sb, body.patente, "web", ctx.isMissingTable);
+    if (!r.ok) return err(r.error, r.status);
+    const v: any = r.vehiculo;
+    return json({ vehiculo: { patente: v.patente, marca: v.marca, modeloCompleto: v.modeloCompleto, anio: v.anio ?? null } });
   }
 
   /* ---------- una foto (solo de un vehículo visible) ---------- */

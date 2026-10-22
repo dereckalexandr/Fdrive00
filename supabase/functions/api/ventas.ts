@@ -18,11 +18,11 @@ import {
 } from "./ventas-core.js";
 import { tramosEfectivos, calcularProduccion } from "./comisiones-core.js";
 import { enviarAviso, enSegundoPlano, correoActivo } from "./correo.ts";
-import { normalizarPatente, patenteValida, normalizarRespuestaBoostr, cacheVigente, limiteDiario, LIMITE_POR_MINUTO } from "./patentes-core.js";
+import { LIMITE_POR_MINUTO } from "./patentes-core.js";
+import { consultarPatente } from "./patentes.ts";
 
 // Consultas por minuto de cada persona a la API de patentes (por instancia de la función: es un freno, no una garantía).
 const consultasPorPersona = new Map<string, { n: number; reset: number }>();
-const hoyChile = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Santiago" });
 import {
   folioTasacion, validarSolicitudTasacion, validarTasacionDirecta, validarBorradorTasacion, validarCompletarTasacion, validarTransicionTasacion,
   topeParteDePago, verificarTopeParteDePago, fusionarParteDePago, metricasTasador, colaTasaciones,
@@ -463,52 +463,18 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
   }
 
   /* ---------- tasaciones (Tasador y solicitudes de los ejecutivos) ---------- */
-  // Datos de un vehículo (marca, modelo, año) a partir de su patente, con la API de Boostr. La clave vive solo en el servidor;
-  // cada patente se consulta una vez (se guarda 60 días) y hay un cupo diario de consultas reales. Nunca se pide ni se devuelve el dueño.
+  // Datos de un vehículo (marca, modelo, año) a partir de su patente, con la API de Boostr. Cada patente se guarda PARA SIEMPRE en la base de
+  // datos: la segunda consulta (de quien sea, del CRM o del sitio web) no gasta cupo. Ver patentes.ts.
   if (op === "vehiculos.patente") {
     const permitido = ctx.esAdmin || ["inventario.editar", "tasaciones.realizar", "tasaciones.pedir", "tasaciones.usar", "inspecciones.realizar", "inspecciones.pedir", "inspecciones.usar", "tasacion_compra.usar", "leads.propios", "leads.asignar", "compras.operar", "consignaciones.operar"].some((x) => can(x));
     if (!permitido) return err("forbidden", 403);
-    const clave = Deno.env.get("BOOSTR_API_KEY");
-    if (!clave) return err("no_configurado", 503);
-    const pat = normalizarPatente(body.patente);
-    if (!patenteValida(pat)) return err("patente_invalida");
-
     const ahora = Date.now();
     const mio = consultasPorPersona.get(userId);
     if (mio && mio.reset > ahora) { mio.n++; if (mio.n > LIMITE_POR_MINUTO) return err("demasiadas_consultas", 429); }
     else consultasPorPersona.set(userId, { n: 1, reset: ahora + 60_000 });
-
-    const kvKey = `patente::${pat}`;
-    const guardada = await sb.from("kv_store").select("value").eq("key", kvKey).maybeSingle();
-    if (guardada.error) return fallo(guardada.error);
-    if (guardada.data) {
-      try { const reg = JSON.parse(guardada.data.value); if (cacheVigente(reg, ahora)) return json({ vehiculo: reg.vehiculo, origen: "guardada" }); } catch { /* registro dañado: se vuelve a consultar */ }
-    }
-
-    const claveUso = `patente_uso::${hoyChile()}`;
-    const uso = await sb.from("kv_store").select("value").eq("key", claveUso).maybeSingle();
-    if (uso.error) return fallo(uso.error);
-    const usadas = Number.parseInt(uso.data ? uso.data.value : "0", 10) || 0;
-    if (usadas >= limiteDiario(Deno.env.get("BOOSTR_LIMITE_DIARIO"))) return err("cupo_agotado", 429);
-    // Se cuenta antes de consultar: si la consulta falla igual gastó cupo del proveedor, y así dos personas a la vez no se pasan del tope.
-    await sb.from("kv_store").upsert({ key: claveUso, value: String(usadas + 1), shared: false, updated_at: new Date().toISOString() }, { onConflict: "key" });
-
-    let json_: any;
-    try {
-      const r = await fetch(`https://api.boostr.cl/vehicle/${pat}.json`, { headers: { "x-api-key": clave, accept: "application/json" }, signal: AbortSignal.timeout(9000) });
-      if (r.status === 401 || r.status === 403 || r.status === 429 || r.status >= 500) {
-        console.error("patentes: el proveedor respondió", r.status);
-        return err("servicio_no_disponible", 502);
-      }
-      json_ = await r.json();
-    } catch (e) {
-      console.error("patentes: no se pudo consultar:", String((e as any)?.message ?? e));
-      return err("servicio_no_disponible", 502);
-    }
-    const n = normalizarRespuestaBoostr(json_, pat);
-    if (!n.ok) return n.error === "no_encontrada" ? err("no_encontrada", 404) : err("servicio_no_disponible", 502);
-    await sb.from("kv_store").upsert({ key: kvKey, value: JSON.stringify({ vehiculo: n.vehiculo, consultadoEn: new Date().toISOString() }), shared: false, updated_at: new Date().toISOString() }, { onConflict: "key" });
-    return json({ vehiculo: n.vehiculo, origen: "boostr" });
+    const r = await consultarPatente(sb, body.patente, "interno", ctx.isMissingTable);
+    if (!r.ok) return err(r.error, r.status);
+    return json({ vehiculo: r.vehiculo, origen: r.origen });
   }
 
   if (op.startsWith("tasaciones.")) {

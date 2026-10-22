@@ -22,7 +22,7 @@ import {
   normalizarRut, validarRut, claveValida, claveProvisoria, validarUsuario, validarConfig, configCompleta, ROLES_ASIGNABLES,
 } from "./crm-core.js";
 import { ventasOp } from "./ventas.ts";
-import { limiteDiario } from "./patentes-core.js";
+import { limiteDiario, limiteWeb } from "./patentes-core.js";
 import { publicOp } from "./publico.ts";
 
 const sb = createClient(
@@ -475,10 +475,14 @@ async function crmOp(s: Session, body: any): Promise<Response> {
     const fall = await sb.from("bitacora").select("creado_en, detalle").eq("accion", "aviso.fallido").gte("creado_en", hace7).order("creado_en", { ascending: false }).limit(50);
     const omit = await sb.from("bitacora").select("id").eq("accion", "aviso.omitido").gte("creado_en", hace7);
     const fallidos = fall.data ?? [];
+    let patentesWebHoy = 0;
+    let patentesGuardadas: number | null = null;
+    try { patentesWebHoy = Number.parseInt((await dbGet(`patente_uso_web::${new Date().toLocaleDateString("en-CA", { timeZone: "America/Santiago" })}`)) ?? "0", 10) || 0; } catch { /* sin dato */ }
+    try { const g = await sb.from("patentes_consultadas").select("patente", { count: "exact", head: true }); patentesGuardadas = g.error ? null : (g.count ?? 0); } catch { /* tabla aún no creada */ }
     let patentesHoy = 0;
     try { patentesHoy = Number.parseInt((await dbGet(`patente_uso::${new Date().toLocaleDateString("en-CA", { timeZone: "America/Santiago" })}`)) ?? "0", 10) || 0; } catch { /* sin dato */ }
     return json({
-      patentes: { activa: !!Deno.env.get("BOOSTR_API_KEY"), usadasHoy: patentesHoy, limite: limiteDiario(Deno.env.get("BOOSTR_LIMITE_DIARIO")) },
+      patentes: { activa: !!Deno.env.get("BOOSTR_API_KEY"), usadasHoy: patentesHoy, usadasWebHoy: patentesWebHoy, limite: limiteDiario(Deno.env.get("BOOSTR_LIMITE_DIARIO")), limiteWeb: limiteWeb(limiteDiario(Deno.env.get("BOOSTR_LIMITE_DIARIO"))), guardadas: patentesGuardadas },
       ahora: new Date().toISOString(), dbMs, conteos,
       respaldo: (resp.data ?? [])[0] ? { en: resp.data[0].creado_en, detalle: resp.data[0].detalle ?? {} } : null,
       avisos: {
