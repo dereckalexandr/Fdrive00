@@ -788,3 +788,12 @@ En *Usuarios* hay un botón **Eliminar** (solo la cuenta maestra), además de De
 - **Teléfono con código de área:** lista desplegable de países (Chile +56 por defecto; Argentina, Perú, Bolivia, Colombia, Brasil, México, España, EE. UU./Canadá, etc.) y el número aparte. Se guarda como número internacional (`+56987654321`); en Chile deben ser 9 dígitos (un 0 al comienzo se ignora) y en los demás países entre 6 y 12. Aplica a **todos** los formularios del sitio (consulta, visita, financiamiento y vender), y el botón de WhatsApp del CRM usa ese número tal cual.
 - **Datos nuevos del dueño:** **número de dueños**, **¿tiene prenda?** (Sí/No, lista), **¿mantenciones en la marca?** (Sí/No, lista) y **precio esperado ($)** (con puntos de miles). Quedan en el lead (`vehiculo_ofrecido`), en las notas del lead y en la solicitud del Tasador. En el CRM se ven en la ficha del lead y en las secciones de **Compra** y **Consignación** (la prenda aparece en rojo); en la consignación el precio esperado se propone como precio de publicación. El ejecutivo también puede editarlos al crear o editar un lead de compra o consignación (allí son opcionales).
 - Sin SQL. Pruebas: `tests/publico-core.test.mjs` y `tests/publico-api.test.mjs`.
+
+## Reparto automático de leads (sitio web y CRM)
+
+Cada lead nuevo se asigna solo, **de forma rotativa: le toca a quien lleva más tiempo sin recibir un lead de su grupo** (quien nunca ha recibido va primero). Solo entran las personas **activas del mismo local** con la habilitación que corresponde:
+- **Ventas** (consulta, visita y financiamiento del sitio web, y leads de venta creados en el CRM) → solo ejecutivos con **Ventas**.
+- **Compra** (cliente que quiere vendernos su auto) → solo con **Compras**. **Consignación** → solo con **Consignaciones**.
+- **Cada grupo rota por separado**: «ventas» por un lado y «compras y consignaciones» por otro. Recibir un lead de venta no quita el turno en las compras ni al revés.
+- Si nadie está habilitado para ese tipo, el lead queda **sin asignar** y se avisa a los Jefes Local (nunca va a alguien sin la habilitación).
+- Lo mismo rige para el reparto al crear leads en el CRM, la reasignación automática y la reasignación en lote. Código: `grupoDeReparto` (`compras-core.js`), `ultimasAsignaciones` (`ventas.ts`) y `publico.ts`. Pruebas: `tests/reparto-leads-api.test.mjs`.

@@ -43,6 +43,14 @@ export const TIPOS_LEAD = [
   { id: "consignacion", nombre: "Consignación" },
 ];
 export const tipoLeadNombre = (id) => (TIPOS_LEAD.find((t) => t.id === id) || {}).nombre || id;
+/**
+ * Grupo de reparto automático de leads. Cada grupo rota por separado entre sus habilitados:
+ *  - «ventas»: leads de venta (consultas, visitas y financiamiento) -> ejecutivos con la habilitación de Ventas.
+ *  - «compras»: leads de compra y de consignación -> ejecutivos con Compras (para los de compra) o Consignaciones (para los de consignación).
+ * Así, recibir un lead de venta no te saca el turno de los de compra, ni al revés.
+ */
+export const grupoDeReparto = (tipo) => (tipo === "compra" || tipo === "consignacion" ? "compras" : "ventas");
+
 export const permisoDeTipo = (tipo) => PERMISO_DE_TIPO[tipo] || PERMISO_DE_TIPO.venta;
 
 /** Nombre de la etapa del lead según su tipo (la etapa interna es la misma: cotizado, reservado, ganado). */

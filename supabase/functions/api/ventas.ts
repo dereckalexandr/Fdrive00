@@ -30,7 +30,7 @@ import {
 
 import {
   folioCompra, folioConsignacion, COMPRA_ABIERTA, CONSIGNACION_ABIERTA, permisoDeTipo, validarVehiculoOfrecido, validarOferta, validarRespuestaOferta, validarPagoCompra,
-  validarTransicionCompra, vehiculoDeCompra, validarConsignacion, vencimientoConsignacion, diasParaVencer, validarTransicionConsignacion, validarExtension,
+  validarTransicionCompra, grupoDeReparto, vehiculoDeCompra, validarConsignacion, vencimientoConsignacion, diasParaVencer, validarTransicionConsignacion, validarExtension,
   vehiculoDeConsignacion, verificarPisoConsignado, filasConsignacion, metricasCompras,
 } from "./compras-core.js";
 import {
@@ -122,10 +122,13 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       .map((u: any) => ({ id: u.id, nombre: u.nombre }));
   }
 
-  async function ultimasAsignaciones() {
-    const { data } = await scoped(sb.from("leads").select("asignado_a, creado_en"));
+  /** Cuándo recibió cada persona su último lead DEL MISMO GRUPO de reparto (ventas, o compras y consignaciones): así cada grupo rota por separado. */
+  async function ultimasAsignaciones(tipo = "venta") {
+    const { data } = await scoped(sb.from("leads").select("asignado_a, creado_en, tipo"));
+    const grupo = grupoDeReparto(tipo);
     const out: Record<string, string> = {};
     for (const l of data ?? []) {
+      if (grupoDeReparto(l.tipo || "venta") !== grupo) continue;
       if (l.asignado_a && (!out[l.asignado_a] || l.creado_en > out[l.asignado_a])) out[l.asignado_a] = l.creado_en;
     }
     return out;
@@ -2301,7 +2304,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       asignado = candidatos.find((c: any) => c.id === body.asignarA) ?? null;
       if (!asignado) return err("asignado_invalido");
     } else {
-      asignado = elegirAsignado(await elegibles(local, tipoLead), await ultimasAsignaciones());
+      asignado = elegirAsignado(await elegibles(local, tipoLead), await ultimasAsignaciones(tipoLead));
     }
 
     const { data: lead, error } = await sb.from("leads").insert({
@@ -2381,7 +2384,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       nuevo = candidatos.find((c: any) => c.id === body.asignarA) ?? null;
       if (!nuevo) return err("asignado_invalido");
     } else {
-      nuevo = elegirAsignado(candidatos.filter((c: any) => c.id !== lead.asignado_a), await ultimasAsignaciones()) ?? null;
+      nuevo = elegirAsignado(candidatos.filter((c: any) => c.id !== lead.asignado_a), await ultimasAsignaciones(lead.tipo || "venta")) ?? null;
       if (!nuevo) return err("sin_candidatos");
     }
     const { data, error } = await sb.from("leads").update({ asignado_a: nuevo.id, actualizado_en: new Date().toISOString() }).eq("id", lead.id).select().single();
@@ -3168,7 +3171,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     const [cVenta, cCompra, cConsig] = await Promise.all([elegibles(local, "venta"), elegibles(local, "compra"), elegibles(local, "consignacion")]);
     const porTipo: Record<string, any[]> = { venta: cVenta, compra: cCompra, consignacion: cConsig };
     const todosCand = [...cVenta, ...cCompra, ...cConsig];
-    const ultima = await ultimasAsignaciones();
+    const ultimaPorGrupo: Record<string, Record<string, string>> = { ventas: await ultimasAsignaciones("venta"), compras: await ultimasAsignaciones("compra") };
     let destino: { id: string; nombre: string } | null = null;
     if (body.asignarA && body.asignarA !== "auto") {
       destino = todosCand.find((c: any) => c.id === body.asignarA) ?? null;
@@ -3187,12 +3190,13 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       // Con "reparto automático" se va rotando entre el equipo (sin repetir a quien ya lo tiene).
       const candidatos = porTipo[l.tipo || "venta"] ?? cVenta;
       if (destino && !candidatos.some((c: any) => c.id === destino!.id)) { omitidos.push({ id: l.id, motivo: "sin_candidatos" }); continue; }
+      const ultima = ultimaPorGrupo[grupoDeReparto(l.tipo || "venta")];
       const asignado = destino ?? elegirAsignado(candidatos.filter((c: any) => c.id !== l.asignado_a), ultima);
       if (!asignado) { omitidos.push({ id: l.id, motivo: "sin_candidatos" }); continue; }
       if (asignado.id === l.asignado_a) { omitidos.push({ id: l.id, motivo: "sin_cambio" }); continue; }
       const up = await sb.from("leads").update({ asignado_a: asignado.id, actualizado_en: ahora }).eq("id", l.id);
       if (up.error) throw up.error;
-      ultima[asignado.id] = new Date().toISOString();
+      ultima[asignado.id] = new Date().toISOString(); // en el reparto en lote, cada grupo sigue rotando
       // Sus tareas pendientes se van con él.
       await sb.from("tareas").update({ asignado_a: asignado.id }).eq("lead_id", l.id).eq("hecha", false);
       await evento(l.id, "asignacion", `Reasignado a ${asignado.nombre} (reasignación en lote)`);

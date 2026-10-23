@@ -5,7 +5,7 @@
 // leads normales del CRM con la fuente «Sitio web», que se reparten solos entre los ejecutivos habilitados.
 import { permisosEfectivos, configCompleta } from "./crm-core.js";
 import { elegirAsignado } from "./ventas-core.js";
-import { permisoDeTipo } from "./compras-core.js";
+import { permisoDeTipo, grupoDeReparto } from "./compras-core.js";
 import { validarVehiculoTasacion } from "./tasaciones-core.js";
 import { sugerirAviso } from "./anuncios-core.js";
 import { enviarAviso, enSegundoPlano, correoActivo } from "./correo.ts";
@@ -205,8 +205,10 @@ export async function publicOp(ctx: CtxPublico, body: any): Promise<Response> {
     if (uq.error) throw uq.error;
     const elegibles = (uq.data ?? []).filter((u: any) => u.activo && (() => { const p = permisosEfectivos(u.roles ?? [], overrides, u.permisos_extra); return p.includes("leads.propios") && p.includes(permisoDeTipo(tipoLeadDe(s))); })()).map((u: any) => ({ id: u.id, nombre: u.nombre }));
     const ultimas: Record<string, string> = {};
-    const lastQ = await sb.from("leads").select("asignado_a, creado_en").eq("local_id", local);
-    for (const l of lastQ.data ?? []) if (l.asignado_a && (!ultimas[l.asignado_a] || l.creado_en > ultimas[l.asignado_a])) ultimas[l.asignado_a] = l.creado_en;
+    // Cada grupo rota por separado: ventas, por un lado; compras y consignaciones, por otro.
+    const grupo = grupoDeReparto(tipoLeadDe(s));
+    const lastQ = await sb.from("leads").select("asignado_a, creado_en, tipo").eq("local_id", local);
+    for (const l of lastQ.data ?? []) if (l.asignado_a && grupoDeReparto(l.tipo || "venta") === grupo && (!ultimas[l.asignado_a] || l.creado_en > ultimas[l.asignado_a])) ultimas[l.asignado_a] = l.creado_en;
     const asignado = elegirAsignado(elegibles, ultimas);
 
     const vtWeb = s.tipo === "vender" ? validarVehiculoTasacion({ patente: s.vende.patente, marca: s.vende.marca, modelo: s.vende.modelo, anio: s.vende.anio, km: s.vende.km, duenos: s.vende.duenos, prenda: s.vende.prenda, mantenciones: s.vende.mantenciones, precioEsperado: s.vende.precioEsperado }) : null;
