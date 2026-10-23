@@ -26,7 +26,7 @@ import { ErrorBoundary } from "./error-boundary.jsx";
 import { SeccionCompra, SeccionConsignacion, ModuloCompras } from "./crm-compras.jsx";
 import { etapaDeOperacion, tipoLeadNombre, TIPOS_LEAD, validarVehiculoOfrecido } from "../supabase/functions/api/compras-core.js";
 import {
-  INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, NavegacionLateral, useGuardado, useCarga, mensajeError, CamposVehiculo, aVehiculoForm,
+  INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, NavegacionLateral, useGuardado, DatosDelDueno, CamposCondiciones, useCarga, mensajeError, CamposVehiculo, aVehiculoForm,
 } from "./crm-ui.jsx";
 
 const COLOR_ETAPA = {
@@ -140,6 +140,7 @@ function LeadFicha({ api, leadId, catalogos, onCerrar, onCambio, onEditar }) {
             <p className="text-stone-800">{ofrecido.marca ? `${ofrecido.marca} ${ofrecido.modelo || ""} ${ofrecido.anio || ""}`.trim() : "Sin datos"}</p>
             <p className="text-xs text-stone-500">{ofrecido.patente ? `${ofrecido.patente} · ` : ""}{ofrecido.km != null ? `${Number(ofrecido.km).toLocaleString("es-CL")} km` : ""}{ofrecido.transmision ? ` · ${ofrecido.transmision}` : ""}</p></div>
         )}
+        {!esVenta && <DatosDelDueno o={ofrecido} />}
         <div className={`${esVenta ? "" : "hidden"} grid grid-cols-1 md:grid-cols-3 gap-3 text-sm`}>
           <div><p className="text-xs uppercase tracking-wide text-stone-400">Vehículo de interés</p>
             <p className="text-stone-800">{vehiculo ? `${vehiculo.marca} ${vehiculo.modelo} ${vehiculo.anio} · ${vehiculo.patente}` : lead.vehiculo_interes || "—"}</p>
@@ -376,7 +377,7 @@ function FormLead({ api, catalogos, lead, onCerrar, onGuardado }) {
         </div>
       </Tarjeta>
 
-      {tipo !== "venta" && <Tarjeta titulo={tipo === "compra" ? "Vehículo que el cliente quiere vendernos" : "Vehículo que deja en consignación"} ayuda="Patente, marca, modelo, año y kilometraje son obligatorios."><CamposVehiculo v={vo} set={setVo} /></Tarjeta>}
+      {tipo !== "venta" && <Tarjeta titulo={tipo === "compra" ? "Vehículo que el cliente quiere vendernos" : "Vehículo que deja en consignación"} ayuda="Patente, marca, modelo, año y kilometraje son obligatorios."><CamposVehiculo v={vo} set={setVo} /><CamposCondiciones v={vo} set={setVo} /></Tarjeta>}
       {tipo === "venta" && <Tarjeta>
         <label className="flex items-center gap-2 text-sm text-stone-800"><input type="checkbox" checked={f.tienePP} onChange={(e) => set("tienePP", e.target.checked)} /> Entrega un vehículo en parte de pago</label>
         {f.tienePP && (

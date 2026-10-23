@@ -209,7 +209,7 @@ export async function publicOp(ctx: CtxPublico, body: any): Promise<Response> {
     for (const l of lastQ.data ?? []) if (l.asignado_a && (!ultimas[l.asignado_a] || l.creado_en > ultimas[l.asignado_a])) ultimas[l.asignado_a] = l.creado_en;
     const asignado = elegirAsignado(elegibles, ultimas);
 
-    const vtWeb = s.tipo === "vender" ? validarVehiculoTasacion({ patente: s.vende.patente, marca: s.vende.marca, modelo: s.vende.modelo, anio: s.vende.anio, km: s.vende.km }) : null;
+    const vtWeb = s.tipo === "vender" ? validarVehiculoTasacion({ patente: s.vende.patente, marca: s.vende.marca, modelo: s.vende.modelo, anio: s.vende.anio, km: s.vende.km, duenos: s.vende.duenos, prenda: s.vende.prenda, mantenciones: s.vende.mantenciones, precioEsperado: s.vende.precioEsperado }) : null;
     const vehTexto = vehiculo ? `${vehiculo.marca} ${vehiculo.modelo} ${vehiculo.anio}` : "";
     const resumen = resumenSolicitud(s, vehTexto);
     let financiamiento: Record<string, unknown> = {};
@@ -241,7 +241,7 @@ export async function publicOp(ctx: CtxPublico, body: any): Promise<Response> {
       if (vt.ok) {
         const t = await sb.from("tasaciones").insert({
           local_id: local, tipo: "directa", contacto: { nombre: s.contacto.nombre, telefono: s.contacto.telefono }, vehiculo: vt.value, patente: vt.value.patente,
-          estado: "pendiente", notas_solicitud: `${s.vende.modalidad === "consignar" ? "Quiere consignar" : "Quiere vender"} (pedido desde el sitio web).${s.mensaje ? ` ${s.mensaje}` : ""}`.slice(0, 300), creado_por: "sitio web",
+          estado: "pendiente", notas_solicitud: `${s.vende.modalidad === "consignar" ? "Quiere consignar" : "Quiere vender"} (pedido desde el sitio web). Espera $${Number(s.vende.precioEsperado).toLocaleString("es-CL")} · ${s.vende.duenos} dueño(s) · prenda: ${s.vende.prenda === "si" ? "sí" : "no"} · mantenciones en la marca: ${s.vende.mantenciones === "si" ? "sí" : "no"}.${s.mensaje ? ` ${s.mensaje}` : ""}`.slice(0, 300), creado_por: "sitio web",
         }).select().single();
         if (!t.error) folioTasacion = t.data.numero;
       }

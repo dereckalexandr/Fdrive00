@@ -29,6 +29,32 @@ export const TIPOS_SOLICITUD = [
   { id: "financiamiento", nombre: "Cotizar financiamiento", vehiculo: true },
   { id: "vender", nombre: "Vender o consignar mi auto", vehiculo: false },
 ];
+/** Códigos de área de país para el teléfono. Chile primero (es el que se usa por defecto). */
+export const PAISES = [
+  { id: "CL", nombre: "Chile", codigo: "56" }, { id: "AR", nombre: "Argentina", codigo: "54" }, { id: "BO", nombre: "Bolivia", codigo: "591" },
+  { id: "BR", nombre: "Brasil", codigo: "55" }, { id: "CO", nombre: "Colombia", codigo: "57" }, { id: "CR", nombre: "Costa Rica", codigo: "506" },
+  { id: "CU", nombre: "Cuba", codigo: "53" }, { id: "EC", nombre: "Ecuador", codigo: "593" }, { id: "SV", nombre: "El Salvador", codigo: "503" },
+  { id: "ES", nombre: "España", codigo: "34" }, { id: "US", nombre: "Estados Unidos / Canadá", codigo: "1" }, { id: "GT", nombre: "Guatemala", codigo: "502" },
+  { id: "HT", nombre: "Haití", codigo: "509" }, { id: "HN", nombre: "Honduras", codigo: "504" }, { id: "MX", nombre: "México", codigo: "52" },
+  { id: "NI", nombre: "Nicaragua", codigo: "505" }, { id: "PA", nombre: "Panamá", codigo: "507" }, { id: "PY", nombre: "Paraguay", codigo: "595" },
+  { id: "PE", nombre: "Perú", codigo: "51" }, { id: "DO", nombre: "República Dominicana", codigo: "1809" }, { id: "UY", nombre: "Uruguay", codigo: "598" },
+  { id: "VE", nombre: "Venezuela", codigo: "58" },
+];
+
+/**
+ * Teléfono con código de país: devuelve "+569XXXXXXXX". En Chile el número tiene 9 dígitos (un 0 al comienzo se ignora); en los demás países, entre 6 y 12.
+ * @returns {{ ok: true, value: string } | { ok: false, error: string }}
+ */
+export function validarTelefonoInternacional(codigoPais, numero) {
+  const codigo = String(codigoPais ?? "").replace(/\D/g, "");
+  const pais = PAISES.find((p) => p.codigo === codigo);
+  if (!pais) return { ok: false, error: "codigo_pais_invalido" };
+  const nacional = soloDigitos(numero).replace(/^0+/, "");
+  const [min, max] = pais.codigo === "56" ? [9, 9] : [6, 12];
+  if (nacional.length < min || nacional.length > max) return { ok: false, error: "telefono_invalido" };
+  return { ok: true, value: `+${pais.codigo}${nacional}` };
+}
+
 export const PLAZOS_FINANCIAMIENTO = [12, 24, 36, 48, 60, 72];
 export const ESPERA_MINIMA_MS = 3_000;      // tiempo mínimo entre abrir el formulario y enviarlo (los robots envían al instante)
 export const VIGENCIA_FORMULARIO_MS = 6 * 3_600_000;
@@ -61,11 +87,23 @@ export function validarSolicitudWeb(input, ahora = new Date()) {
   if (!tipo) return { ok: false, error: "tipo_invalido" };
   const nombre = texto(i.nombre, 80);
   if (nombre.length < 3) return { ok: false, error: "nombre_invalido" };
-  const telefono = texto(i.telefono, 30);
-  if (soloDigitos(telefono).length < 8 || soloDigitos(telefono).length > 15) return { ok: false, error: "telefono_invalido" };
+  let telefono;
+  if (i.codigoPais !== undefined && i.codigoPais !== null && i.codigoPais !== "") {
+    const t = validarTelefonoInternacional(i.codigoPais, i.telefono);
+    if (!t.ok) return { ok: false, error: t.error };
+    telefono = t.value;
+  } else {
+    telefono = texto(i.telefono, 30); // formularios antiguos: el número completo en un solo campo
+    if (soloDigitos(telefono).length < 8 || soloDigitos(telefono).length > 15) return { ok: false, error: "telefono_invalido" };
+  }
   const email = texto(i.email, 80).toLowerCase();
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, error: "email_invalido" };
   const mensaje = String(i.mensaje ?? "").replace(/\r/g, "").trim().slice(0, 500);
+  // Al vender o consignar, todos los datos son obligatorios.
+  if (tipo.id === "vender") {
+    if (!email) return { ok: false, error: "email_requerido" };
+    if (mensaje.length < 3) return { ok: false, error: "mensaje_requerido" };
+  }
   const base = { tipo: tipo.id, contacto: { nombre, telefono, email: email || null }, mensaje: mensaje || null, localId: i.localId ? String(i.localId) : null };
 
   if (tipo.vehiculo) {
@@ -96,7 +134,13 @@ export function validarSolicitudWeb(input, ahora = new Date()) {
     const km = entero(i.km, 0, 2_000_000);
     if (km === null || Number.isNaN(km)) return { ok: false, error: "km_invalido" };
     const modalidad = i.modalidad === "consignar" ? "consignar" : "vender";
-    base.vende = { patente, marca, modelo, anio, km, modalidad };
+    const duenos = entero(i.duenos, 1, 30);
+    if (duenos === null || Number.isNaN(duenos)) return { ok: false, error: "duenos_invalido" };
+    if (!["si", "no"].includes(i.prenda)) return { ok: false, error: "prenda_invalida" };
+    if (!["si", "no"].includes(i.mantenciones)) return { ok: false, error: "mantenciones_invalidas" };
+    const precioEsperado = entero(i.precioEsperado, 1, 2_000_000_000);
+    if (precioEsperado === null || Number.isNaN(precioEsperado)) return { ok: false, error: "precio_esperado_invalido" };
+    base.vende = { patente, marca, modelo, anio, km, modalidad, duenos, prenda: i.prenda, mantenciones: i.mantenciones, precioEsperado };
   }
   return { ok: true, value: base };
 }
@@ -117,6 +161,7 @@ export function resumenSolicitud(v, vehiculoTexto = "") {
   if (v.tipo === "visita") partes.push(`Pide visita o test drive de ${vehiculoTexto}`);
   if (v.tipo === "financiamiento") partes.push(`Cotiza financiamiento de ${vehiculoTexto}: pie $${Number(v.pie).toLocaleString("es-CL")}, ${v.plazo} cuotas`);
   if (v.tipo === "vender") partes.push(`${v.vende.modalidad === "consignar" ? "Quiere consignar" : "Quiere vender"}: ${v.vende.marca} ${v.vende.modelo} ${v.vende.anio} · ${v.vende.km.toLocaleString("es-CL")} km · ${v.vende.patente}`);
+  if (v.tipo === "vender" && v.vende.duenos) partes.push(`${v.vende.duenos} dueño${v.vende.duenos === 1 ? "" : "s"} · prenda: ${v.vende.prenda === "si" ? "sí" : "no"} · mantenciones en la marca: ${v.vende.mantenciones === "si" ? "sí" : "no"} · precio esperado $${Number(v.vende.precioEsperado).toLocaleString("es-CL")}`);
   if (v.mensaje) partes.push(`Mensaje: ${v.mensaje}`);
   return partes.join(". ");
 }
@@ -125,13 +170,20 @@ export function resumenSolicitud(v, vehiculoTexto = "") {
 export const MENSAJES_WEB = {
   consentimiento_requerido: "Para continuar, acepta el uso de tus datos para que podamos contactarte.",
   nombre_invalido: "Escribe tu nombre completo.",
-  telefono_invalido: "Escribe un teléfono válido, con al menos 8 dígitos.",
+  telefono_invalido: "Revisa el teléfono: en Chile son 9 dígitos (ej. 9 1234 5678); en otros países, entre 6 y 12 dígitos, sin el código de área.",
   email_invalido: "El correo no parece válido.",
   vehiculo_requerido: "Elige el vehículo.",
   fecha_invalida: "Elige una fecha y hora dentro de los próximos 45 días.",
   pie_invalido: "Escribe el pie (puede ser 0).",
   plazo_invalido: "Elige un plazo de la lista.",
   patente_invalida: "La patente no es válida (formato ABCD12 o AB1234).",
+  codigo_pais_invalido: "Elige el código de área de tu país.",
+  email_requerido: "Escribe tu correo electrónico.",
+  mensaje_requerido: "Cuéntanos algo más de tu auto (escribe un comentario).",
+  duenos_invalido: "Indica cuántos dueños ha tenido el auto (un número entre 1 y 30).",
+  prenda_invalida: "Indica si el auto tiene prenda (Sí o No).",
+  mantenciones_invalidas: "Indica si tiene las mantenciones en la marca (Sí o No).",
+  precio_esperado_invalido: "Escribe el precio que esperas por tu auto.",
   no_encontrada: "No encontramos esa patente. Completa los datos a mano.",
   cupo_agotado: "La búsqueda automática no está disponible en este momento. Completa los datos a mano.",
   servicio_no_disponible: "La búsqueda automática no está disponible en este momento. Completa los datos a mano.",

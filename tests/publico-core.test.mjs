@@ -2,8 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   visibleEnCatalogo, vehiculoPublico, validarSolicitudWeb, cuotaReferencial, tipoLeadDe, resumenSolicitud, MENSAJES_WEB,
-  ESPERA_MINIMA_MS, VIGENCIA_FORMULARIO_MS,
-} from "../supabase/functions/api/publico-core.js";
+  ESPERA_MINIMA_MS, VIGENCIA_FORMULARIO_MS, validarTelefonoInternacional, PAISES,
+}  from "../supabase/functions/api/publico-core.js";
 import { cuotaEstimada } from "../supabase/functions/api/ventas-core.js";
 import { validarConfig, configCompleta, CONFIG_DEFECTO } from "../supabase/functions/api/crm-core.js";
 
@@ -85,7 +85,7 @@ test("Financiamiento: pie y plazo, y la cuota referencial", () => {
 });
 
 test("Vender o consignar: datos del vehículo del visitante", () => {
-  const v = (o = {}) => base({ tipo: "vender", vehiculoId: undefined, patente: "ab-cd 12", marca: "Toyota", modelo: "Yaris", anio: 2018, km: 78000, modalidad: "consignar", ...o });
+  const v = (o = {}) => base({ tipo: "vender", vehiculoId: undefined, patente: "ab-cd 12", marca: "Toyota", modelo: "Yaris", anio: 2018, km: 78000, modalidad: "consignar", duenos: 2, prenda: "no", mantenciones: "si", precioEsperado: 8500000, ...o });
   const ok = validarSolicitudWeb(v(), AHORA);
   assert.ok(ok.ok, JSON.stringify(ok));
   assert.equal(ok.value.vende.patente, "ABCD12");
@@ -97,6 +97,50 @@ test("Vender o consignar: datos del vehículo del visitante", () => {
   assert.equal(validarSolicitudWeb(v({ anio: 1900 }), AHORA).error, "anio_invalido");
   assert.equal(validarSolicitudWeb(v({ km: "" }), AHORA).error, "km_invalido");
   assert.match(resumenSolicitud(ok.value), /Quiere consignar: Toyota Yaris 2018 · 78\.000 km · ABCD12/);
+  assert.match(resumenSolicitud(ok.value), /2 dueños · prenda: no · mantenciones en la marca: sí · precio esperado \$8\.500\.000/);
+  assert.deepEqual([ok.value.vende.duenos, ok.value.vende.prenda, ok.value.vende.mantenciones, ok.value.vende.precioEsperado], [2, "no", "si", 8500000]);
+});
+
+test("Vender o consignar: todos los datos son obligatorios", () => {
+  const v = (o = {}) => base({ tipo: "vender", vehiculoId: undefined, patente: "ABCD12", marca: "Toyota", modelo: "Yaris", anio: 2018, km: 78000, modalidad: "vender", duenos: 1, prenda: "no", mantenciones: "no", precioEsperado: 8000000, ...o });
+  assert.ok(validarSolicitudWeb(v(), AHORA).ok);
+  const e = (o) => validarSolicitudWeb(v(o), AHORA).error;
+  assert.equal(e({ email: "" }), "email_requerido");
+  assert.equal(e({ mensaje: "" }), "mensaje_requerido");
+  assert.equal(e({ mensaje: "  " }), "mensaje_requerido");
+  assert.equal(e({ duenos: "" }), "duenos_invalido");
+  assert.equal(e({ duenos: 0 }), "duenos_invalido");
+  assert.equal(e({ duenos: 31 }), "duenos_invalido");
+  assert.equal(e({ duenos: 1.5 }), "duenos_invalido");
+  assert.equal(e({ prenda: "" }), "prenda_invalida");
+  assert.equal(e({ prenda: "tal vez" }), "prenda_invalida");
+  assert.equal(e({ mantenciones: "" }), "mantenciones_invalidas");
+  assert.equal(e({ mantenciones: undefined }), "mantenciones_invalidas");
+  assert.equal(e({ precioEsperado: "" }), "precio_esperado_invalido");
+  assert.equal(e({ precioEsperado: 0 }), "precio_esperado_invalido");
+  assert.equal(e({ precioEsperado: -5 }), "precio_esperado_invalido");
+  for (const k of ["duenos", "prenda", "mantenciones", "precio_esperado"]) assert.ok(MENSAJES_WEB[k === "precio_esperado" ? "precio_esperado_invalido" : k === "duenos" ? "duenos_invalido" : k === "prenda" ? "prenda_invalida" : "mantenciones_invalidas"]);
+  // Las demás solicitudes no exigen correo ni comentario.
+  assert.ok(validarSolicitudWeb(base({ email: "", mensaje: "" }), AHORA).ok);
+});
+
+test("Teléfono con código de país: se arma el número internacional y se valida por país", () => {
+  const t = (codigoPais, telefono) => validarSolicitudWeb(base({ codigoPais, telefono }), AHORA);
+  assert.equal(t("56", "9 1234 5678").value.contacto.telefono, "+56912345678");
+  assert.equal(t("+56", "912345678").value.contacto.telefono, "+56912345678");
+  assert.equal(t("56", "0912345678").value.contacto.telefono, "+56912345678", "un 0 al comienzo se ignora");
+  assert.equal(t("56", "91234567").error, "telefono_invalido", "Chile: 9 dígitos");
+  assert.equal(t("56", "9123456789").error, "telefono_invalido");
+  assert.equal(t("54", "11 2345 6789").value.contacto.telefono, "+541123456789");
+  assert.equal(t("51", "912345678").value.contacto.telefono, "+51912345678");
+  assert.equal(t("1", "212 555 0123").value.contacto.telefono, "+12125550123");
+  assert.equal(t("54", "123").error, "telefono_invalido");
+  assert.equal(t("999", "912345678").error, "codigo_pais_invalido");
+  assert.equal(t("abc", "912345678").error, "codigo_pais_invalido");
+  assert.equal(t("56", "").error, "telefono_invalido");
+  assert.ok(MENSAJES_WEB.codigo_pais_invalido);
+  assert.equal(validarTelefonoInternacional("56", "9 8765 4321").value, "+56987654321");
+  assert.ok(PAISES.some((p) => p.id === "CL" && p.codigo === "56") && PAISES[0].id === "CL", "Chile va primero");
 });
 
 test("Resumen para el ejecutivo y mensajes para el visitante", () => {

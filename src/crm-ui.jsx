@@ -3,6 +3,7 @@
  */
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { TRANSMISIONES, COMBUSTIBLES } from "../supabase/functions/api/ventas-core.js";
+import { InputDinero } from "./campo-dinero.jsx";
 import { camposDesdePatente, aplicarCampos, NOMBRE_CAMPO } from "./datos-patente.js";
 
 export const INPUT = "border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-amber-500 w-full";
@@ -341,6 +342,32 @@ export function CamposVehiculo({ v, set, bloqueado = false }) {
       <Campo etiqueta="Combustible">
         <select value={v.combustible || ""} disabled={bloqueado} onChange={(e) => set({ ...v, combustible: e.target.value })} className={INPUT}><option value="">—</option>{COMBUSTIBLES.map((t) => <option key={t}>{t}</option>)}</select>
       </Campo>
+    </div>
+  );
+}
+
+/** Lo que declara el dueño de un vehículo que quiere vendernos o consignar: dueños, prenda, mantenciones en la marca y precio esperado. */
+export function DatosDelDueno({ o }) {
+  if (!o || (o.duenos == null && !o.prenda && !o.mantenciones && o.precioEsperado == null)) return null;
+  const sn = (v) => (v === "si" ? "Sí" : v === "no" ? "No" : "—");
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 border border-stone-200 bg-stone-50 p-3 text-sm">
+      <div><p className="text-[11px] uppercase tracking-wide text-stone-400">Dueños</p><p className="text-stone-900">{o.duenos ?? "—"}</p></div>
+      <div><p className="text-[11px] uppercase tracking-wide text-stone-400">Con prenda</p><p className={o.prenda === "si" ? "text-rose-700 font-medium" : "text-stone-900"}>{sn(o.prenda)}</p></div>
+      <div><p className="text-[11px] uppercase tracking-wide text-stone-400">Mantenciones en la marca</p><p className="text-stone-900">{sn(o.mantenciones)}</p></div>
+      <div><p className="text-[11px] uppercase tracking-wide text-stone-400">Precio esperado</p><p className="font-mono text-stone-900">{o.precioEsperado != null ? clp(o.precioEsperado) : "—"}</p></div>
+    </div>
+  );
+}
+
+/** Los mismos datos para editarlos en el lead (opcionales: el sitio web los pide siempre; aquí el ejecutivo los puede completar). */
+export function CamposCondiciones({ v, set }) {
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+      <Campo etiqueta="Número de dueños"><input type="number" min="1" max="30" value={v.duenos ?? ""} onChange={(e) => set({ ...v, duenos: e.target.value })} className={INPUT} /></Campo>
+      <Campo etiqueta="¿Tiene prenda?"><select value={v.prenda || ""} onChange={(e) => set({ ...v, prenda: e.target.value })} className={INPUT}><option value="">—</option><option value="si">Sí</option><option value="no">No</option></select></Campo>
+      <Campo etiqueta="¿Mantenciones en la marca?"><select value={v.mantenciones || ""} onChange={(e) => set({ ...v, mantenciones: e.target.value })} className={INPUT}><option value="">—</option><option value="si">Sí</option><option value="no">No</option></select></Campo>
+      <Campo etiqueta="Precio esperado ($)"><InputDinero value={v.precioEsperado ?? ""} onChange={(e) => set({ ...v, precioEsperado: e.target.value })} className={`${INPUT} font-mono`} /></Campo>
     </div>
   );
 }

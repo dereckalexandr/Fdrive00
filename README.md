@@ -781,3 +781,10 @@ En *Usuarios* hay un botón **Eliminar** (solo la cuenta maestra), además de De
 - Se muestra qué tiene asociado: si tiene **ventas, compras, consignaciones o fichas de inspección/valorizaciones del Inspector, no se puede eliminar** (se perdería el historial y las comisiones): se deja desactivada.
 - Lo demás (leads, tareas, tasaciones, inspecciones pedidas, validaciones, avisos) **se conserva pero queda sin responsable**; el aviso lo indica con las cantidades.
 - Hay que escribir el nombre completo para confirmar. El RUT queda libre para crear otra persona y la acción queda en la Bitácora (`usuario.eliminar`, sin claves). Servidor: `usuarios.impacto` y `usuarios.delete`; pruebas: `tests/usuarios-eliminar-api.test.mjs`.
+
+## Sitio web · «Vende o consigna tu auto»: todo obligatorio y más datos
+
+- **Todos los campos son obligatorios** (patente, marca, modelo, año, kilometraje, sucursal si hay más de una, nombre, teléfono, **correo** y **comentarios**), y el servidor lo vuelve a exigir.
+- **Teléfono con código de área:** lista desplegable de países (Chile +56 por defecto; Argentina, Perú, Bolivia, Colombia, Brasil, México, España, EE. UU./Canadá, etc.) y el número aparte. Se guarda como número internacional (`+56987654321`); en Chile deben ser 9 dígitos (un 0 al comienzo se ignora) y en los demás países entre 6 y 12. Aplica a **todos** los formularios del sitio (consulta, visita, financiamiento y vender), y el botón de WhatsApp del CRM usa ese número tal cual.
+- **Datos nuevos del dueño:** **número de dueños**, **¿tiene prenda?** (Sí/No, lista), **¿mantenciones en la marca?** (Sí/No, lista) y **precio esperado ($)** (con puntos de miles). Quedan en el lead (`vehiculo_ofrecido`), en las notas del lead y en la solicitud del Tasador. En el CRM se ven en la ficha del lead y en las secciones de **Compra** y **Consignación** (la prenda aparece en rojo); en la consignación el precio esperado se propone como precio de publicación. El ejecutivo también puede editarlos al crear o editar un lead de compra o consignación (allí son opcionales).
+- Sin SQL. Pruebas: `tests/publico-core.test.mjs` y `tests/publico-api.test.mjs`.

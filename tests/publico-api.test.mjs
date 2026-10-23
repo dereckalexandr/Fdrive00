@@ -212,19 +212,22 @@ test("Cotizar financiamiento: el lead guarda el pie y recibe la cuota referencia
 
 test("Vender o consignar: lead de compra o consignación y una tasación esperando al Tasador", async () => {
   nuevaIp();
-  const datos = { patente: "ab-cd 12", marca: "Toyota", modelo: "Yaris", anio: 2018, km: 78000 };
+  const datos = { patente: "ab-cd 12", marca: "Toyota", modelo: "Yaris", anio: 2018, km: 78000, duenos: 2, prenda: "no", mantenciones: "si", precioEsperado: 8500000 };
   const r = await sol("vender", { ...datos, modalidad: "consignar", localId: L1 });
   assert.equal(r.status, 200, JSON.stringify(r));
   const l = leadsWeb()[leadsWeb().length - 1];
   assert.equal(l.tipo, "consignacion");
   assert.match(l.vehiculo_interes, /CONSIGNA: Toyota Yaris 2018 · ABCD12/);
   assert.equal(l.vehiculo_id ?? null, null);
+  assert.match(l.notas, /2 dueños · prenda: no · mantenciones en la marca: sí · precio esperado \$8\.500\.000/);
+  assert.deepEqual([l.vehiculo_ofrecido.duenos, l.vehiculo_ofrecido.prenda, l.vehiculo_ofrecido.mantenciones, l.vehiculo_ofrecido.precioEsperado], [2, "no", "si", 8500000], "los datos del dueño quedan en el lead");
   const t = db.tablas.tasaciones.find((x) => x.patente === "ABCD12");
   assert.ok(t, "se creó la tasación");
   assert.equal(t.estado, "pendiente");
   assert.equal(t.tipo, "directa");
   assert.equal(t.contacto.nombre, "Pedro Soto");
   assert.equal(t.lead_id ?? null, null, "no se liga al lead para no tocar su parte de pago");
+  assert.match(t.notas_solicitud, /Espera \$8\.500\.000 · 2 dueño\(s\) · prenda: no · mantenciones en la marca: sí/, "el Tasador ve lo que declaró el dueño");
   // El Tasador la ve en su cola.
   const cola = await ve(U.t1.token, "tasaciones.list", { vista: "cola" });
   assert.ok(cola.tasaciones.some((x) => x.id === t.id));
@@ -233,6 +236,25 @@ test("Vender o consignar: lead de compra o consignación y una tasación esperan
   assert.equal((await sol("vender", { ...datos, km: "", modalidad: "vender", localId: L1 })).error, "km_invalido");
   assert.equal((await sol("vender", { ...datos, patente: "ZZZZ11", modalidad: "vender", localId: L1 })).status, 200);
   assert.equal(leadsWeb()[leadsWeb().length - 1].tipo, "compra");
+  // Todo es obligatorio al vender o consignar.
+  nuevaIp();
+  for (const [campo, valor, error] of [["email", "", "email_requerido"], ["mensaje", "", "mensaje_requerido"], ["duenos", "", "duenos_invalido"], ["prenda", "", "prenda_invalida"], ["mantenciones", "", "mantenciones_invalidas"], ["precioEsperado", "", "precio_esperado_invalido"]]) {
+    assert.equal((await sol("vender", { ...datos, patente: "YYYY11", modalidad: "vender", localId: L1, [campo]: valor })).error, error, campo);
+  }
+});
+
+test("Vender o consignar: el teléfono lleva código de país y se guarda como número internacional", async () => {
+  nuevaIp();
+  const datos = { patente: "PPPP11", marca: "Kia", modelo: "Rio", anio: 2020, km: 30000, duenos: 1, prenda: "si", mantenciones: "si", precioEsperado: 7000000, modalidad: "vender", localId: L1 };
+  assert.equal((await sol("vender", { ...datos, codigoPais: "56", telefono: "9 8765 4321" })).status, 200);
+  const l = leadsWeb()[leadsWeb().length - 1];
+  const cli = db.tablas.clientes.find((c) => c.id === l.cliente_id);
+  assert.equal(cli.telefono, "+56987654321");
+  assert.equal(l.vehiculo_ofrecido.prenda, "si");
+  assert.equal((await sol("vender", { ...datos, patente: "PPPP22", codigoPais: "56", telefono: "98765" })).error, "telefono_invalido");
+  assert.equal((await sol("vender", { ...datos, patente: "PPPP33", codigoPais: "000", telefono: "987654321" })).error, "codigo_pais_invalido");
+  assert.equal((await sol("vender", { ...datos, patente: "PPPP44", codigoPais: "54", telefono: "11 2345 6789" })).status, 200);
+  assert.equal(db.tablas.clientes.find((c) => c.id === leadsWeb()[leadsWeb().length - 1].cliente_id).telefono, "+541123456789");
 });
 
 test("Sin ejecutivos habilitados el lead queda sin asignar; con varios locales hay que elegir uno", async () => {
@@ -246,7 +268,7 @@ test("Sin ejecutivos habilitados el lead queda sin asignar; con varios locales h
   assert.ok(db.tablas.lead_eventos.some((e) => e.lead_id === l.id && /sin ejecutivos habilitados/.test(e.detalle)));
   // Dos locales y sin vehículo: se debe indicar cuál.
   nuevaIp();
-  const datos = { patente: "QQQQ11", marca: "Mazda", modelo: "3", anio: 2019, km: 50000, modalidad: "vender" };
+  const datos = { patente: "QQQQ11", marca: "Mazda", modelo: "3", anio: 2019, km: 50000, modalidad: "vender", duenos: 1, prenda: "no", mantenciones: "no", precioEsperado: 9000000 };
   assert.equal((await sol("vender", datos)).error, "sin_local");
   assert.equal((await sol("vender", { ...datos, localId: L2 })).status, 200);
   assert.equal(leadsWeb()[leadsWeb().length - 1].local_id, L2);

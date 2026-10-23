@@ -40,7 +40,13 @@ export function validarVehiculoTasacion(input) {
   const combustible = texto(i.combustible, 20);
   if (transmision && !TRANSMISIONES.includes(transmision)) return { ok: false, error: "transmision_invalida" };
   if (combustible && !COMBUSTIBLES.includes(combustible)) return { ok: false, error: "combustible_invalido" };
-  return { ok: true, value: { patente, marca, modelo, version: texto(i.version, 60) || null, anio, km, color: texto(i.color, 30) || null, transmision: transmision || null, combustible: combustible || null } };
+  // Lo que declara el dueño (opcional aquí; el formulario del sitio web lo exige): número de dueños, prenda, mantenciones en la marca y precio esperado.
+  const extra = {};
+  if (i.duenos !== undefined && i.duenos !== null && i.duenos !== "") { const d = entero(i.duenos, 1, 30); if (d === null || Number.isNaN(d)) return { ok: false, error: "duenos_invalido" }; extra.duenos = d; }
+  if (i.prenda !== undefined && i.prenda !== null && i.prenda !== "") { if (!["si", "no"].includes(i.prenda)) return { ok: false, error: "prenda_invalida" }; extra.prenda = i.prenda; }
+  if (i.mantenciones !== undefined && i.mantenciones !== null && i.mantenciones !== "") { if (!["si", "no"].includes(i.mantenciones)) return { ok: false, error: "mantenciones_invalidas" }; extra.mantenciones = i.mantenciones; }
+  if (i.precioEsperado !== undefined && i.precioEsperado !== null && i.precioEsperado !== "") { const pe = entero(i.precioEsperado, 1, 2_000_000_000); if (pe === null || Number.isNaN(pe)) return { ok: false, error: "precio_esperado_invalido" }; extra.precioEsperado = pe; }
+  return { ok: true, value: { patente, marca, modelo, version: texto(i.version, 60) || null, anio, km, color: texto(i.color, 30) || null, transmision: transmision || null, combustible: combustible || null, ...extra } };
 }
 
 /** Solicitud de un ejecutivo: el vehículo y una nota para el Tasador. */

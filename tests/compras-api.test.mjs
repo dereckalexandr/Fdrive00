@@ -270,7 +270,7 @@ test("Cancelar y anular una compra", async () => {
 test("Lead que llega por el sitio web: se asigna a quien compra y se ofrece su tasación", async () => {
   nuevaIp();
   const pat = "WEBV11";
-  const r = await api({ action: "public", op: "solicitud", tipo: "vender", nombre: "Pedro Web", telefono: "955500123", acepta: true, abiertoEn: Date.now() - 10000, web: "", localId: L1, patente: pat, marca: "Mazda", modelo: "3", anio: 2019, km: 50000, modalidad: "vender" });
+  const r = await api({ action: "public", op: "solicitud", tipo: "vender", nombre: "Pedro Web", codigoPais: "56", telefono: "955500123", email: "pedro@web.cl", mensaje: "Auto en buen estado", duenos: 1, prenda: "no", mantenciones: "si", precioEsperado: 9000000, acepta: true, abiertoEn: Date.now() - 10000, web: "", localId: L1, patente: pat, marca: "Mazda", modelo: "3", anio: 2019, km: 50000, modalidad: "vender" });
   assert.equal(r.status, 200, JSON.stringify(r));
   const lead = db.tablas.leads.find((l) => l.vehiculo_ofrecido && l.vehiculo_ofrecido.patente === pat);
   assert.ok(lead, "el lead guarda el vehículo ofrecido");

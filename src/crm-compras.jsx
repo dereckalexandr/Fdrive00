@@ -12,7 +12,7 @@ import React, { useState } from "react";
 import { InputDinero } from "./campo-dinero.jsx";
 import { MEDIOS_PAGO } from "../supabase/functions/api/ventas-core.js";
 import { compraNombre, consignacionNombre, COMPRA_ABIERTA, CONSIGNACION_ABIERTA, validarOferta, validarConsignacion } from "../supabase/functions/api/compras-core.js";
-import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, hace, Aviso, Cargando, Tarjeta, Campo, Pestanas, useCarga, mensajeError } from "./crm-ui.jsx";
+import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, hace, Aviso, Cargando, Tarjeta, Campo, Pestanas, useCarga, mensajeError, DatosDelDueno } from "./crm-ui.jsx";
 
 const COLOR_COMPRA = { oferta: "bg-amber-100 text-amber-800", aceptada: "bg-sky-100 text-sky-800", pago_pendiente: "bg-violet-100 text-violet-800", comprada: "bg-emerald-100 text-emerald-800", rechazada: "bg-stone-200 text-stone-600", anulada: "bg-stone-200 text-stone-600", cancelada: "bg-stone-200 text-stone-600" };
 const COLOR_CONS = { en_validacion: "bg-amber-100 text-amber-800", vigente: "bg-emerald-100 text-emerald-800", vendida: "bg-sky-100 text-sky-800", devuelta: "bg-stone-200 text-stone-600", cancelada: "bg-stone-200 text-stone-600" };
@@ -114,6 +114,7 @@ export function SeccionCompra({ api, lead, datos, onCambio, avisar }) {
   return (
     <div className="bg-white border border-stone-200 p-4 flex flex-col gap-3">
       <p className="text-sm text-stone-700">Compra del vehículo</p>
+      <DatosDelDueno o={o} />
       <p className="text-xs text-stone-500">Vehículo que ofrece el cliente: <strong className="text-stone-800">{nombreVeh(o) || "sin datos"}</strong>{o.km != null ? ` · ${Number(o.km).toLocaleString("es-CL")} km` : ""}</p>
 
       {!abierta && !cerrado && puedeOperar && (
@@ -194,7 +195,7 @@ function Consignacion({ api, c, puedeOperar, onCambio, avisar }) {
 
 export function SeccionConsignacion({ api, lead, datos, onCambio, avisar }) {
   const { datos: lista, recargar } = useCarga(() => api("consignaciones.list", { vista: "lead", leadId: lead.id }), [api, lead.id, datos.eventos.length]);
-  const [f, setF] = useState({ precioPiso: "", precioPublicacion: "", plazoDias: 90, notas: "" });
+  const [f, setF] = useState({ precioPiso: "", precioPublicacion: lead.vehiculo_ofrecido && lead.vehiculo_ofrecido.precioEsperado ? String(lead.vehiculo_ofrecido.precioEsperado) : "", plazoDias: 90, notas: "" });
   const [error, setError] = useState("");
   const [ocupado, setOcupado] = useState(false);
   if (!lista) return <Cargando />;
@@ -213,6 +214,7 @@ export function SeccionConsignacion({ api, lead, datos, onCambio, avisar }) {
   return (
     <div className="bg-white border border-stone-200 p-4 flex flex-col gap-3">
       <p className="text-sm text-stone-700">Consignación del vehículo</p>
+      <DatosDelDueno o={o} />
       <p className="text-xs text-stone-500">Vehículo del dueño: <strong className="text-stone-800">{nombreVeh(o) || "sin datos"}</strong>{o.km != null ? ` · ${Number(o.km).toLocaleString("es-CL")} km` : ""}</p>
       {!abierta && !cerrado && datos.puedeEditar && lista.consignaciones.every((c) => !["vendida"].includes(c.estado)) && (
         <div className="border border-stone-200 bg-stone-50 p-3 flex flex-col gap-3">

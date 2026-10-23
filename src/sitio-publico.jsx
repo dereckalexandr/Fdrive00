@@ -12,7 +12,7 @@
  */
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { InputDinero } from "./campo-dinero.jsx";
-import { PLAZOS_FINANCIAMIENTO, MENSAJES_WEB } from "../supabase/functions/api/publico-core.js";
+import { PLAZOS_FINANCIAMIENTO, MENSAJES_WEB, PAISES } from "../supabase/functions/api/publico-core.js";
 import { camposDesdePatente } from "./datos-patente.js";
 
 const URL_FUNCION = import.meta.env.VITE_SUPABASE_URL ? `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/api` : "";
@@ -113,7 +113,7 @@ const mananaALas11 = () => { const d = new Date(); d.setDate(d.getDate() + 1); d
 
 function Formulario({ tipo, vehiculo, locales = [], empresa, onCerrar }) {
   const [abiertoEn] = useState(() => Date.now()); // momento en que se abrió: los robots envían al instante
-  const [f, setF] = useState({ nombre: "", telefono: "", email: "", mensaje: "", fechaHora: mananaALas11(), pie: "", plazo: 48, patente: "", marca: "", modelo: "", anio: "", km: "", modalidad: "vender", localId: locales.length === 1 ? locales[0].id : "", acepta: false, web: "" });
+  const [f, setF] = useState({ nombre: "", telefono: "", email: "", mensaje: "", fechaHora: mananaALas11(), pie: "", plazo: 48, patente: "", marca: "", modelo: "", anio: "", km: "", modalidad: "vender", codigoPais: "56", duenos: "", prenda: "", mantenciones: "", precioEsperado: "", localId: locales.length === 1 ? locales[0].id : "", acepta: false, web: "" });
   const [estado, setEstado] = useState({ enviando: false, error: "", listo: null });
   const [verPrivacidad, setVerPrivacidad] = useState(false);
   const [buscandoPatente, setBuscandoPatente] = useState(false);
@@ -136,11 +136,11 @@ function Formulario({ tipo, vehiculo, locales = [], empresa, onCerrar }) {
     ev.preventDefault();
     setEstado({ enviando: true, error: "", listo: null });
     try {
-      const datos = { tipo, nombre: f.nombre, telefono: f.telefono, email: f.email, mensaje: f.mensaje, acepta: f.acepta, abiertoEn, web: f.web, localId: f.localId || undefined };
+      const datos = { tipo, nombre: f.nombre, codigoPais: f.codigoPais, telefono: f.telefono, email: f.email, mensaje: f.mensaje, acepta: f.acepta, abiertoEn, web: f.web, localId: f.localId || undefined };
       if (vehiculo) datos.vehiculoId = vehiculo.id;
       if (tipo === "visita") datos.fechaHora = f.fechaHora ? new Date(f.fechaHora).toISOString() : "";
       if (tipo === "financiamiento") { datos.pie = f.pie === "" ? "" : Number(f.pie); datos.plazo = Number(f.plazo); }
-      if (tipo === "vender") Object.assign(datos, { patente: f.patente, marca: f.marca, modelo: f.modelo, anio: f.anio === "" ? "" : Number(f.anio), km: f.km === "" ? "" : Number(f.km), modalidad: f.modalidad });
+      if (tipo === "vender") Object.assign(datos, { patente: f.patente, marca: f.marca, modelo: f.modelo, anio: f.anio === "" ? "" : Number(f.anio), km: f.km === "" ? "" : Number(f.km), modalidad: f.modalidad, duenos: f.duenos === "" ? "" : Number(f.duenos), prenda: f.prenda, mantenciones: f.mantenciones, precioEsperado: f.precioEsperado === "" ? "" : Number(f.precioEsperado) });
       const r = await llamar("solicitud", datos);
       setEstado({ enviando: false, error: "", listo: r });
     } catch (e) { setEstado({ enviando: false, error: textoError(e), listo: null }); }
@@ -179,15 +179,26 @@ function Formulario({ tipo, vehiculo, locales = [], empresa, onCerrar }) {
             <Campo etiqueta="Modelo"><input value={f.modelo} onChange={(e) => set("modelo", e.target.value)} className={INPUT} required /></Campo>
             <Campo etiqueta="Año"><input type="number" value={f.anio} onChange={(e) => set("anio", e.target.value)} className={INPUT} required /></Campo>
             <Campo etiqueta="Kilometraje"><input type="number" min="0" value={f.km} onChange={(e) => set("km", e.target.value)} className={INPUT} required /></Campo>
+            <Campo etiqueta="Número de dueños"><input type="number" min="1" max="30" value={f.duenos} onChange={(e) => set("duenos", e.target.value)} className={INPUT} placeholder="Ej. 1" required /></Campo>
+            <Campo etiqueta="¿Tiene prenda?"><select value={f.prenda} onChange={(e) => set("prenda", e.target.value)} className={INPUT} required><option value="">Elige…</option><option value="si">Sí</option><option value="no">No</option></select></Campo>
+            <Campo etiqueta="¿Mantenciones en la marca?"><select value={f.mantenciones} onChange={(e) => set("mantenciones", e.target.value)} className={INPUT} required><option value="">Elige…</option><option value="si">Sí</option><option value="no">No</option></select></Campo>
+            <Campo etiqueta="Precio esperado ($)"><InputDinero value={f.precioEsperado} onChange={(e) => set("precioEsperado", e.target.value)} className={INPUT} placeholder="Ej. 8.500.000" required /></Campo>
           </div>
           {locales.length > 1 && <Campo etiqueta="¿En qué sucursal te atendemos?"><select value={f.localId} onChange={(e) => set("localId", e.target.value)} className={INPUT} required><option value="">Elige…</option>{locales.map((l) => <option key={l.id} value={l.id}>{l.nombre}</option>)}</select></Campo>}
         </>
       )}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <Campo etiqueta="Tu nombre"><input value={f.nombre} onChange={(e) => set("nombre", e.target.value)} className={INPUT} autoComplete="name" required /></Campo>
-        <Campo etiqueta="Teléfono"><input type="tel" value={f.telefono} onChange={(e) => set("telefono", e.target.value)} className={INPUT} autoComplete="tel" placeholder="9 1234 5678" required /></Campo>
+        <Campo etiqueta="Teléfono" ayuda={f.codigoPais === "56" ? "Chile: 9 dígitos, por ejemplo 9 1234 5678." : "Escribe el número sin el código de área."}>
+          <div className="flex gap-2">
+            <select value={f.codigoPais} onChange={(e) => set("codigoPais", e.target.value)} className={`${INPUT} !w-[11.5rem] shrink-0`} aria-label="Código de área del país" required>
+              {PAISES.map((pa) => <option key={pa.id} value={pa.codigo}>{pa.nombre} (+{pa.codigo})</option>)}
+            </select>
+            <input type="tel" value={f.telefono} onChange={(e) => set("telefono", e.target.value)} className={INPUT} autoComplete="tel-national" inputMode="tel" placeholder={f.codigoPais === "56" ? "9 1234 5678" : "Número"} required />
+          </div>
+        </Campo>
       </div>
-      <Campo etiqueta="Correo (opcional)"><input type="email" value={f.email} onChange={(e) => set("email", e.target.value)} className={INPUT} autoComplete="email" /></Campo>
+      <Campo etiqueta={tipo === "vender" ? "Correo" : "Correo (opcional)"}><input type="email" value={f.email} onChange={(e) => set("email", e.target.value)} className={INPUT} autoComplete="email" required={tipo === "vender"} /></Campo>
       {tipo === "visita" && <Campo etiqueta="¿Cuándo te acomoda venir?" ayuda="Es una preferencia: te confirmaremos el horario."><input type="datetime-local" value={f.fechaHora} onChange={(e) => set("fechaHora", e.target.value)} className={INPUT} required /></Campo>}
       {tipo === "financiamiento" && (
         <div className="grid grid-cols-2 gap-3">
@@ -195,7 +206,7 @@ function Formulario({ tipo, vehiculo, locales = [], empresa, onCerrar }) {
           <Campo etiqueta="Plazo"><select value={f.plazo} onChange={(e) => set("plazo", e.target.value)} className={INPUT}>{PLAZOS_FINANCIAMIENTO.map((p) => <option key={p} value={p}>{p} cuotas</option>)}</select></Campo>
         </div>
       )}
-      <Campo etiqueta={tipo === "consulta" ? "Tu consulta" : "Algo que quieras contarnos (opcional)"}><textarea rows={3} maxLength={500} value={f.mensaje} onChange={(e) => set("mensaje", e.target.value)} className={INPUT} /></Campo>
+      <Campo etiqueta={tipo === "consulta" ? "Tu consulta" : tipo === "vender" ? "Comentarios sobre tu auto" : "Algo que quieras contarnos (opcional)"}><textarea rows={3} maxLength={500} value={f.mensaje} onChange={(e) => set("mensaje", e.target.value)} className={INPUT} required={tipo === "vender"} minLength={tipo === "vender" ? 3 : undefined} /></Campo>
 
       {/* Campo trampa: está fuera de la pantalla; las personas no lo ven, los robots lo llenan. */}
       <div aria-hidden="true" style={{ position: "absolute", left: "-10000px", width: 1, height: 1, overflow: "hidden" }}>
