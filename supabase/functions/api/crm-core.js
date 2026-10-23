@@ -240,7 +240,8 @@ export const CONFIG_DEFECTO = {
   motivos_perdida: ["Precio", "Compró en otro lugar", "Sin respuesta", "Cambió de idea", "Financiamiento rechazado"],
   meta_mensual_unidades: 0,
   dias_reserva: 3,
-  horas_sin_contacto: 4,
+  horas_primer_contacto: 2,   // plazo para el primer contacto: pasado esto, el lead aparece en rojo para el ejecutivo
+  horas_sin_contacto: 4,      // y pasado esto, también para el Jefe Local
   horas_tasacion: 8,
   horas_inspeccion: 8,
   horas_validacion: 8,
@@ -263,7 +264,7 @@ export function validarConfig(clave, valor) {
     if (limpio.length === 0 || limpio.some((v) => v.length > 60)) return { ok: false };
     return { ok: true, value: limpio };
   }
-  if (clave === "horas_sin_contacto" || clave === "horas_tasacion" || clave === "horas_inspeccion" || clave === "horas_validacion" || clave === "dias_detenido") {
+  if (clave === "horas_primer_contacto" || clave === "horas_sin_contacto" || clave === "horas_tasacion" || clave === "horas_inspeccion" || clave === "horas_validacion" || clave === "dias_detenido") {
     const n = Number(valor);
     const max = clave === "dias_detenido" ? 90 : 168;
     if (!Number.isInteger(n) || n < 1 || n > max) return { ok: false };

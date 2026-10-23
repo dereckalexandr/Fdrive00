@@ -24,6 +24,7 @@ import { ModuloAnuncios } from "./crm-anuncios.jsx";
 import { ModuloMarketing } from "./crm-marketing.jsx";
 import { ErrorBoundary } from "./error-boundary.jsx";
 import { HabilitacionesEquipo } from "./crm-equipo.jsx";
+import { Hoy, ProximaAccionModal } from "./crm-hoy.jsx";
 import { SeccionCompra, SeccionConsignacion, ModuloCompras } from "./crm-compras.jsx";
 import { etapaDeOperacion, tipoLeadNombre, TIPOS_LEAD, validarVehiculoOfrecido } from "../supabase/functions/api/compras-core.js";
 import {
@@ -90,6 +91,7 @@ function LeadFicha({ api, leadId, catalogos, onCerrar, onCambio, onEditar }) {
   const [detalle, setDetalle] = useState("");
   const [motivo, setMotivo] = useState("");
   const [pidePerdida, setPidePerdida] = useState(false);
+  const [siguiente, setSiguiente] = useState(false);
 
   const puedeAsignar = datos && datos.puedeEditar && catalogos.puedeAsignar;
   useEffect(() => {
@@ -105,18 +107,19 @@ function LeadFicha({ api, leadId, catalogos, onCerrar, onCambio, onEditar }) {
   const esVenta = tipoLead === "venta";
   const ofrecido = lead.vehiculo_ofrecido || {};
 
-  const accion = async (fn) => { setMsg(""); try { await fn(); await recargar(); onCambio(); } catch (e) { setMsg(mensajeError(e)); } };
+  const accion = async (fn) => { setMsg(""); try { const r = await fn(); await recargar(); onCambio(); if (r && r.pedirProximaAccion) setSiguiente(true); } catch (e) { setMsg(mensajeError(e)); } };
   const mover = (etapa) => {
     if (etapa === "perdido") { setPidePerdida(true); return; }
     accion(() => api("leads.mover", { id: lead.id, etapa }));
   };
-  const registrar = () => accion(async () => { await api("leads.nota", { id: lead.id, tipo, detalle }); setDetalle(""); });
+  const registrar = () => accion(async () => { const r = await api("leads.nota", { id: lead.id, tipo, detalle }); setDetalle(""); return r; });
   const pp = lead.parte_pago || {};
   const fin = lead.financiamiento || {};
 
   return (
     <Modal titulo={cliente ? cliente.nombre : "Lead"} onCerrar={onCerrar} ancho="max-w-3xl">
       {msg && <Aviso>{msg}</Aviso>}
+      {siguiente && <ProximaAccionModal api={api} leadId={lead.id} cliente={cliente ? cliente.nombre : "el cliente"} onCerrar={() => setSiguiente(false)} onAgendada={async () => { await recargar(); onCambio(); }} />}
 
       <div className="bg-white border border-stone-200 p-4 flex flex-col gap-3">
         <div className="flex flex-wrap items-center gap-2">
@@ -450,6 +453,7 @@ function Leads({ api, catalogos, abrirLead, version, onCambio }) {
   const [perdiendo, setPerdiendo] = useState(null);
   const [motivo, setMotivo] = useState("");
   const [sobre, setSobre] = useState("");
+  const [siguiente, setSiguiente] = useState(null);
 
   const mapas = useMemo(() => {
     if (!datos) return {};
@@ -461,7 +465,7 @@ function Leads({ api, catalogos, abrirLead, version, onCambio }) {
     if (etapa === lead.etapa) return;
     if (ETAPAS.find((e) => e.id === etapa && e.automatica)) { setMsg(mensajeError({ message: "etapa_automatica" })); return; }
     if (etapa === "perdido" && !motivoPerdida) { setPerdiendo(lead); return; }
-    try { await api("leads.mover", { id: lead.id, etapa, motivo: motivoPerdida }); await recargar(); onCambio(); }
+    try { const r = await api("leads.mover", { id: lead.id, etapa, motivo: motivoPerdida }); await recargar(); onCambio(); if (r && r.pedirProximaAccion) setSiguiente(lead); }
     catch (e) { setMsg(mensajeError(e)); }
   };
 
@@ -520,6 +524,7 @@ function Leads({ api, catalogos, abrirLead, version, onCambio }) {
         </Modal>
       )}
       {form && <FormLead api={api} catalogos={catalogos} onCerrar={() => setForm(false)} onGuardado={async () => { setForm(false); await recargar(); onCambio(); }} />}
+      {siguiente && <ProximaAccionModal api={api} leadId={siguiente.id} cliente={(mapas.c.get(siguiente.cliente_id) || {}).nombre || "el cliente"} onCerrar={() => setSiguiente(null)} onAgendada={async () => { await recargar(); onCambio(); }} />}
     </>
   );
 }
@@ -674,7 +679,7 @@ export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador, 
   const can = (p) => esAdmin || permisos.includes(p);
   const usaLeads = can("leads.propios") || can("leads.local") || can("leads.asignar");
   const [localSel, setLocalSel] = useState("");
-  const [tab, setTab] = useGuardado(esAdmin ? "ventas-admin" : "ventas", usaLeads ? "inicio" : "inventario", ["inicio", "leads", "agenda", "ventas", "gestion", "tasaciones", "aprobaciones", "compras", "inspecciones", "fichas", "equipo", "validaciones", "anuncios", "marketing", "inventario", "clientes"]);
+  const [tab, setTab] = useGuardado(esAdmin ? "ventas-admin" : "ventas", usaLeads ? "hoy" : "inventario", ["hoy", "inicio", "leads", "agenda", "ventas", "gestion", "tasaciones", "aprobaciones", "compras", "inspecciones", "fichas", "equipo", "validaciones", "anuncios", "marketing", "inventario", "clientes"]);
   const [version, setVersion] = useState(0);
   const [leadAbierto, setLeadAbierto] = useState(null);
   const [leadEditando, setLeadEditando] = useState(null);
@@ -704,7 +709,7 @@ export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador, 
   };
   const puedeCompras = can("compras.operar") || can("consignaciones.operar") || can("leads.asignar");
   const opciones = [];
-  if (usaLeads) opciones.push(["inicio", "Inicio"], ["leads", "Leads"]);
+  if (usaLeads) opciones.push(["hoy", "Hoy"], ["inicio", "Inicio"], ["leads", "Leads"]);
   if (catalogos.puedeAgenda) opciones.push(["agenda", "Agenda"]);
   if (catalogos.puedeComision) opciones.push(["ventas", "Ventas"]);
   if (puedeAprobar) opciones.push(["gestion", "Gestión"], ["tasaciones", "Tasaciones"], ["aprobaciones", "Aprobaciones", pend.datos || 0]);
@@ -719,7 +724,7 @@ export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador, 
   // Si la pestaña recordada ya no está disponible para esta persona, se usa la primera.
   const tabVigente = opciones.some((o) => o[0] === tab) ? tab : (opciones[0] || [])[0];
   const GRUPOS = [
-    { titulo: "Trabajo diario", ids: ["inicio", "leads", "agenda", "clientes", "inventario"] },
+    { titulo: "Trabajo diario", ids: ["hoy", "inicio", "leads", "agenda", "clientes", "inventario"] },
     { titulo: "Comercial", ids: ["ventas", "gestion", "aprobaciones", "compras", "tasaciones", "inspecciones", "fichas", "equipo"] },
     { titulo: "Operación", ids: ["validaciones", "anuncios", "marketing"] },
   ];
@@ -735,6 +740,7 @@ export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador, 
       )}
       <div className="lg:hidden"><Pestanas valor={tabVigente} onCambio={setTab} opciones={opciones} /></div>
       <ErrorBoundary clave={tabVigente}>
+      {tabVigente === "hoy" && <Hoy api={api} catalogos={catalogos} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
       {tabVigente === "inicio" && <Inicio api={api} catalogos={catalogos} abrirLead={setLeadAbierto} irA={setTab} version={version} onCambio={subir} />}
       {tabVigente === "leads" && <Leads api={api} catalogos={catalogos} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
       {tabVigente === "tasaciones" && <ModuloTasaciones api={api} permisos={permisos} esAdmin={esAdmin} renderEstimador={renderEstimador} />}

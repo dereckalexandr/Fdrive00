@@ -94,6 +94,18 @@ for (const i of [0, 1, 2]) {
   await ve(U.tasador.token, "tasaciones.guardar", { id: t.id, borrador: { inspeccion: { key: `inspeccion::${U.insp.id}::i1`, fecha: "2026-10-18", inspector: "Ivo Inspector", patente: "BKTD10", marca: "Toyota", modelo: "Yaris", anio: "2021" } } });
 }
 
+// Tareas y antigüedades distintas para ver la vista «Hoy» con todos sus grupos.
+{
+  const enH = (h) => new Date(Date.now() + h * 3_600_000).toISOString();
+  const mia = (i) => leads[i] && leads[i].quien;
+  const tarea = (i, h, titulo, tipo = "llamada") => leads[i] && ve(mia(i).token, "tareas.create", { leadId: leads[i].lead.id, titulo, tipo, venceEn: enH(h) });
+  await tarea(0, -6, "Llamar para confirmar interés");
+  await tarea(1, 3, "Enviar cotización por WhatsApp", "whatsapp");
+  await tarea(2, 70, "Seguimiento semanal");
+  if (leads[5]) db.tablas.leads.find((l) => l.id === leads[5].lead.id).creado_en = enH(-6);
+  if (leads[6]) db.tablas.leads.find((l) => l.id === leads[6].lead.id).creado_en = enH(-3);
+}
+
 // Servidor de la función simulada (misma dirección que la real: /functions/v1/api).
 crearHttp(async (req, res) => {
   const trozos = [];

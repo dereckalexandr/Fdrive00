@@ -15,6 +15,7 @@ import {
   puedeEditarLead, etapaNombre,
   validarCierre, margenVenta, mesChile, esMes, nombreMes, FINANCIERAS,
   horasDesde, ETAPAS_ABIERTAS, esSinAtender, esDetenido, ultimaActividad, embudoCohorte, rendimientoPorFuente, motivosDePerdida, validarAviso, claseTarea,
+  GRUPOS_HOY, clasificarLeadHoy, ordenarHoy, faltaProximaAccion,
 } from "./ventas-core.js";
 import { tramosEfectivos, calcularProduccion } from "./comisiones-core.js";
 import { enviarAviso, enSegundoPlano, correoActivo } from "./correo.ts";
@@ -133,6 +134,16 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       if (l.asignado_a && (!out[l.asignado_a] || l.creado_en > out[l.asignado_a])) out[l.asignado_a] = l.creado_en;
     }
     return out;
+  }
+
+  /** Tras una acción sobre un lead: ¿hay que pedirle a la persona su próxima acción? (lead abierto y sin ninguna tarea pendiente que aún no venza). */
+  async function pedirProximaAccion(leadId: string | null | undefined): Promise<boolean> {
+    try {
+      if (!leadId) return false;
+      const [l, t] = await Promise.all([sb.from("leads").select("id, etapa").eq("id", leadId).maybeSingle(), sb.from("tareas").select("id, vence_en, hecha").eq("lead_id", leadId).eq("hecha", false)]);
+      if (!l.data) return false;
+      return faltaProximaAccion(l.data, t.error ? [] : t.data ?? []);
+    } catch { return false; }
   }
 
   async function evento(leadId: string, tipo: string, detalle: string) {
@@ -2409,7 +2420,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     if (reservaActiva) await cerrarReserva(reservaActiva, "cancelada", "El lead se marcó como perdido", { volverACotizado: false });
     await evento(lead.id, "etapa", `${etapaNombre(lead.etapa)} → ${etapaNombre(r.value.etapa)}${r.value.motivo_perdida ? ` (${r.value.motivo_perdida})` : ""}`);
     await audit(ctx.actor, "lead.mover", "lead", lead.id, { de: lead.etapa, a: r.value.etapa, motivo: r.value.motivo_perdida });
-    return json({ lead: data });
+    return json({ lead: data, pedirProximaAccion: await pedirProximaAccion(lead.id) });
   }
 
   if (op === "leads.reasignar") {
@@ -2450,7 +2461,52 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     }
     const { data, error } = await sb.from("leads").update(patch).eq("id", lead.id).select().single();
     if (error) return fallo(error);
-    return json({ lead: data });
+    return json({ lead: data, pedirProximaAccion: await pedirProximaAccion(lead.id) });
+  }
+
+  // «Hoy»: los leads abiertos ordenados por qué hay que hacer primero (primer contacto, acciones vencidas, de hoy, sin próxima acción…).
+  if (op === "leads.hoy") {
+    if (!(can("leads.propios") || veTodoElLocal)) return err("forbidden", 403);
+    const todos = body.todos === true && veTodoElLocal;
+    const cfg = await configNegocio();
+    const ahora = new Date();
+    const { data, error } = await scoped(sb.from("leads").select("*").order("creado_en", { ascending: true }));
+    if (error) return fallo(error);
+    let abiertos: any[] = (data ?? []).filter((l: any) => !ETAPAS_CERRADAS.includes(l.etapa));
+    if (!todos) abiertos = abiertos.filter((l) => l.asignado_a === userId);
+    abiertos = abiertos.slice(0, MAX_LISTA);
+    const ids = abiertos.map((l) => l.id);
+    const [tareasTodas, clientes, vehiculos, usuarios] = await Promise.all([
+      enLotes("tareas", "lead_id", ids), porIds("clientes", abiertos.map((l) => l.cliente_id)), porIds("vehiculos", abiertos.map((l) => l.vehiculo_id)), porIds("usuarios", abiertos.map((l) => l.asignado_a)),
+    ]);
+    const pendientes = new Map<string, any[]>();
+    for (const t of tareasTodas) if (!t.hecha) pendientes.set(t.lead_id, [...(pendientes.get(t.lead_id) ?? []), t]);
+    const cli = new Map(clientes.map((c: any) => [c.id, c]));
+    const veh = new Map(vehiculos.map((v: any) => [v.id, v]));
+    const usr = new Map(usuarios.map((u: any) => [u.id, u]));
+    const items = abiertos.map((lead) => ({ lead, hoy: clasificarLeadHoy({ lead, tareas: pendientes.get(lead.id) ?? [], ahora, horasPrimerContacto: cfg.horas_primer_contacto, horasJefe: cfg.horas_sin_contacto, diasDetenido: cfg.dias_detenido }) })).filter((x) => x.hoy);
+    const ordenados = ordenarHoy(items as any);
+    const texto = (l: any) => {
+      const v: any = l.vehiculo_id ? veh.get(l.vehiculo_id) : null;
+      if (v) return `${v.marca} ${v.modelo} ${v.anio}`;
+      const o = l.vehiculo_ofrecido || {};
+      if (l.tipo && l.tipo !== "venta" && o.marca) return `${o.marca} ${o.modelo || ""} ${o.anio || ""}`.trim();
+      return l.vehiculo_interes || "";
+    };
+    const resumen: Record<string, number> = Object.fromEntries(GRUPOS_HOY.map((g) => [g.id, 0]));
+    const leads = ordenados.map(({ lead, hoy }: any) => {
+      resumen[hoy.grupo]++;
+      const c: any = cli.get(lead.cliente_id);
+      const u: any = usr.get(lead.asignado_a);
+      return {
+        id: lead.id, grupo: hoy.grupo, nivelJefe: hoy.nivelJefe, estancado: hoy.estancado, edadHoras: hoy.edadHoras, etapa: lead.etapa, tipo: lead.tipo || "venta", fuente: lead.fuente || "",
+        creado_en: lead.creado_en, ultimo_contacto: lead.ultimo_contacto || null, vehiculo: texto(lead),
+        cliente: c ? { id: c.id, nombre: c.nombre, telefono: c.telefono || null } : { id: null, nombre: "Cliente", telefono: null },
+        asignado: u ? { id: u.id, nombre: u.nombre } : null,
+        proxima: hoy.proxima ? { id: hoy.proxima.id, titulo: hoy.proxima.titulo, tipo: hoy.proxima.tipo, vence_en: hoy.proxima.vence_en } : null,
+      };
+    });
+    return json({ leads, resumen, total: leads.length, puedeAsignar: esSupervisor, veTodo: veTodoElLocal, plazos: { primerContacto: cfg.horas_primer_contacto, jefe: cfg.horas_sin_contacto } });
   }
 
   /* ---------- tareas ---------- */
@@ -2497,7 +2553,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     const { data, error } = await sb.from("tareas").update({ hecha, hecha_en: hecha ? new Date().toISOString() : null }).eq("id", t.id).select().single();
     if (error) return fallo(error);
     if (hecha && t.lead_id) await evento(t.lead_id, "nota", `Tarea cumplida: ${t.titulo}`);
-    return json({ tarea: data });
+    return json({ tarea: data, pedirProximaAccion: hecha && t.lead_id ? await pedirProximaAccion(t.lead_id) : false });
   }
 
   /* ---------- cotizaciones ---------- */

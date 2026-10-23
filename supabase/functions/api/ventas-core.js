@@ -522,3 +522,49 @@ export function puedeEditarLead({ permisos, esAdmin, usuarioId, lead }) {
   const habilitacion = lead.tipo === "compra" ? "compras.operar" : lead.tipo === "consignacion" ? "consignaciones.operar" : "ventas.operar";
   return permisos.includes("leads.propios") && permisos.includes(habilitacion) && lead.asignado_a === usuarioId;
 }
+
+/* ---------- Hoy: qué hacer ahora ---------- */
+/** Grupos de la vista «Hoy», en el orden en que se atienden. */
+export const GRUPOS_HOY = [
+  { id: "sin_contacto", nombre: "Sin primer contacto", ayuda: "Llegaron hace más del plazo y nadie los ha contactado." },
+  { id: "por_atender", nombre: "Recién llegados", ayuda: "Nuevos, todavía dentro del plazo para el primer contacto." },
+  { id: "vencida", nombre: "Próxima acción vencida", ayuda: "La tarea agendada ya pasó y sigue pendiente." },
+  { id: "hoy", nombre: "Para hoy", ayuda: "Tienen una acción agendada para hoy." },
+  { id: "sin_accion", nombre: "Sin próxima acción", ayuda: "Están abiertos pero no tienen nada agendado: define el siguiente paso." },
+  { id: "programada", nombre: "Programados", ayuda: "Su próxima acción es otro día." },
+];
+
+/**
+ * En qué grupo de «Hoy» cae un lead abierto (o null si está cerrado).
+ * `tareas`: las tareas PENDIENTES de ese lead. `proxima` es la más cercana en el tiempo.
+ * Prioridad: primer contacto > acción vencida > acción de hoy > sin acción > programado.
+ */
+export function clasificarLeadHoy({ lead, tareas = [], ahora = new Date(), horasPrimerContacto = 2, horasJefe = 4, diasDetenido = 7 }) {
+  if (!lead || ETAPAS_CERRADAS.includes(lead.etapa)) return null;
+  const pendientes = tareas.filter((t) => !t.hecha && Number.isFinite(Date.parse(t.vence_en))).sort((a, b) => Date.parse(a.vence_en) - Date.parse(b.vence_en));
+  const proxima = pendientes[0] || null;
+  const edadHoras = horasDesde(lead.creado_en, ahora);
+  const sinContactar = lead.etapa === "nuevo" && !lead.ultimo_contacto;
+  let grupo;
+  let nivelJefe = false;
+  if (sinContactar) {
+    if (edadHoras >= horasPrimerContacto) { grupo = "sin_contacto"; nivelJefe = edadHoras >= horasJefe; } else grupo = "por_atender";
+  } else if (proxima && Date.parse(proxima.vence_en) < ahora.getTime()) grupo = "vencida";
+  else if (proxima && diaLocal(proxima.vence_en) === diaLocal(ahora)) grupo = "hoy";
+  else if (!proxima) grupo = "sin_accion";
+  else grupo = "programada";
+  return { grupo, proxima, edadHoras: Math.round(edadHoras * 10) / 10, nivelJefe, estancado: esDetenido(lead, ahora, diasDetenido) };
+}
+
+/** Orden dentro de cada grupo: lo más urgente o más antiguo primero. */
+export function ordenarHoy(items) {
+  const peso = Object.fromEntries(GRUPOS_HOY.map((g, i) => [g.id, i]));
+  const clave = (x) => (x.hoy.grupo === "sin_contacto" || x.hoy.grupo === "por_atender" ? Date.parse(x.lead.creado_en) : x.hoy.proxima ? Date.parse(x.hoy.proxima.vence_en) : Date.parse(ultimaActividad(x.lead) || x.lead.creado_en));
+  return [...items].sort((a, b) => (peso[a.hoy.grupo] - peso[b.hoy.grupo]) || (clave(a) - clave(b)));
+}
+
+/** ¿A este lead hay que pedirle un siguiente paso? Está abierto y no tiene ninguna tarea pendiente que aún no venza. */
+export function faltaProximaAccion(lead, tareas = [], ahora = new Date()) {
+  if (!lead || ETAPAS_CERRADAS.includes(lead.etapa)) return false;
+  return !tareas.some((t) => !t.hecha && Date.parse(t.vence_en) > ahora.getTime());
+}

@@ -754,7 +754,8 @@ function ConfigTab() {
       <SitioWebConfig c={c} ok={ok} mal={mal} />
       <TextoEditor clave="condiciones_cotizacion" titulo="Condiciones en el PDF de la cotización" ayuda="Este texto aparece al final de cada cotización que se entrega al cliente. Redáctalo con tus condiciones comerciales." valor={c.condiciones_cotizacion} onGuardado={ok} onError={mal} />
       <Tarjeta titulo="Alertas del panel de gestión" ayuda="Cuándo el panel del Jefe Local marca un lead como desatendido o detenido.">
-        <NumeroEditor clave="horas_sin_contacto" etiqueta="Lead nuevo sin ningún contacto desde hace" valor={c.horas_sin_contacto} sufijo="horas" paso="1" onGuardado={ok} onError={mal} />
+        <NumeroEditor clave="horas_primer_contacto" etiqueta="Plazo para el primer contacto: el lead aparece en rojo al ejecutivo después de" valor={c.horas_primer_contacto} sufijo="horas" paso="1" onGuardado={ok} onError={mal} />
+        <NumeroEditor clave="horas_sin_contacto" etiqueta="Lead nuevo sin ningún contacto: también avisa al Jefe Local después de" valor={c.horas_sin_contacto} sufijo="horas" paso="1" onGuardado={ok} onError={mal} />
         <NumeroEditor clave="horas_tasacion" etiqueta="Solicitud de tasación sin que un Tasador la tome desde hace" valor={c.horas_tasacion} sufijo="horas" paso="1" onGuardado={ok} onError={mal} />
         <NumeroEditor clave="horas_inspeccion" etiqueta="Solicitud de inspección sin que un Inspector la tome desde hace" valor={c.horas_inspeccion} sufijo="horas" paso="1" onGuardado={ok} onError={mal} />
         <NumeroEditor clave="horas_validacion" etiqueta="Validación de documentos sin que un Validador la tome desde hace" valor={c.horas_validacion} sufijo="horas" paso="1" onGuardado={ok} onError={mal} />
