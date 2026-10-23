@@ -26,6 +26,7 @@ import { ErrorBoundary } from "./error-boundary.jsx";
 import { HabilitacionesEquipo } from "./crm-equipo.jsx";
 import { Hoy, ProximaAccionModal, RegistrarContactoModal, cuando as cuandoTexto } from "./crm-hoy.jsx";
 import { Miniatura as MiniaturaVehiculo } from "./crm-inventario.jsx";
+import { ListaLeads } from "./crm-leads-lista.jsx";
 import { SeccionCompra, SeccionConsignacion, ModuloCompras } from "./crm-compras.jsx";
 import { etapaDeOperacion, etapasDeTipo, ayudaDeEtapa, tipoLeadNombre, TIPOS_LEAD, validarVehiculoOfrecido } from "../supabase/functions/api/compras-core.js";
 import {
@@ -495,6 +496,7 @@ function Leads({ api, catalogos, abrirLead, version, onCambio }) {
   const [siguiente, setSiguiente] = useState(null);
   const [accion, setAccion] = useState(null); // { tipo: "llamada"|"whatsapp"|"nota"|"agendar", lead }
   const [tipoVista, setTipoVista] = useGuardado("tablero-tipo", "venta", ["venta", "compra", "consignacion"]);
+  const [vista, setVista] = useGuardado("leads-vista", "tablero", ["tablero", "lista"]);
 
   const mapas = useMemo(() => {
     if (!datos) return {};
@@ -530,21 +532,27 @@ function Leads({ api, catalogos, abrirLead, version, onCambio }) {
         <div className="flex flex-wrap items-center gap-3">
           <button onClick={() => setForm(true)} className={BTN_AMBAR}>+ Nuevo lead</button>
           <div className="flex border border-stone-300 rounded-lg overflow-hidden">
+            {[["tablero", "Tablero"], ["lista", "Lista"]].map(([id, nombre]) => (
+              <button key={id} onClick={() => setVista(id)} className={`px-3 py-1.5 text-sm ${vista === id ? "bg-amber-500 text-stone-900 font-medium" : "bg-white text-stone-700"}`}>{nombre}</button>
+            ))}
+          </div>
+          {vista === "tablero" && <div className="flex border border-stone-300 rounded-lg overflow-hidden">
             {tabs.map((t) => (
               <button key={t.id} onClick={() => setTipoVista(t.id)} className={`px-3 py-1.5 text-sm ${tipo === t.id ? "bg-stone-900 text-white" : "bg-white text-stone-700"}`}>{t.nombre} <span className="text-xs opacity-70">{conteo[t.id] || 0}</span></button>
             ))}
-          </div>
+          </div>}
           {datos.veTodo && (
             <div className="flex border border-stone-300 rounded-lg overflow-hidden">
               <button onClick={() => setTodos(false)} className={`px-3 py-1.5 text-sm ${!todos ? "bg-stone-900 text-white" : "bg-white text-stone-700"}`}>Mis leads</button>
               <button onClick={() => setTodos(true)} className={`px-3 py-1.5 text-sm ${todos ? "bg-stone-900 text-white" : "bg-white text-stone-700"}`}>Todo el local</button>
             </div>
           )}
-          <span className="text-xs text-stone-500 ml-auto">{delTipo.length} lead{delTipo.length === 1 ? "" : "s"} · arrastra una tarjeta para cambiar de etapa</span>
+          {vista === "tablero" && <span className="text-xs text-stone-500 ml-auto">{delTipo.length} lead{delTipo.length === 1 ? "" : "s"} · arrastra una tarjeta para cambiar de etapa</span>}
         </div>
       </Tarjeta>
       {msg && <Aviso>{msg}</Aviso>}
-      <div className="flex flex-col md:flex-row gap-3 md:overflow-x-auto md:pb-3 items-start">
+      {vista === "lista" && <ListaLeads api={api} datos={datos} mapas={mapas} catalogos={catalogos} todos={todos} abrirLead={abrirLead} recargar={recargar} onCambio={onCambio} />}
+      {vista === "tablero" && <div className="flex flex-col md:flex-row gap-3 md:overflow-x-auto md:pb-3 items-start">
         {columnas.map((id) => {
           const leads = delTipo.filter((l) => l.etapa === id);
           const auto = (ETAPAS.find((e) => e.id === id) || {}).automatica || ["tasacion", "contrato", "documentos"].includes(id);
@@ -568,8 +576,8 @@ function Leads({ api, catalogos, abrirLead, version, onCambio }) {
             </div>
           );
         })}
-      </div>
-      <p className="text-xs text-stone-500">Las etapas marcadas «auto» se mueven solas según lo que vas haciendo (cotizar, reservar, pedir una tasación, hacer una oferta, aprobar el cierre…). El número de color en cada tarjeta son los días que lleva en su etapa: verde, normal; ámbar desde 3 días; rojo desde 7.</p>
+      </div>}
+      {vista === "tablero" && <p className="text-xs text-stone-500">Las etapas marcadas «auto» se mueven solas según lo que vas haciendo (cotizar, reservar, pedir una tasación, hacer una oferta, aprobar el cierre…). El número de color en cada tarjeta son los días que lleva en su etapa: verde, normal; ámbar desde 3 días; rojo desde 7.</p>}
 
       {perdiendo && (
         <Modal titulo="Marcar como perdido" onCerrar={() => { setPerdiendo(null); setMotivo(""); }} ancho="max-w-md">

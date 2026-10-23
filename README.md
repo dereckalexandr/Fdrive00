@@ -821,3 +821,10 @@ Nueva pestaña **Hoy** (la primera de *Trabajo diario*): los leads abiertos orde
 - Tarjeta nueva: foto del vehículo, monto, días en la etapa (semáforo verde / ámbar desde 3 d / rojo desde 7 d), próxima acción y botones de llamar, WhatsApp, nota y agendar.
 - `supabase-crm-etapas.sql` agrega `leads.etapa_desde` (se renueva sola con un trigger al cambiar de etapa). Hasta ejecutarlo, los días se calculan desde la última actualización.
 - Pruebas: `tests/pipeline-core.test.mjs` y el caso de etapas automáticas en `tests/compras-api.test.mjs`.
+
+## Rediseño de leads · Fase 3: vista Lista
+
+- En **Leads** hay un selector **Tablero / Lista**. La lista (`src/crm-leads-lista.jsx`) muestra una fila por lead con filtros por texto (cliente, teléfono, vehículo; sin tildes), tipo, etapa, ejecutivo (incluye «Sin asignar»), fuente y atención (solo abiertos, por atender, sin próxima acción, próxima acción vencida, detenidos desde 7 días), y 5 órdenes.
+- El Jefe Local puede marcar varios leads abiertos y **reasignarlos en lote** (reparto automático o a una persona) con `leads.reasignarLote` (hasta 50 por vez; omite cerrados, con cierre en curso o de otro tipo no habilitado).
+- **Exportar a Excel (CSV)**: respeta filtros y selección; separador «;», UTF-8 con BOM y celdas protegidas contra fórmulas.
+- La lógica es pura y se prueba en `supabase/functions/api/leads-lista-core.js` (`tests/leads-lista-core.test.mjs`). No requiere SQL ni cambios en la función.
