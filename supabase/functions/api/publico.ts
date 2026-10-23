@@ -47,7 +47,7 @@ function superaLimitePatentes(ip: string) {
   return a.n > LIMITE_WEB_IP_HORA;
 }
 
-const QUE_PIDIO: Record<string, string> = { consulta: "una consulta", visita: "una visita", financiamiento: "una simulación de financiamiento", vender: "vender o consignar tu vehículo" };
+const QUE_PIDIO: Record<string, string> = { consulta: "una consulta", visita: "una visita", financiamiento: "una simulación de financiamiento", vender: "vender o consignar tu vehículo", renovar: "cambiar tu auto por otro" };
 
 export async function publicOp(ctx: CtxPublico, body: any): Promise<Response> {
   /** Avisos por correo de una solicitud del sitio: al ejecutivo asignado (o a los Jefes Local si no hay) y la confirmación al cliente. Nunca frenan la solicitud. */
@@ -211,7 +211,7 @@ export async function publicOp(ctx: CtxPublico, body: any): Promise<Response> {
     for (const l of lastQ.data ?? []) if (l.asignado_a && grupoDeReparto(l.tipo || "venta") === grupo && (!ultimas[l.asignado_a] || l.creado_en > ultimas[l.asignado_a])) ultimas[l.asignado_a] = l.creado_en;
     const asignado = elegirAsignado(elegibles, ultimas);
 
-    const vtWeb = s.tipo === "vender" ? validarVehiculoTasacion({ patente: s.vende.patente, marca: s.vende.marca, modelo: s.vende.modelo, anio: s.vende.anio, km: s.vende.km, duenos: s.vende.duenos, prenda: s.vende.prenda, mantenciones: s.vende.mantenciones, precioEsperado: s.vende.precioEsperado }) : null;
+    const vtWeb = s.tipo === "vender" || s.tipo === "renovar" ? validarVehiculoTasacion({ patente: s.vende.patente, marca: s.vende.marca, modelo: s.vende.modelo, anio: s.vende.anio, km: s.vende.km, duenos: s.vende.duenos, prenda: s.vende.prenda, mantenciones: s.vende.mantenciones, precioEsperado: s.vende.precioEsperado }) : null;
     const vehTexto = vehiculo ? `${vehiculo.marca} ${vehiculo.modelo} ${vehiculo.anio}` : "";
     const resumen = resumenSolicitud(s, vehTexto);
     let financiamiento: Record<string, unknown> = {};
@@ -224,7 +224,8 @@ export async function publicOp(ctx: CtxPublico, body: any): Promise<Response> {
       local_id: local, tipo: tipoLeadDe(s), etapa: "nuevo", cliente_id: cliente.id, fuente: FUENTE_WEB,
       vehiculo_id: vehiculo ? vehiculo.id : null,
       vehiculo_interes: s.tipo === "vender" ? `${s.vende.modalidad === "consignar" ? "CONSIGNA" : "VENDE"}: ${s.vende.marca} ${s.vende.modelo} ${s.vende.anio} · ${s.vende.patente}` : null,
-      parte_pago: {}, financiamiento, asignado_a: asignado ? asignado.id : null, ...(vtWeb && vtWeb.ok ? { vehiculo_ofrecido: vtWeb.value } : {}),
+      // Renovar: su auto queda como vehículo en parte de pago del lead (el valor lo fija la tasación).
+      parte_pago: s.tipo === "renovar" ? { tiene: true, patente: s.vende.patente, marca: s.vende.marca, modelo: s.vende.modelo, anio: s.vende.anio, km: s.vende.km, valor: 0, duenos: s.vende.duenos, prenda: s.vende.prenda, mantenciones: s.vende.mantenciones, precioEsperado: s.vende.precioEsperado } : {}, financiamiento, asignado_a: asignado ? asignado.id : null, ...(vtWeb && vtWeb.ok ? { vehiculo_ofrecido: vtWeb.value } : {}),
       notas: [resumen, cuota ? `Cuota referencial: $${cuota.cuota.toLocaleString("es-CL")} por mes (financiando $${cuota.montoFinanciar.toLocaleString("es-CL")} a ${s.plazo} cuotas, tasa ${cfg.tasa_mensual_web}% mensual). Sujeta a evaluación.` : ""].filter(Boolean).join("\n").slice(0, 1000),
     }).select().single();
     if (ins.error) return fallo(ins.error);
@@ -235,6 +236,14 @@ export async function publicOp(ctx: CtxPublico, body: any): Promise<Response> {
     // Visita: queda en la agenda del ejecutivo.
     if (s.tipo === "visita" && asignado) {
       await sb.from("tareas").insert({ lead_id: lead.id, asignado_a: asignado.id, local_id: local, titulo: `Visita pedida por el sitio web: ${vehTexto}`.slice(0, 120), tipo: "visita", vence_en: s.fechaHora });
+    }
+    // Renovar: la tasación de SU auto queda en la cola de los Tasadores, ligada al lead (al completarse, fija el valor en parte de pago).
+    if (s.tipo === "renovar" && vtWeb && vtWeb.ok) {
+      const t = await sb.from("tasaciones").insert({
+        local_id: local, tipo: "parte_pago", lead_id: lead.id, solicitante_id: asignado ? asignado.id : null, vehiculo: vtWeb.value, patente: vtWeb.value.patente,
+        estado: "pendiente", notas_solicitud: `Cambia su auto por un ${vehTexto} (pedido desde el sitio web). Espera $${Number(s.vende.precioEsperado).toLocaleString("es-CL")} · ${s.vende.duenos} dueño(s) · prenda: ${s.vende.prenda === "si" ? "sí" : "no"} · mantenciones en la marca: ${s.vende.mantenciones === "si" ? "sí" : "no"}.`.slice(0, 300), creado_por: "sitio web",
+      }).select().single();
+      if (!t.error) await sb.from("lead_eventos").insert({ lead_id: lead.id, usuario_id: "sistema", usuario_nombre: "Sitio web", tipo: "tasacion", detalle: `Tasación pedida desde el sitio web para su auto ${s.vende.marca} ${s.vende.modelo} ${s.vende.anio} (${s.vende.patente})` });
     }
     // Vender o consignar: además queda una tasación esperando al Tasador.
     let folioTasacion: number | null = null;

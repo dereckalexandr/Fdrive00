@@ -23,6 +23,7 @@ import { SeccionValidacion, ModuloValidaciones } from "./crm-validaciones.jsx";
 import { ModuloAnuncios } from "./crm-anuncios.jsx";
 import { ModuloMarketing } from "./crm-marketing.jsx";
 import { ErrorBoundary } from "./error-boundary.jsx";
+import { HabilitacionesEquipo } from "./crm-equipo.jsx";
 import { SeccionCompra, SeccionConsignacion, ModuloCompras } from "./crm-compras.jsx";
 import { etapaDeOperacion, tipoLeadNombre, TIPOS_LEAD, validarVehiculoOfrecido } from "../supabase/functions/api/compras-core.js";
 import {
@@ -151,6 +152,7 @@ function LeadFicha({ api, leadId, catalogos, onCerrar, onCambio, onEditar }) {
           <div><p className="text-xs uppercase tracking-wide text-stone-400">Financiamiento</p>
             <p className="text-stone-800">{fin.quiere ? `Pie ${clp(fin.pie)}${fin.banco ? ` · ${fin.banco}` : ""}` : "No"}</p>
             {fin.quiere && <p className="text-xs text-stone-500">{(ESTADOS_FINANCIAMIENTO.find((e) => e.id === fin.estado) || {}).nombre}</p>}</div>
+          {esVenta && pp.tiene && <div className="col-span-full"><DatosDelDueno o={pp} /></div>}
         </div>
         {lead.notas && <p className="text-sm text-stone-600 border-t border-stone-100 pt-2">{lead.notas}</p>}
       </div>
@@ -672,7 +674,7 @@ export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador, 
   const can = (p) => esAdmin || permisos.includes(p);
   const usaLeads = can("leads.propios") || can("leads.local") || can("leads.asignar");
   const [localSel, setLocalSel] = useState("");
-  const [tab, setTab] = useGuardado(esAdmin ? "ventas-admin" : "ventas", usaLeads ? "inicio" : "inventario", ["inicio", "leads", "agenda", "ventas", "gestion", "tasaciones", "aprobaciones", "compras", "inspecciones", "fichas", "validaciones", "anuncios", "marketing", "inventario", "clientes"]);
+  const [tab, setTab] = useGuardado(esAdmin ? "ventas-admin" : "ventas", usaLeads ? "inicio" : "inventario", ["inicio", "leads", "agenda", "ventas", "gestion", "tasaciones", "aprobaciones", "compras", "inspecciones", "fichas", "equipo", "validaciones", "anuncios", "marketing", "inventario", "clientes"]);
   const [version, setVersion] = useState(0);
   const [leadAbierto, setLeadAbierto] = useState(null);
   const [leadEditando, setLeadEditando] = useState(null);
@@ -709,6 +711,7 @@ export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador, 
   if (usaLeads && puedeCompras) opciones.push(["compras", "Compras y consignaciones"]);
   if (catalogos.puedeInspecciones) opciones.push(["inspecciones", "Inspecciones"]);
   if (puedeAprobar && renderFichas) opciones.push(["fichas", "Fichas de inspectores"]);
+  if (puedeAprobar) opciones.push(["equipo", "Equipo"]);
   if (puedeAprobar) opciones.push(["validaciones", "Validaciones"], ["anuncios", "Avisos"], ["marketing", "Marketing"]);
   opciones.push(["inventario", "Inventario"]);
   if (usaLeads) opciones.push(["clientes", "Clientes"]);
@@ -717,7 +720,7 @@ export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador, 
   const tabVigente = opciones.some((o) => o[0] === tab) ? tab : (opciones[0] || [])[0];
   const GRUPOS = [
     { titulo: "Trabajo diario", ids: ["inicio", "leads", "agenda", "clientes", "inventario"] },
-    { titulo: "Comercial", ids: ["ventas", "gestion", "aprobaciones", "compras", "tasaciones", "inspecciones", "fichas"] },
+    { titulo: "Comercial", ids: ["ventas", "gestion", "aprobaciones", "compras", "tasaciones", "inspecciones", "fichas", "equipo"] },
     { titulo: "Operación", ids: ["validaciones", "anuncios", "marketing"] },
   ];
 
@@ -741,6 +744,7 @@ export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador, 
       {tabVigente === "validaciones" && <ModuloValidaciones api={api} permisos={permisos} esAdmin={esAdmin} />}
       {tabVigente === "inspecciones" && <ModuloInspecciones api={api} permisos={permisos} esAdmin={esAdmin} />}
       {tabVigente === "fichas" && renderFichas && renderFichas()}
+      {tabVigente === "equipo" && <HabilitacionesEquipo api={api} />}
       {tabVigente === "gestion" && <Gestion api={api} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
       {tabVigente === "ventas" && <Ventas api={api} catalogos={catalogos} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
       {tabVigente === "aprobaciones" && <AprobacionesTodo api={api} version={version} abrirLead={setLeadAbierto} onCambio={subir} />}

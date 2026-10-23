@@ -19,8 +19,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import {
   ROLES, PERMISO_IDS, permisosDeRol, permisosEfectivos, limpiarExtra,
-  normalizarRut, validarRut, claveValida, claveProvisoria, validarUsuario, validarConfig, configCompleta, ROLES_ASIGNABLES,
-} from "./crm-core.js";
+  normalizarRut, validarRut, claveValida, claveProvisoria, validarUsuario, validarConfig, configCompleta, ROLES_ASIGNABLES, conVentasPorDefecto } from "./crm-core.js";
 import { ventasOp } from "./ventas.ts";
 import { limiteDiario, limiteWeb } from "./patentes-core.js";
 import { publicOp } from "./publico.ts";
@@ -340,7 +339,7 @@ async function crmOp(s: Session, body: any): Promise<Response> {
     else if (!claveValida(clave)) return json({ error: "clave_invalida" }, 400);
     const { data, error } = await sb.from("usuarios").insert({
       rut: v.value.rut, nombre: v.value.nombre, email: v.value.email, telefono: v.value.telefono,
-      roles: v.value.roles, permisos_extra: v.value.extra, local_id: v.value.localId, ...(v.value.comision !== undefined ? { comision: v.value.comision } : {}),
+      roles: v.value.roles, permisos_extra: conVentasPorDefecto(v.value.roles, v.value.extra), local_id: v.value.localId, ...(v.value.comision !== undefined ? { comision: v.value.comision } : {}),
       clave_hash: await hashSecret(clave), debe_cambiar_clave: true,
     }).select().single();
     if (error) return dbFail(error);
@@ -360,7 +359,8 @@ async function crmOp(s: Session, body: any): Promise<Response> {
     // Los tramos de comisión solo se tocan si vienen en la petición.
     const cambios: Record<string, unknown> = {
       nombre: v.value.nombre, email: v.value.email, telefono: v.value.telefono, roles: v.value.roles,
-      permisos_extra: v.value.extra, local_id: v.value.localId, actualizado_en: new Date().toISOString(),
+      // Si a esta persona se le suma ahora el rol Ejecutivo, también parte con Ventas.
+      permisos_extra: (antes.roles ?? []).includes("ejecutivo") ? v.value.extra : conVentasPorDefecto(v.value.roles, v.value.extra), local_id: v.value.localId, actualizado_en: new Date().toISOString(),
     };
     if (v.value.comision !== undefined) cambios.comision = v.value.comision;
     const { data, error } = await sb.from("usuarios").update(cambios).eq("id", id).select().single();
@@ -745,7 +745,7 @@ Deno.serve(async (req) => {
       }
       const actor: Actor = s.role === "admin" ? adminActor(s) : { tipo: "usuario", id: s.id, nombre: user!.nombre };
       try {
-        return await ventasOp({ sb, json, audit, isMissingTable, rolePermOverrides, esAdmin: s.role === "admin", actor, user }, body);
+        return await ventasOp({ sb, json, audit, isMissingTable, rolePermOverrides, dropLive: dropLiveCache, esAdmin: s.role === "admin", actor, user }, body);
       } catch (e) {
         // Quien llega aquí ya inició sesión: se le muestra el motivo técnico para poder corregirlo (nunca claves ni datos).
         console.error("ventas error:", body?.op, e);

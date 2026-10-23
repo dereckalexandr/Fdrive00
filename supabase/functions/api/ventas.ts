@@ -7,7 +7,7 @@
 //   - leads.asignar                       -> supervisor: ve, modifica y reasigna todo el local
 //   - cuenta maestra (admin)              -> todo; elige el local con `localId`
 // Cada persona está acotada a su local. Los cambios importantes quedan en la bitácora.
-import { permisosEfectivos, configCompleta } from "./crm-core.js";
+import { permisosEfectivos, configCompleta, limpiarExtra } from "./crm-core.js";
 import {
   ESTADOS_VEHICULO, ETAPAS, ETAPAS_CERRADAS, TIPOS_CONTACTO,
   validarCotizacion, estadoCotizacionInicial, requiereNuevaAprobacion, validarReserva, reservaVencida,
@@ -55,6 +55,7 @@ export type Ctx = {
   audit: (actor: any, accion: string, entidad?: string, entidadId?: string, detalle?: Record<string, unknown>) => Promise<void>;
   isMissingTable: (e: any) => boolean;
   rolePermOverrides: () => Promise<Record<string, string[]>>;
+  dropLive?: () => void;
   esAdmin: boolean;
   actor: { tipo: "admin" | "usuario"; id?: string; nombre?: string };
   user: { id: string; nombre: string; localId: string | null; permisos: string[] } | null;
@@ -478,6 +479,43 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     const r = await consultarPatente(sb, body.patente, "interno", ctx.isMissingTable);
     if (!r.ok) return err(r.error, r.status);
     return json({ vehiculo: r.vehiculo, origen: r.origen });
+  }
+
+  // Habilitaciones de los ejecutivos del local: Ventas la trae todo ejecutivo nuevo; Compras y Consignaciones las activa el Jefe Local (o el Administrador).
+  if (op === "equipo.habilitaciones" || op === "equipo.habilitar") {
+    if (!esSupervisor) return err("forbidden", 403);
+    const overrides = await ctx.rolePermOverrides();
+    const vista = (u: any) => {
+      const ef = permisosEfectivos(u.roles ?? [], overrides, u.permisos_extra);
+      return { id: u.id, nombre: u.nombre, activo: !!u.activo, ventas: ef.includes("ventas.operar"), compras: ef.includes("compras.operar"), consignaciones: ef.includes("consignaciones.operar") };
+    };
+    if (op === "equipo.habilitaciones") {
+      let q = sb.from("usuarios").select("id, nombre, roles, permisos_extra, activo, local_id");
+      if (localId) q = q.eq("local_id", localId);
+      const { data, error } = await q;
+      if (error) throw error;
+      const ejecutivos = (data ?? []).filter((u: any) => (u.roles ?? []).includes("ejecutivo")).sort((a: any, b: any) => String(a.nombre).localeCompare(String(b.nombre), "es")).map(vista);
+      return json({ ejecutivos });
+    }
+    const permiso = String(body.permiso ?? "");
+    if (!["compras.operar", "consignaciones.operar"].includes(permiso)) return err("permiso_invalido");
+    if (typeof body.activo !== "boolean") return err("valor_invalido");
+    const { data: u, error } = await sb.from("usuarios").select("*").eq("id", String(body.usuarioId ?? "")).maybeSingle();
+    if (error) throw error;
+    if (!u || (!ctx.esAdmin && u.local_id !== localId)) return err("no_existe", 404);
+    if (!(u.roles ?? []).includes("ejecutivo")) return err("no_es_ejecutivo");
+    const e = limpiarExtra(u.permisos_extra);
+    const otorgar = e.otorgar.filter((x: string) => x !== permiso);
+    const quitar = e.quitar.filter((x: string) => x !== permiso);
+    if (body.activo) otorgar.push(permiso);
+    else if (permisosEfectivos(u.roles ?? [], overrides, { otorgar, quitar }).includes(permiso)) quitar.push(permiso); // si el rol ya se lo da por defecto, se le quita expresamente
+    const antes = vista(u);
+    const up = await sb.from("usuarios").update({ permisos_extra: { otorgar, quitar }, actualizado_en: new Date().toISOString() }).eq("id", u.id).select().single();
+    if (up.error) throw up.error;
+    if (ctx.dropLive) ctx.dropLive();
+    const despues = vista(up.data);
+    await audit(ctx.actor, "usuario.habilitar", "usuario", u.id, { nombre: u.nombre, permiso, activo: body.activo, antes: { compras: antes.compras, consignaciones: antes.consignaciones }, despues: { compras: despues.compras, consignaciones: despues.consignaciones } });
+    return json({ ejecutivo: despues });
   }
 
   if (op.startsWith("tasaciones.")) {

@@ -134,7 +134,15 @@ function validarParteDePago(p) {
   if ([anio, km, valor].some((n) => Number.isNaN(n))) return { ok: false, error: "parte_pago_invalida" };
   const patente = normalizarPatente(p.patente);
   if (patente && !patenteValida(patente)) return { ok: false, error: "patente_invalida" };
-  return { ok: true, value: { tiene: true, patente: patente || null, marca: texto(p.marca, 40) || null, modelo: texto(p.modelo, 60) || null, anio, km, valor } };
+  // Lo que declaró el dueño (opcional): se conserva al editar el lead.
+  const extra = {};
+  const d = entero(p.duenos, 1, 30);
+  if (d !== null && !Number.isNaN(d)) extra.duenos = d;
+  if (["si", "no"].includes(p.prenda)) extra.prenda = p.prenda;
+  if (["si", "no"].includes(p.mantenciones)) extra.mantenciones = p.mantenciones;
+  const pe = entero(p.precioEsperado, 1, 2_000_000_000);
+  if (pe !== null && !Number.isNaN(pe)) extra.precioEsperado = pe;
+  return { ok: true, value: { tiene: true, patente: patente || null, marca: texto(p.marca, 40) || null, modelo: texto(p.modelo, 60) || null, anio, km, valor, ...extra } };
 }
 
 function validarFinanciamiento(f) {

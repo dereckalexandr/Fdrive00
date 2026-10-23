@@ -164,3 +164,25 @@ test("Datos del sitio en la configuración", () => {
   assert.ok(!validarConfig("tasa_mensual_web", null).ok);
   assert.equal(CONFIG_DEFECTO.tasa_mensual_web, 1.5);
 });
+
+test("Renovar (cambiar mi auto por otro): exige el vehículo deseado y todos los datos del auto actual; es un lead de venta", () => {
+  const r = (o = {}) => base({ tipo: "renovar", vehiculoId: "v1", patente: "ab-cd 12", marca: "Toyota", modelo: "Yaris", anio: 2016, km: 90000, duenos: 2, prenda: "no", mantenciones: "si", precioEsperado: 5000000, ...o });
+  const ok = validarSolicitudWeb(r(), AHORA);
+  assert.ok(ok.ok, JSON.stringify(ok));
+  assert.equal(tipoLeadDe(ok.value), "venta", "va al reparto de ventas");
+  assert.equal(ok.value.vehiculoId, "v1");
+  assert.equal(ok.value.vende.patente, "ABCD12");
+  assert.equal(ok.value.vende.modalidad, "cambiar");
+  assert.match(resumenSolicitud(ok.value, "Hyundai Venue 2023"), /Quiere cambiar su Toyota Yaris 2016 · 90\.000 km · ABCD12 por Hyundai Venue 2023/);
+  assert.match(resumenSolicitud(ok.value, "Hyundai Venue 2023"), /2 dueños · prenda: no · mantenciones en la marca: sí · precio esperado \$5\.000\.000/);
+  const e = (o) => validarSolicitudWeb(r(o), AHORA).error;
+  assert.equal(e({ vehiculoId: "" }), "vehiculo_requerido");
+  assert.equal(e({ email: "" }), "email_requerido");
+  assert.equal(e({ mensaje: "" }), "mensaje_requerido");
+  assert.equal(e({ patente: "12" }), "patente_invalida");
+  assert.equal(e({ km: "" }), "km_invalido");
+  assert.equal(e({ duenos: "" }), "duenos_invalido");
+  assert.equal(e({ prenda: "" }), "prenda_invalida");
+  assert.equal(e({ mantenciones: "" }), "mantenciones_invalidas");
+  assert.equal(e({ precioEsperado: "" }), "precio_esperado_invalido");
+});

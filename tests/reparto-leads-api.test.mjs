@@ -9,7 +9,7 @@ const U = {};
 let admin; let L; let n = 0;
 
 async function crearEje(clave, nombre, rut, habilitaciones) {
-  const r = await crm(admin, "usuarios.create", { datos: { nombre, rut, roles: ["ejecutivo"], localId: L, extra: { otorgar: habilitaciones, quitar: [] } }, clave: CLAVE });
+  const r = await crm(admin, "usuarios.create", { datos: { nombre, rut, roles: ["ejecutivo"], localId: L, extra: { otorgar: habilitaciones, quitar: habilitaciones.includes("ventas.operar") ? [] : ["ventas.operar"] } }, clave: CLAVE });
   assert.equal(r.status, 200, JSON.stringify(r));
   U[clave] = r.usuario.id;
 }
@@ -84,6 +84,16 @@ test("Cada grupo rota por separado: recibir un lead de venta no quita el turno d
   // Y a la inversa: tras varias compras, las ventas siguen alternando entre sus dos habilitados.
   const ventas = [await consulta(U.vehiculo), await consulta(U.vehiculo)];
   assert.notEqual(ventas[0].asignado_a, ventas[1].asignado_a);
+});
+
+test("Cambiar mi auto por otro (renovar): es un lead de venta y rota con el resto de las ventas", async () => {
+  const renovar = () => pedir("renovar", { vehiculoId: U.vehiculo, patente: `RN${String(1000 + ++n)}`, marca: "Kia", modelo: "Rio", anio: 2016, km: 90000, duenos: 2, prenda: "no", mantenciones: "no", precioEsperado: 4000000 });
+  const seguidos = [await consulta(U.vehiculo), await renovar(), await consulta(U.vehiculo), await renovar()];
+  assert.ok(seguidos.every((l) => l.tipo === "venta"));
+  assert.ok(seguidos.every((l) => ["ventasYcompras", "soloVentas"].includes(nombreDe(l.asignado_a))), "solo con Ventas");
+  const q = seguidos.map((l) => nombreDe(l.asignado_a));
+  for (let i = 1; i < q.length; i++) assert.notEqual(q[i], q[i - 1], "alterna con las consultas");
+  assert.equal(seguidos[1].parte_pago.tiene, true);
 });
 
 test("Si nadie está habilitado para ese tipo, el lead queda sin asignar (y no va a quien no corresponde)", async () => {

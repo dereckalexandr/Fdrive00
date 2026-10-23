@@ -30,7 +30,7 @@ before(async () => {
   await crear(admin, "jefe", "Julia Jefa", "12.345.678-5", ["jefe_local"], L1);
   await crear(admin, "e1", "Eva Uno", "6.000.000-K", ["ejecutivo"], L1, ventas);
   await crear(admin, "e2", "Ema Dos", "7.654.321-6", ["ejecutivo"], L1, ventas);
-  await crear(admin, "e3", "Eli Tres", "9.876.543-3", ["ejecutivo"], L1); // sin habilitación de ventas
+  await crear(admin, "e3", "Eli Tres", "9.876.543-3", ["ejecutivo"], L1, { otorgar: [], quitar: ["ventas.operar"] }); // sin habilitación de ventas
   await crear(admin, "jefeSur", "Jorge Sur", "8.765.432-K", ["jefe_local"], L2);
   await crear(admin, "tasador", "Tito Tasador", "5.555.555-9", ["tasador"], L1);
 });

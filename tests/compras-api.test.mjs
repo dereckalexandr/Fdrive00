@@ -62,11 +62,11 @@ before(async () => {
   admin = await loginAdmin();
   L1 = (await crm(admin, "locales.create", { nombre: "Casa matriz" })).local.id;
   L2 = (await crm(admin, "locales.create", { nombre: "Sucursal Sur" })).local.id;
-  const todo = { otorgar: ["compras.operar", "consignaciones.operar"], quitar: [] };
+  const todo = { otorgar: ["compras.operar", "consignaciones.operar"], quitar: ["ventas.operar"] }; // solo compras y consignaciones (sin Ventas)
   await crear("jefe", "Julia Jefa", "12.345.678-5", ["jefe_local"], L1);
   await crear("jefeSur", "Jorge Sur", "8.765.432-K", ["jefe_local"], L2);
   await crear("c1", "Carla Compras", "6.000.000-K", ["ejecutivo"], L1, todo);
-  await crear("c2", "Camilo Compras", "7.654.321-6", ["ejecutivo"], L1, { otorgar: ["compras.operar"], quitar: [] });
+  await crear("c2", "Camilo Compras", "7.654.321-6", ["ejecutivo"], L1, { otorgar: ["compras.operar"], quitar: ["ventas.operar"] });
   await crear("e1", "Eva Ventas", "9.876.543-3", ["ejecutivo"], L1, { otorgar: ["ventas.operar"], quitar: [] });
   await crear("t1", "Tito Tasador", "5.555.555-9", ["tasador"], L1);
   await crear("mkt", "Marta Marketing", "10.000.013-K", ["marketing"], L1);

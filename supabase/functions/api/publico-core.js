@@ -28,6 +28,8 @@ export const TIPOS_SOLICITUD = [
   { id: "visita", nombre: "Agendar una visita o test drive", vehiculo: true },
   { id: "financiamiento", nombre: "Cotizar financiamiento", vehiculo: true },
   { id: "vender", nombre: "Vender o consignar mi auto", vehiculo: false },
+  // Renovar: quiere cambiar su auto por uno del catálogo (su auto queda como vehículo en parte de pago).
+  { id: "renovar", nombre: "Cambiar mi auto por este", vehiculo: true },
 ];
 /** Códigos de área de país para el teléfono. Chile primero (es el que se usa por defecto). */
 export const PAISES = [
@@ -99,8 +101,9 @@ export function validarSolicitudWeb(input, ahora = new Date()) {
   const email = texto(i.email, 80).toLowerCase();
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, error: "email_invalido" };
   const mensaje = String(i.mensaje ?? "").replace(/\r/g, "").trim().slice(0, 500);
-  // Al vender o consignar, todos los datos son obligatorios.
-  if (tipo.id === "vender") {
+  // Al vender, consignar o cambiar su auto, todos los datos son obligatorios.
+  const conAuto = tipo.id === "vender" || tipo.id === "renovar";
+  if (conAuto) {
     if (!email) return { ok: false, error: "email_requerido" };
     if (mensaje.length < 3) return { ok: false, error: "mensaje_requerido" };
   }
@@ -123,7 +126,7 @@ export function validarSolicitudWeb(input, ahora = new Date()) {
     base.pie = pie;
     base.plazo = plazo;
   }
-  if (tipo.id === "vender") {
+  if (conAuto) {
     const patente = normalizarPatente(i.patente);
     if (!patenteValida(patente)) return { ok: false, error: "patente_invalida" };
     const marca = texto(i.marca, 40);
@@ -133,7 +136,7 @@ export function validarSolicitudWeb(input, ahora = new Date()) {
     if (anio === null || Number.isNaN(anio)) return { ok: false, error: "anio_invalido" };
     const km = entero(i.km, 0, 2_000_000);
     if (km === null || Number.isNaN(km)) return { ok: false, error: "km_invalido" };
-    const modalidad = i.modalidad === "consignar" ? "consignar" : "vender";
+    const modalidad = tipo.id === "renovar" ? "cambiar" : i.modalidad === "consignar" ? "consignar" : "vender";
     const duenos = entero(i.duenos, 1, 30);
     if (duenos === null || Number.isNaN(duenos)) return { ok: false, error: "duenos_invalido" };
     if (!["si", "no"].includes(i.prenda)) return { ok: false, error: "prenda_invalida" };
@@ -152,7 +155,7 @@ export function cuotaReferencial(precio, pie, plazo, tasaMensualPct) {
 }
 
 /** Tipo de lead que se crea según la solicitud. */
-export const tipoLeadDe = (v) => (v.tipo === "vender" ? (v.vende.modalidad === "consignar" ? "consignacion" : "compra") : "venta");
+export const tipoLeadDe = (v) => (v.tipo === "vender" ? (v.vende.modalidad === "consignar" ? "consignacion" : "compra") : "venta"); // renovar es una venta: su auto va como parte de pago
 
 /** Texto que ve el ejecutivo en el lead (qué pidió el visitante). */
 export function resumenSolicitud(v, vehiculoTexto = "") {
@@ -161,7 +164,8 @@ export function resumenSolicitud(v, vehiculoTexto = "") {
   if (v.tipo === "visita") partes.push(`Pide visita o test drive de ${vehiculoTexto}`);
   if (v.tipo === "financiamiento") partes.push(`Cotiza financiamiento de ${vehiculoTexto}: pie $${Number(v.pie).toLocaleString("es-CL")}, ${v.plazo} cuotas`);
   if (v.tipo === "vender") partes.push(`${v.vende.modalidad === "consignar" ? "Quiere consignar" : "Quiere vender"}: ${v.vende.marca} ${v.vende.modelo} ${v.vende.anio} · ${v.vende.km.toLocaleString("es-CL")} km · ${v.vende.patente}`);
-  if (v.tipo === "vender" && v.vende.duenos) partes.push(`${v.vende.duenos} dueño${v.vende.duenos === 1 ? "" : "s"} · prenda: ${v.vende.prenda === "si" ? "sí" : "no"} · mantenciones en la marca: ${v.vende.mantenciones === "si" ? "sí" : "no"} · precio esperado $${Number(v.vende.precioEsperado).toLocaleString("es-CL")}`);
+  if (v.tipo === "renovar") partes.push(`Quiere cambiar su ${v.vende.marca} ${v.vende.modelo} ${v.vende.anio} · ${v.vende.km.toLocaleString("es-CL")} km · ${v.vende.patente} por ${vehiculoTexto}`);
+  if ((v.tipo === "vender" || v.tipo === "renovar") && v.vende.duenos) partes.push(`${v.vende.duenos} dueño${v.vende.duenos === 1 ? "" : "s"} · prenda: ${v.vende.prenda === "si" ? "sí" : "no"} · mantenciones en la marca: ${v.vende.mantenciones === "si" ? "sí" : "no"} · precio esperado $${Number(v.vende.precioEsperado).toLocaleString("es-CL")}`);
   if (v.mensaje) partes.push(`Mensaje: ${v.mensaje}`);
   return partes.join(". ");
 }

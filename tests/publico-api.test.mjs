@@ -257,6 +257,39 @@ test("Vender o consignar: el teléfono lleva código de país y se guarda como n
   assert.equal(db.tablas.clientes.find((c) => c.id === leadsWeb()[leadsWeb().length - 1].cliente_id).telefono, "+541123456789");
 });
 
+test("Renovar (cambiar mi auto por otro): lead de venta con su auto como parte de pago y su tasación esperando al Tasador", async () => {
+  nuevaIp();
+  const datos = { vehiculoId: U.disp.id, patente: "ab-cd 34", marca: "Chevrolet", modelo: "Sail", anio: 2017, km: 88000, duenos: 3, prenda: "si", mantenciones: "no", precioEsperado: 4500000 };
+  const r = await sol("renovar", datos);
+  assert.equal(r.status, 200, JSON.stringify(r));
+  const l = leadsWeb()[leadsWeb().length - 1];
+  assert.equal(l.tipo, "venta", "es un lead de venta: va al reparto de ventas");
+  assert.equal(l.vehiculo_id, U.disp.id, "el auto que le interesa");
+  assert.equal(l.parte_pago.tiene, true);
+  assert.deepEqual([l.parte_pago.patente, l.parte_pago.marca, l.parte_pago.modelo, l.parte_pago.anio, l.parte_pago.km], ["ABCD34", "Chevrolet", "Sail", 2017, 88000]);
+  assert.deepEqual([l.parte_pago.duenos, l.parte_pago.prenda, l.parte_pago.mantenciones, l.parte_pago.precioEsperado], [3, "si", "no", 4500000]);
+  assert.match(l.notas, /Quiere cambiar su Chevrolet Sail 2017/);
+  const t = db.tablas.tasaciones.find((x) => x.patente === "ABCD34");
+  assert.ok(t, "se pidió la tasación de su auto");
+  assert.equal(t.tipo, "parte_pago");
+  assert.equal(t.estado, "pendiente");
+  assert.equal(t.lead_id, l.id, "ligada al lead: al completarse fija el valor en parte de pago");
+  assert.equal(t.tasador_id ?? null, null);
+  assert.match(t.notas_solicitud, /Espera \$4\.500\.000 · 3 dueño\(s\) · prenda: sí/);
+  const cola = await ve(U.t1.token, "tasaciones.list", { vista: "cola" });
+  assert.ok(cola.tasaciones.some((x) => x.id === t.id), "el Tasador la ve en su cola");
+  // El Tasador la completa y el valor queda como parte de pago del lead.
+  assert.equal((await ve(U.t1.token, "tasaciones.tomar", { id: t.id })).status, 200);
+  assert.equal((await ve(U.t1.token, "tasaciones.completar", { id: t.id, borrador: { valorCompra: 4000000, valorVenta: 5200000 } })).status, 200);
+  assert.equal(db.tablas.leads.find((x) => x.id === l.id).parte_pago.valor, 4000000);
+  // Obligatorios: el auto deseado y todos los datos del actual.
+  nuevaIp();
+  assert.equal((await sol("renovar", { ...datos, vehiculoId: "" })).error, "vehiculo_requerido");
+  assert.equal((await sol("renovar", { ...datos, precioEsperado: "" })).error, "precio_esperado_invalido");
+  assert.equal((await sol("renovar", { ...datos, email: "" })).error, "email_requerido");
+});
+
+
 test("Sin ejecutivos habilitados el lead queda sin asignar; con varios locales hay que elegir uno", async () => {
   nuevaIp();
   // Local 2 sin personal: se crea un vehículo allí.

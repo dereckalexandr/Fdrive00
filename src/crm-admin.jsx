@@ -152,7 +152,14 @@ function UsuariosTab() {
     setFormError(""); setEntrega(null);
   };
   const set = (campo, valor) => setForm((f) => ({ ...f, [campo]: valor }));
-  const toggleRol = (r) => set("roles", form.roles.includes(r) ? form.roles.filter((x) => x !== r) : [...form.roles, r]);
+  const toggleRol = (r) => setForm((f) => {
+    const quita = f.roles.includes(r);
+    const roles = quita ? f.roles.filter((x) => x !== r) : [...f.roles, r];
+    // Todo Ejecutivo parte con Ventas (si no se decidió ya sobre ella).
+    let extra = f.extra;
+    if (!quita && r === "ejecutivo" && !extra.otorgar.includes("ventas.operar") && !extra.quitar.includes("ventas.operar")) extra = { ...extra, otorgar: [...extra.otorgar, "ventas.operar"] };
+    return { ...f, roles, extra };
+  });
 
   // Estado de un permiso para esta persona: "rol" (según sus roles), "otorgar" o "quitar".
   const estadoPermiso = (p) => (form.extra.otorgar.includes(p) ? "otorgar" : form.extra.quitar.includes(p) ? "quitar" : "rol");
@@ -273,11 +280,11 @@ function UsuariosTab() {
 
           {form.roles.includes("ejecutivo") && (
             <div className="mt-4 border border-stone-200 p-3">
-              <p className="text-sm text-stone-700 mb-2">El Ejecutivo está habilitado para:</p>
+              <p className="text-sm text-stone-700 mb-2">El Ejecutivo está habilitado para: <span className="text-xs text-stone-500">(Ventas viene marcada por defecto; Compras y Consignaciones también las puede activar el Jefe Local)</span></p>
               <div className="flex flex-wrap gap-4">
                 {HABILITACIONES_EJECUTIVO.map((h) => (
                   <label key={h.permiso} className="text-sm text-stone-700 flex items-center gap-2">
-                    <input type="checkbox" checked={efectivos.includes(h.permiso)} onChange={(e) => ponerPermiso(h.permiso, e.target.checked ? "otorgar" : "rol")} /> {h.nombre}
+                    <input type="checkbox" checked={efectivos.includes(h.permiso)} onChange={(e) => ponerPermiso(h.permiso, e.target.checked ? "otorgar" : h.permiso === "ventas.operar" ? "quitar" : "rol")} /> {h.nombre}
                   </label>
                 ))}
               </div>

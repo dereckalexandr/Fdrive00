@@ -108,7 +108,7 @@ function Marco({ empresa, ir, children }) {
 /* =========================================================
    FORMULARIO DE SOLICITUD (los cuatro tipos)
 ========================================================= */
-const TITULOS = { consulta: "Consultar por este vehículo", visita: "Agendar una visita o test drive", financiamiento: "Cotizar financiamiento", vender: "Vender o consignar mi auto" };
+const TITULOS = { consulta: "Consultar por este vehículo", visita: "Agendar una visita o test drive", financiamiento: "Cotizar financiamiento", vender: "Vender o consignar mi auto", renovar: "Cambiar mi auto por este" };
 const mananaALas11 = () => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(11, 0, 0, 0); const p = (n) => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; };
 
 function Formulario({ tipo, vehiculo, locales = [], empresa, onCerrar }) {
@@ -140,7 +140,7 @@ function Formulario({ tipo, vehiculo, locales = [], empresa, onCerrar }) {
       if (vehiculo) datos.vehiculoId = vehiculo.id;
       if (tipo === "visita") datos.fechaHora = f.fechaHora ? new Date(f.fechaHora).toISOString() : "";
       if (tipo === "financiamiento") { datos.pie = f.pie === "" ? "" : Number(f.pie); datos.plazo = Number(f.plazo); }
-      if (tipo === "vender") Object.assign(datos, { patente: f.patente, marca: f.marca, modelo: f.modelo, anio: f.anio === "" ? "" : Number(f.anio), km: f.km === "" ? "" : Number(f.km), modalidad: f.modalidad, duenos: f.duenos === "" ? "" : Number(f.duenos), prenda: f.prenda, mantenciones: f.mantenciones, precioEsperado: f.precioEsperado === "" ? "" : Number(f.precioEsperado) });
+      if (tipo === "vender" || tipo === "renovar") Object.assign(datos, { patente: f.patente, marca: f.marca, modelo: f.modelo, anio: f.anio === "" ? "" : Number(f.anio), km: f.km === "" ? "" : Number(f.km), modalidad: tipo === "vender" ? f.modalidad : "cambiar", duenos: f.duenos === "" ? "" : Number(f.duenos), prenda: f.prenda, mantenciones: f.mantenciones, precioEsperado: f.precioEsperado === "" ? "" : Number(f.precioEsperado) });
       const r = await llamar("solicitud", datos);
       setEstado({ enviando: false, error: "", listo: r });
     } catch (e) { setEstado({ enviando: false, error: textoError(e), listo: null }); }
@@ -166,10 +166,11 @@ function Formulario({ tipo, vehiculo, locales = [], empresa, onCerrar }) {
   return (
     <form onSubmit={enviar} className="flex flex-col gap-4">
       {vehiculo && <p className="text-sm text-stone-600">{nombreVeh(vehiculo)} {vehiculo.anio} · {clp(vehiculo.precio)}</p>}
-      {tipo === "vender" && (
+      {(tipo === "vender" || tipo === "renovar") && (
         <>
+          {tipo === "renovar" && <p className="text-sm font-medium text-stone-800">Datos del auto que entregarías</p>}
           <div className="grid grid-cols-2 gap-3">
-            <Campo etiqueta="¿Qué prefieres?"><select value={f.modalidad} onChange={(e) => set("modalidad", e.target.value)} className={INPUT}><option value="vender">Vender mi auto</option><option value="consignar">Consignarlo</option></select></Campo>
+            {tipo === "vender" && <Campo etiqueta="¿Qué prefieres?"><select value={f.modalidad} onChange={(e) => set("modalidad", e.target.value)} className={INPUT}><option value="vender">Vender mi auto</option><option value="consignar">Consignarlo</option></select></Campo>}
             <div>
               <Campo etiqueta="Patente"><input value={f.patente} onChange={(e) => set("patente", e.target.value.toUpperCase())} className={`${INPUT} font-mono`} placeholder="ABCD12" required /></Campo>
               <button type="button" onClick={buscarPatente} disabled={buscandoPatente || !/^([A-Z]{4}\d{2}|[A-Z]{2}\d{4})$/.test(f.patente.replace(/[^A-Z0-9]/g, ""))} className="mt-1.5 text-sm text-amber-700 underline underline-offset-2 disabled:text-stone-400 disabled:no-underline">{buscandoPatente ? "Buscando…" : "Buscar los datos de mi auto"}</button>
@@ -184,7 +185,7 @@ function Formulario({ tipo, vehiculo, locales = [], empresa, onCerrar }) {
             <Campo etiqueta="¿Mantenciones en la marca?"><select value={f.mantenciones} onChange={(e) => set("mantenciones", e.target.value)} className={INPUT} required><option value="">Elige…</option><option value="si">Sí</option><option value="no">No</option></select></Campo>
             <Campo etiqueta="Precio esperado ($)"><InputDinero value={f.precioEsperado} onChange={(e) => set("precioEsperado", e.target.value)} className={INPUT} placeholder="Ej. 8.500.000" required /></Campo>
           </div>
-          {locales.length > 1 && <Campo etiqueta="¿En qué sucursal te atendemos?"><select value={f.localId} onChange={(e) => set("localId", e.target.value)} className={INPUT} required><option value="">Elige…</option>{locales.map((l) => <option key={l.id} value={l.id}>{l.nombre}</option>)}</select></Campo>}
+          {tipo === "vender" && locales.length > 1 && <Campo etiqueta="¿En qué sucursal te atendemos?"><select value={f.localId} onChange={(e) => set("localId", e.target.value)} className={INPUT} required><option value="">Elige…</option>{locales.map((l) => <option key={l.id} value={l.id}>{l.nombre}</option>)}</select></Campo>}
         </>
       )}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -198,7 +199,7 @@ function Formulario({ tipo, vehiculo, locales = [], empresa, onCerrar }) {
           </div>
         </Campo>
       </div>
-      <Campo etiqueta={tipo === "vender" ? "Correo" : "Correo (opcional)"}><input type="email" value={f.email} onChange={(e) => set("email", e.target.value)} className={INPUT} autoComplete="email" required={tipo === "vender"} /></Campo>
+      <Campo etiqueta={tipo === "vender" || tipo === "renovar" ? "Correo" : "Correo (opcional)"}><input type="email" value={f.email} onChange={(e) => set("email", e.target.value)} className={INPUT} autoComplete="email" required={tipo === "vender" || tipo === "renovar"} /></Campo>
       {tipo === "visita" && <Campo etiqueta="¿Cuándo te acomoda venir?" ayuda="Es una preferencia: te confirmaremos el horario."><input type="datetime-local" value={f.fechaHora} onChange={(e) => set("fechaHora", e.target.value)} className={INPUT} required /></Campo>}
       {tipo === "financiamiento" && (
         <div className="grid grid-cols-2 gap-3">
@@ -206,7 +207,7 @@ function Formulario({ tipo, vehiculo, locales = [], empresa, onCerrar }) {
           <Campo etiqueta="Plazo"><select value={f.plazo} onChange={(e) => set("plazo", e.target.value)} className={INPUT}>{PLAZOS_FINANCIAMIENTO.map((p) => <option key={p} value={p}>{p} cuotas</option>)}</select></Campo>
         </div>
       )}
-      <Campo etiqueta={tipo === "consulta" ? "Tu consulta" : tipo === "vender" ? "Comentarios sobre tu auto" : "Algo que quieras contarnos (opcional)"}><textarea rows={3} maxLength={500} value={f.mensaje} onChange={(e) => set("mensaje", e.target.value)} className={INPUT} required={tipo === "vender"} minLength={tipo === "vender" ? 3 : undefined} /></Campo>
+      <Campo etiqueta={tipo === "consulta" ? "Tu consulta" : tipo === "vender" || tipo === "renovar" ? "Comentarios sobre tu auto" : "Algo que quieras contarnos (opcional)"}><textarea rows={3} maxLength={500} value={f.mensaje} onChange={(e) => set("mensaje", e.target.value)} className={INPUT} required={tipo === "vender" || tipo === "renovar"} minLength={tipo === "vender" || tipo === "renovar" ? 3 : undefined} /></Campo>
 
       {/* Campo trampa: está fuera de la pantalla; las personas no lo ven, los robots lo llenan. */}
       <div aria-hidden="true" style={{ position: "absolute", left: "-10000px", width: 1, height: 1, overflow: "hidden" }}>
@@ -224,7 +225,7 @@ function Formulario({ tipo, vehiculo, locales = [], empresa, onCerrar }) {
       )}
       {estado.error && <p className="text-sm text-rose-700 bg-rose-50 border border-rose-200 px-3 py-2" role="alert">{estado.error}</p>}
       <div className="flex gap-2">
-        <button type="submit" disabled={estado.enviando} className={BTN}>{estado.enviando ? "Enviando…" : tipo === "visita" ? "Pedir visita" : tipo === "financiamiento" ? "Calcular mi cuota" : tipo === "vender" ? "Enviar" : "Enviar consulta"}</button>
+        <button type="submit" disabled={estado.enviando} className={BTN}>{estado.enviando ? "Enviando…" : tipo === "visita" ? "Pedir visita" : tipo === "financiamiento" ? "Calcular mi cuota" : tipo === "vender" || tipo === "renovar" ? "Enviar" : "Enviar consulta"}</button>
         <button type="button" onClick={onCerrar} className={BTN_2}>Cancelar</button>
       </div>
     </form>
@@ -356,6 +357,7 @@ function Detalle({ id, ir, locales }) {
             <button onClick={() => setForm("consulta")} className={BTN}>Consultar por este auto</button>
             <button onClick={() => setForm("visita")} className={BTN_2}>Agendar visita o test drive</button>
             <button onClick={() => setForm("financiamiento")} className={BTN_2}>Cotizar financiamiento</button>
+            <button onClick={() => setForm("renovar")} className={BTN_2}>Cambiar mi auto por este</button>
             {wa && <a href={wa} target="_blank" rel="noreferrer" className="px-5 py-3 text-sm text-center bg-emerald-600 text-white hover:bg-emerald-500">Escribir por WhatsApp</a>}
           </div>
           <dl className="bg-white border border-stone-200 divide-y divide-stone-100 text-sm">{datosTecnicos.map(([k, x]) => (<div key={k} className="flex justify-between px-4 py-2.5"><dt className="text-stone-500">{k}</dt><dd className="text-stone-900">{x}</dd></div>))}</dl>

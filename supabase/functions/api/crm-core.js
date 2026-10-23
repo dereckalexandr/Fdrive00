@@ -94,6 +94,17 @@ export const HABILITACIONES_EJECUTIVO = [
   { permiso: "consignaciones.operar", nombre: "Consignaciones" },
 ];
 
+/**
+ * Todo Ejecutivo nuevo parte con la habilitación de VENTAS (Compras y Consignaciones las activa el Jefe Local o el Administrador).
+ * Si quien lo crea ya decidió sobre Ventas (la otorgó o la quitó a propósito), se respeta.
+ */
+export function conVentasPorDefecto(roles, extra) {
+  const e = limpiarExtra(extra);
+  if (!Array.isArray(roles) || !roles.includes("ejecutivo")) return e;
+  if (e.otorgar.includes("ventas.operar") || e.quitar.includes("ventas.operar")) return e;
+  return { otorgar: [...e.otorgar, "ventas.operar"], quitar: e.quitar };
+}
+
 const esPermiso = (p) => PERMISO_IDS.includes(p);
 const unicos = (arr) => Array.from(new Set(arr));
 

@@ -36,7 +36,7 @@ before(async () => {
   await crear("jefe", "Julia Jefa", "12.345.678-5", ["jefe_local"], L1);
   await crear("e1", "Eva Uno", "6.000.000-K", ["ejecutivo"], L1, ventas);
   await crear("e2", "Ema Dos", "7.654.321-6", ["ejecutivo"], L1, ventas);
-  await crear("e3", "Eli Tres", "9.876.543-3", ["ejecutivo"], L1);
+  await crear("e3", "Eli Tres", "9.876.543-3", ["ejecutivo"], L1, { otorgar: [], quitar: ["ventas.operar"] });
   await crear("jefeSur", "Jorge Sur", "8.765.432-K", ["jefe_local"], L2);
   await crear("mkt", "Marta Marketing", "13.579.246-2", ["marketing"], L1);
   U.v1 = (await ve(U.jefe.token, "inventario.save", { datos: VEH })).vehiculo;
