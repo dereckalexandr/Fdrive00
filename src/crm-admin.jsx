@@ -10,6 +10,7 @@ import React, { useState, useEffect, useMemo, useCallback, lazy, Suspense } from
 // La gráfica pesa mucho: se carga recién cuando se abre el resumen.
 const GraficoActividad = lazy(() => import("./charts.jsx").then((m) => ({ default: m.GraficoActividad })));
 import { ModuloVentas } from "./crm-ventas.jsx";
+import { Modal } from "./crm-ui.jsx";
 import { TramosEditor } from "./crm-tramos.jsx";
 import { tramosAUi, uiAComision, errorDeTramos } from "../supabase/functions/api/comisiones-core.js";
 import {
@@ -21,6 +22,10 @@ const MENSAJES = {
   crm_not_installed: "Faltan las tablas del CRM. Ejecuta el archivo supabase-crm-setup.sql en Supabase (SQL Editor) y recarga.",
   server_not_configured: "El CRM necesita Supabase configurado: no está disponible en modo de prueba local.",
   duplicado: "Ya existe un registro con ese dato (RUT o nombre repetido).",
+  desactivar_primero: "Primero desactiva a la persona y luego podrás eliminarla.",
+  confirmacion_invalida: "El nombre escrito no coincide con el de la persona.",
+  tiene_historial: "Esta persona tiene historial que se perdería: déjala desactivada.",
+  no_existe: "Esa persona ya no existe.",
   rut_invalido: "El RUT no es válido. Revisa el número y el dígito verificador.",
   nombre_invalido: "Escribe el nombre completo (entre 3 y 80 caracteres).",
   roles_requeridos: "Elige al menos un rol.",
@@ -76,6 +81,46 @@ function useCarga(fn, deps) {
    USUARIOS
 ========================================================= */
 const FORM_VACIO = { id: null, nombre: "", rut: "", email: "", telefono: "", localId: "", roles: [], extra: { otorgar: [], quitar: [] }, tramos: {}, claveManual: "" };
+
+/** Confirmación para eliminar a una persona: muestra qué se pierde y exige escribir su nombre. */
+function EliminarUsuario({ usuario, onCerrar, onEliminado }) {
+  const { cargando, error, datos } = useCarga(() => crm("usuarios.impacto", { id: usuario.id }), [usuario.id]);
+  const [nombre, setNombre] = useState("");
+  const [ocupado, setOcupado] = useState(false);
+  const [fallo, setFallo] = useState("");
+  const activo = usuario.activo;
+  const bloqueado = !datos || datos.bloqueos.length > 0 || activo;
+  const eliminar = async () => {
+    setOcupado(true); setFallo("");
+    try { await crm("usuarios.delete", { id: usuario.id, confirmar: nombre }); await onEliminado(); }
+    catch (e) { setFallo(e && e.message === "tiene_historial" ? "Esta persona tiene historial que se perdería: déjala desactivada." : mensajeCrm(e)); setOcupado(false); }
+  };
+  return (
+    <Modal titulo={`Eliminar a ${usuario.nombre}`} onCerrar={onCerrar} ancho="max-w-lg">
+      {error && <Aviso>{error}</Aviso>}
+      {cargando && !datos && <Cargando />}
+      {activo && <Aviso tipo="info">Primero desactiva esta cuenta (botón «Desactivar»): así se cierra su sesión y se comprueba que nadie la necesita. Después podrás eliminarla.</Aviso>}
+      {datos && datos.bloqueos.length > 0 && (
+        <Aviso>No se puede eliminar porque tiene historial que se perdería (y las comisiones): {datos.bloqueos.map((b) => `${b.que}: ${b.n}`).join(", ")}. Déjala desactivada.</Aviso>
+      )}
+      {datos && datos.bloqueos.length === 0 && datos.avisos.length > 0 && (
+        <Aviso tipo="info">Al eliminarla, esto se conserva pero queda <strong>sin responsable</strong>: {datos.avisos.map((b) => `${b.que}: ${b.n}`).join(", ")}.</Aviso>
+      )}
+      {datos && datos.bloqueos.length === 0 && datos.avisos.length === 0 && <p className="text-sm text-stone-600">No tiene registros asociados.</p>}
+      {!bloqueado && (
+        <>
+          <p className="text-sm text-stone-700">Esta acción <strong>no se puede deshacer</strong> y el RUT queda libre para crear otra persona. Para confirmar, escribe su nombre completo: <span className="font-medium">{usuario.nombre}</span></p>
+          <input value={nombre} onChange={(e) => setNombre(e.target.value)} className={INPUT} placeholder={usuario.nombre} autoFocus />
+        </>
+      )}
+      {fallo && <Aviso>{fallo}</Aviso>}
+      <div className="flex gap-2">
+        <button onClick={eliminar} disabled={bloqueado || ocupado || nombre.trim().toLowerCase() !== usuario.nombre.trim().toLowerCase()} className="px-4 py-2 text-sm font-medium bg-rose-600 text-white hover:bg-rose-500 disabled:opacity-40">{ocupado ? "Eliminando…" : "Eliminar para siempre"}</button>
+        <button onClick={onCerrar} className={BTN}>Cancelar</button>
+      </div>
+    </Modal>
+  );
+}
 
 function UsuariosTab() {
   const { cargando, error, datos, recargar } = useCarga(async () => {
@@ -144,6 +189,7 @@ function UsuariosTab() {
     setGuardando(false);
   };
 
+  const [eliminando, setEliminando] = useState(null);
   const cambiarActivo = async (u) => {
     setAccionError("");
     if (u.activo && !window.confirm(`¿Desactivar a ${u.nombre}? No podrá ingresar y su sesión abierta se cerrará. Sus datos se conservan.`)) return;
@@ -300,13 +346,15 @@ function UsuariosTab() {
                   <button onClick={() => abrirEditar(u)} className={BTN}>Editar</button>
                   <button onClick={() => reiniciarClave(u)} className={BTN}>Reiniciar clave</button>
                   <button onClick={() => cambiarActivo(u)} className={BTN}>{u.activo ? "Desactivar" : "Activar"}</button>
+                  <button onClick={() => setEliminando(u)} className={`${BTN} text-rose-700 border-rose-200 hover:bg-rose-50`}>Eliminar</button>
                 </div></td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-      <p className="text-xs text-stone-500">Los usuarios no se eliminan: se desactivan, para conservar su historial. Los perfiles anteriores de Ejecutivo e Inspector por código siguen funcionando en sus pestañas.</p>
+      <p className="text-xs text-stone-500">Desactivar conserva todo el historial y se puede revertir. Eliminar borra a la persona para siempre: solo se puede si está desactivada y no tiene ventas, compras, consignaciones ni fichas de inspección. Los perfiles anteriores de Ejecutivo e Inspector por código siguen funcionando en sus pestañas.</p>
+      {eliminando && <EliminarUsuario usuario={eliminando} onCerrar={() => setEliminando(null)} onEliminado={async () => { setEliminando(null); await recargar(); }} />}
     </>
   );
 }

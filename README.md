@@ -773,3 +773,11 @@ Junto a cada campo de **Patente** (estimador de *Tasación de compra*, formulari
 - **Activar:** `npx.cmd supabase secrets set BOOSTR_API_KEY=<tu clave> --project-ref lvcmstvcbbvltompunbr` (y, si contratas un plan con más consultas diarias, `BOOSTR_LIMITE_DIARIO=50`, por ejemplo) y luego `node scripts/deploy-api.mjs`.
 - Pruebas: `tests/patentes-core.test.mjs`, `tests/patentes-api.test.mjs`, `tests/datos-patente.test.mjs`.
 - **Pendiente de comprobar con la clave real:** los nombres de los campos extra de los planes de pago (versión, transmisión, combustible, color); el plan gratuito entrega marca, modelo, año y tipo.
+
+## Eliminar personas del CRM
+
+En *Usuarios* hay un botón **Eliminar** (solo la cuenta maestra), además de Desactivar. Es un borrado definitivo, por eso tiene seguros:
+- La persona debe estar **desactivada** primero (así se cierra su sesión y se comprueba que nadie la necesita).
+- Se muestra qué tiene asociado: si tiene **ventas, compras, consignaciones o fichas de inspección/valorizaciones del Inspector, no se puede eliminar** (se perdería el historial y las comisiones): se deja desactivada.
+- Lo demás (leads, tareas, tasaciones, inspecciones pedidas, validaciones, avisos) **se conserva pero queda sin responsable**; el aviso lo indica con las cantidades.
+- Hay que escribir el nombre completo para confirmar. El RUT queda libre para crear otra persona y la acción queda en la Bitácora (`usuario.eliminar`, sin claves). Servidor: `usuarios.impacto` y `usuarios.delete`; pruebas: `tests/usuarios-eliminar-api.test.mjs`.

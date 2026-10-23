@@ -383,6 +383,54 @@ async function crmOp(s: Session, body: any): Promise<Response> {
     await audit(actor, activo ? "usuario.activar" : "usuario.desactivar", "usuario", data.id, { rut: data.rut, nombre: data.nombre });
     return json({ usuario: pubUser(data) });
   }
+  /** Qué dejaría atrás eliminar a una persona: lo que lo impide (historial de ventas, compras, fichas) y lo que solo quedaría sin responsable. */
+  async function impactoDeUsuario(id: string) {
+    const contar = async (tabla: string, col: string) => {
+      const r = await sb.from(tabla).select("id", { count: "exact", head: true }).eq(col, id);
+      return r.error ? 0 : (r.count ?? 0); // una tabla que aún no existe no tiene registros
+    };
+    const fichas = async (prefijo: string) => {
+      const r = await sb.from(TABLE).select("key", { count: "exact", head: true }).like("key", `${prefijo}::${id}::%`);
+      return r.error ? 0 : (r.count ?? 0);
+    };
+    const [ventas, compras, consignaciones, inspecciones, valorizaciones, leads, tareas, tasT, tasS, insI, insS, validaciones, anuncios] = await Promise.all([
+      contar("cierres", "ejecutivo_id"), contar("compras", "ejecutivo_id"), contar("consignaciones", "ejecutivo_id"),
+      fichas("inspeccion"), fichas("tasacion"),
+      contar("leads", "asignado_a"), contar("tareas", "asignado_a"), contar("tasaciones", "tasador_id"), contar("tasaciones", "solicitante_id"),
+      contar("inspecciones", "inspector_id"), contar("inspecciones", "solicitante_id"), contar("validaciones", "validador_id"), contar("anuncios", "anunciante_id"),
+    ]);
+    const bloqueos = [
+      { que: "ventas cerradas", n: ventas }, { que: "compras", n: compras }, { que: "consignaciones", n: consignaciones },
+      { que: "fichas de inspección del Inspector", n: inspecciones }, { que: "valorizaciones del Inspector", n: valorizaciones },
+    ].filter((x) => x.n > 0);
+    const avisos = [
+      { que: "leads asignados", n: leads }, { que: "tareas", n: tareas }, { que: "tasaciones", n: tasT + tasS }, { que: "inspecciones pedidas o realizadas", n: insI + insS },
+      { que: "validaciones", n: validaciones }, { que: "avisos de publicación", n: anuncios },
+    ].filter((x) => x.n > 0);
+    return { bloqueos, avisos };
+  }
+  if (op === "usuarios.impacto") {
+    const { data, error } = await sb.from("usuarios").select("id, nombre, activo").eq("id", String(body.id ?? "")).maybeSingle();
+    if (error) return dbFail(error);
+    if (!data) return json({ error: "no_existe" }, 404);
+    return json({ nombre: data.nombre, activo: !!data.activo, ...(await impactoDeUsuario(data.id)) });
+  }
+  // Eliminar de verdad a una persona. Solo si ya está desactivada y no tiene historial que se perdería (ventas, compras, consignaciones, fichas);
+  // lo demás (leads, tareas, tasaciones…) queda sin responsable pero se conserva. No se puede deshacer.
+  if (op === "usuarios.delete") {
+    const { data, error } = await sb.from("usuarios").select("*").eq("id", String(body.id ?? "")).maybeSingle();
+    if (error) return dbFail(error);
+    if (!data) return json({ error: "no_existe" }, 404);
+    if (data.activo) return json({ error: "desactivar_primero" }, 409);
+    if (String(body.confirmar ?? "").trim().toLowerCase() !== String(data.nombre).trim().toLowerCase()) return json({ error: "confirmacion_invalida" }, 400);
+    const impacto = await impactoDeUsuario(data.id);
+    if (impacto.bloqueos.length) return json({ error: "tiene_historial", bloqueos: impacto.bloqueos }, 409);
+    const del = await sb.from("usuarios").delete().eq("id", data.id);
+    if (del.error) return del.error.code === "23503" ? json({ error: "tiene_historial", bloqueos: [] }, 409) : dbFail(del.error);
+    dropLiveCache();
+    await audit(actor, "usuario.eliminar", "usuario", data.id, { rut: data.rut, nombre: data.nombre, roles: data.roles ?? [], quedaronSinResponsable: impacto.avisos });
+    return json({ ok: true, quedaronSinResponsable: impacto.avisos });
+  }
   if (op === "usuarios.resetClave") {
     const clave = claveProvisoria(crypto.getRandomValues(new Uint8Array(10)));
     const { data, error } = await sb.from("usuarios").update({
