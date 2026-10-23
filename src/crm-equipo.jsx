@@ -22,6 +22,47 @@ function Interruptor({ activo, deshabilitado, onCambio, etiqueta }) {
   );
 }
 
+const num = (n, mal) => <span className={`tabular-nums ${n > 0 ? (mal ? "text-rose-700 font-semibold" : "text-stone-900") : "text-stone-300"}`}>{n}</span>;
+
+/** Carga de trabajo de cada ejecutivo: cuántos leads tiene y cuáles están atrasados. */
+export function CargaEquipo({ api = apiPorDefecto }) {
+  const { cargando, error, datos } = useCarga(() => api("equipo.carga"), [api]);
+  if (error && !datos) return <Aviso>{error}</Aviso>;
+  if (!datos) return <Cargando />;
+  const filas = datos.sinAsignar ? [...datos.filas, datos.sinAsignar] : datos.filas;
+  const p = datos.plazos;
+  return (
+    <Tarjeta titulo="Carga del equipo" ayuda={`En rojo, lo atrasado: primer contacto pasado de ${p.primerContacto} h, acciones vencidas y leads detenidos ${p.detenido} días o más. Los plazos se cambian en Configuración. Cuando alguien se atrasa, le llega un aviso por correo (y a ti, el de leads sin atender más de ${p.jefe} h).`}>
+      {filas.length === 0 ? <p className="text-sm text-stone-500">No hay ejecutivos en este local.</p> : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs uppercase tracking-wide text-stone-400 border-b border-stone-200">
+                <th className="py-2 pr-3">Ejecutivo</th><th className="py-2 pr-3">Abiertos</th><th className="py-2 pr-3" title="Ventas / Compras / Consignaciones">V / C / Cs</th><th className="py-2 pr-3">Sin contactar</th>
+                <th className="py-2 pr-3">Contacto atrasado</th><th className="py-2 pr-3">Sin próxima acción</th><th className="py-2 pr-3">Acción vencida</th><th className="py-2 pr-3">Detenidos</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filas.map((f) => (
+                <tr key={f.id || "sin"} className="border-b border-stone-100">
+                  <td className={`py-2.5 pr-3 ${f.id ? "text-stone-900" : "text-rose-600"}`}>{f.nombre}</td>
+                  <td className="py-2.5 pr-3">{num(f.abiertos)}</td>
+                  <td className="py-2.5 pr-3 text-stone-600 tabular-nums">{f.porTipo.venta} / {f.porTipo.compra} / {f.porTipo.consignacion}</td>
+                  <td className="py-2.5 pr-3">{num(f.porAtender)}</td>
+                  <td className="py-2.5 pr-3">{num(f.atrasadosContacto, true)}</td>
+                  <td className="py-2.5 pr-3">{num(f.sinProxima)}</td>
+                  <td className="py-2.5 pr-3">{num(f.vencidas, true)}</td>
+                  <td className="py-2.5 pr-3">{num(f.detenidos, true)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Tarjeta>
+  );
+}
+
 export function HabilitacionesEquipo({ api = apiPorDefecto }) {
   const { cargando, error, datos, recargar } = useCarga(() => api("equipo.habilitaciones"), [api]);
   const [ocupado, setOcupado] = useState("");
@@ -42,6 +83,7 @@ export function HabilitacionesEquipo({ api = apiPorDefecto }) {
   const lista = datos.ejecutivos;
   return (
     <div className="flex flex-col gap-4">
+      <CargaEquipo api={api} />
       <Tarjeta titulo="Habilitaciones de los ejecutivos" ayuda="Ventas la trae todo ejecutivo nuevo. Aquí activas Compras y Consignaciones: los leads de compra y de consignación (incluidos los del sitio web) se reparten solo entre quienes las tienen, de forma rotativa.">
         {msg && <div className="mb-3"><Aviso tipo={msg.ok ? "ok" : "error"}>{msg.texto}</Aviso></div>}
         {lista.length === 0 ? <p className="text-sm text-stone-500">No hay ejecutivos en este local.</p> : (

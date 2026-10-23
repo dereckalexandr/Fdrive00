@@ -7,6 +7,7 @@
 //   - leads.asignar                       -> supervisor: ve, modifica y reasigna todo el local
 //   - cuenta maestra (admin)              -> todo; elige el local con `localId`
 // Cada persona está acotada a su local. Los cambios importantes quedan en la bitácora.
+import { cargaDelEquipo } from "./alertas-leads-core.js";
 import { permisosEfectivos, configCompleta, limpiarExtra } from "./crm-core.js";
 import {
   ESTADOS_VEHICULO, ETAPAS, ETAPAS_CERRADAS, TIPOS_CONTACTO,
@@ -540,6 +541,20 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     const despues = vista(up.data);
     await audit(ctx.actor, "usuario.habilitar", "usuario", u.id, { nombre: u.nombre, permiso, activo: body.activo, antes: { compras: antes.compras, consignaciones: antes.consignaciones }, despues: { compras: despues.compras, consignaciones: despues.consignaciones } });
     return json({ ejecutivo: despues });
+  }
+
+  // Carga de trabajo del equipo (Jefe Local): quién tiene qué pendiente y qué está atrasado.
+  if (op === "equipo.carga") {
+    if (!esSupervisor) return err("forbidden", 403);
+    const cfg = await configNegocio();
+    let qu = sb.from("usuarios").select("id, nombre, roles, activo, local_id");
+    if (localId) qu = qu.eq("local_id", localId);
+    const [us, ls, ts] = await Promise.all([qu, scoped(sb.from("leads").select("*")), scoped(sb.from("tareas").select("lead_id, vence_en").eq("hecha", false))]);
+    if (us.error) return fallo(us.error);
+    if (ls.error) return fallo(ls.error);
+    const ejecutivos = (us.data ?? []).filter((u: any) => u.activo && (u.roles ?? []).includes("ejecutivo")).map((u: any) => ({ id: u.id, nombre: u.nombre }));
+    const carga = cargaDelEquipo({ ejecutivos, leads: ls.data ?? [], tareasPendientes: ts.error ? [] : (ts.data ?? []), ahora: new Date(), cfg });
+    return json({ ...carga, plazos: { primerContacto: cfg.horas_primer_contacto, jefe: cfg.horas_sin_contacto, detenido: cfg.dias_detenido } });
   }
 
   if (op.startsWith("tasaciones.")) {

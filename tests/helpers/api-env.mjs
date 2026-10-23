@@ -63,7 +63,7 @@ function patronARegex(patron, insensible) {
 }
 
 export function crearBaseFalsa() {
-  const tablas = { usuarios: [], locales: [], roles_permisos: [], bitacora: [], config_negocio: [], kv_store: [], vehiculos: [], clientes: [], leads: [], lead_eventos: [], tareas: [], cotizaciones: [], reservas: [], cierres: [], avisos: [], tasaciones: [], inspecciones: [], validaciones: [], validacion_docs: [], anuncios: [], anuncio_portales: [], campanias: [], publicaciones_rrss: [], material_vehiculo: [], compras: [], consignaciones: [], patentes_consultadas: [] };
+  const tablas = { usuarios: [], locales: [], roles_permisos: [], bitacora: [], config_negocio: [], kv_store: [], vehiculos: [], clientes: [], leads: [], lead_eventos: [], tareas: [], cotizaciones: [], reservas: [], cierres: [], avisos: [], tasaciones: [], inspecciones: [], validaciones: [], validacion_docs: [], anuncios: [], anuncio_portales: [], campanias: [], publicaciones_rrss: [], material_vehiculo: [], compras: [], consignaciones: [], patentes_consultadas: [], alertas_leads: [] };
   const consultas = [];
 
   function builder(nombre) {
@@ -159,7 +159,7 @@ export const iniciarFuncion = async () => {
   writeFileSync(fake, "export const createClient = () => globalThis.__baseFalsa.cliente;\n");
   const core = pathToFileURL(resolve("supabase/functions/api/crm-core.js")).href;
   let src = readFileSync("supabase/functions/api/index.ts", "utf8");
-  src = src.replace("npm:@supabase/supabase-js@2", pathToFileURL(fake).href).replace("./crm-core.js", core).replace("./ventas.ts", pathToFileURL(resolve("supabase/functions/api/ventas.ts")).href).replace("./publico.ts", pathToFileURL(resolve("supabase/functions/api/publico.ts")).href).replace("./patentes-core.js", pathToFileURL(resolve("supabase/functions/api/patentes-core.js")).href);
+  src = src.replace("npm:@supabase/supabase-js@2", pathToFileURL(fake).href).replace("./crm-core.js", core).replace("./ventas.ts", pathToFileURL(resolve("supabase/functions/api/ventas.ts")).href).replace("./publico.ts", pathToFileURL(resolve("supabase/functions/api/publico.ts")).href).replace("./alertas.ts", pathToFileURL(resolve("supabase/functions/api/alertas.ts")).href).replace("./patentes-core.js", pathToFileURL(resolve("supabase/functions/api/patentes-core.js")).href);
   const archivo = join(dir, "index.mts");
   writeFileSync(archivo, src);
   globalThis.__baseFalsa = db;

@@ -23,6 +23,7 @@ import {
 import { ventasOp } from "./ventas.ts";
 import { limiteDiario, limiteWeb } from "./patentes-core.js";
 import { publicOp } from "./publico.ts";
+import { correrAlertas } from "./alertas.ts";
 
 const sb = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -597,6 +598,15 @@ Deno.serve(async (req) => {
     // Sitio web público: catálogo y solicitudes de los visitantes (no requiere sesión; se valida y limita adentro).
     if (action === "public") {
       return await publicOp({ sb, json, audit, isMissingTable, rolePermOverrides, ip }, body);
+    }
+
+    // Tarea programada (pg_cron): manda por correo las alertas de plazos de los leads. Solo con el secreto CRON_SECRET.
+    if (action === "cronAlertas") {
+      const esperado = Deno.env.get("CRON_SECRET") ?? "";
+      const recibido = String(body?.secreto ?? "");
+      if (esperado.length < 16 || recibido.length !== esperado.length || !safeEqual(new TextEncoder().encode(recibido), new TextEncoder().encode(esperado))) return json({ error: "unauthorized" }, 401);
+      try { return json({ ok: true, ...(await correrAlertas({ sb, rolePermOverrides, audit })) }); }
+      catch (e) { console.error("cronAlertas:", e); return json({ error: "server_error", detalle: String((e as any)?.message ?? e).slice(0, 200) }, 500); }
     }
 
     /* ----- autenticación ----- */

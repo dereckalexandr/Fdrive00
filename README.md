@@ -828,3 +828,10 @@ Nueva pestaña **Hoy** (la primera de *Trabajo diario*): los leads abiertos orde
 - El Jefe Local puede marcar varios leads abiertos y **reasignarlos en lote** (reparto automático o a una persona) con `leads.reasignarLote` (hasta 50 por vez; omite cerrados, con cierre en curso o de otro tipo no habilitado).
 - **Exportar a Excel (CSV)**: respeta filtros y selección; separador «;», UTF-8 con BOM y celdas protegidas contra fórmulas.
 - La lógica es pura y se prueba en `supabase/functions/api/leads-lista-core.js` (`tests/leads-lista-core.test.mjs`). No requiere SQL ni cambios en la función.
+
+## Rediseño de leads · Fase 4: alertas de plazos por correo y carga del equipo
+
+- **Carga del equipo** (Ventas → Equipo, solo Jefe Local): por ejecutivo, leads abiertos (y cuántos de venta / compra / consignación), sin contactar, contacto atrasado, sin próxima acción, acción vencida y detenidos; lo atrasado se marca en rojo. Usa los plazos de *Configuración* (primer contacto, Jefe, días detenido). Operación `equipo.carga`.
+- **Alertas por correo**: una tarea programada (pg_cron, cada 30 min) llama a la función con la acción `cronAlertas` y el secreto `CRON_SECRET`. Se avisa **una sola vez por lead y tipo** (tabla `alertas_leads`): primer contacto atrasado → ejecutivo (o Jefes si no tiene); sigue sin atender pasado el plazo del Jefe → Jefes del local; detenido → ejecutivo. Un correo resumen por persona. Sin `RESEND_API_KEY` o sin la tabla no se envía nada.
+- Instalación: `supabase-crm-alertas.sql` (tabla + tarea programada), secreto `CRON_SECRET` (mínimo 16 caracteres).
+- Código: `alertas-leads-core.js` (reglas puras), `alertas.ts` (envío), `tests/alertas-leads.test.mjs`.
