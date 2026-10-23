@@ -75,7 +75,7 @@ function Foto({ vehiculoId, fotoId, alt = "", className = "" }) {
 const BTN = "px-5 py-3 text-sm bg-amber-500 text-stone-900 font-semibold rounded-lg shadow-suave hover:bg-amber-400 disabled:opacity-50 transition-colors";
 const BTN_2 = "px-5 py-3 text-sm border border-stone-300 bg-white text-stone-800 font-medium rounded-lg hover:bg-stone-50 transition-colors";
 const INPUT = "border border-stone-300 bg-white px-3 py-2.5 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-amber-500 w-full";
-const Campo = ({ etiqueta, children, ayuda }) => (<label className="text-sm text-stone-700 flex flex-col gap-1">{etiqueta}{children}{ayuda && <span className="text-xs text-stone-500">{ayuda}</span>}</label>);
+const Campo = ({ etiqueta, children, ayuda, clase = "" }) => (<label className={`text-sm text-stone-700 flex flex-col gap-1 min-w-0 ${clase}`}>{etiqueta}{children}{ayuda && <span className="text-xs text-stone-500">{ayuda}</span>}</label>);
 
 function Marco({ empresa, ir, children }) {
   const wa = empresa && empresa.whatsapp ? `https://wa.me/${empresa.whatsapp}` : "";
@@ -192,12 +192,12 @@ function Formulario({ tipo, vehiculo, locales = [], empresa, onCerrar }) {
       )}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <Campo etiqueta="Tu nombre"><input value={f.nombre} onChange={(e) => set("nombre", e.target.value)} className={INPUT} autoComplete="name" required /></Campo>
-        <Campo etiqueta="Teléfono" ayuda={f.codigoPais === "56" ? "Chile: 9 dígitos, por ejemplo 9 1234 5678." : "Escribe el número sin el código de área."}>
-          <div className="flex flex-col sm:flex-row gap-2">
+        <Campo clase="md:col-span-2" etiqueta="Teléfono" ayuda={f.codigoPais === "56" ? "Chile: 9 dígitos, por ejemplo 9 1234 5678." : "Escribe el número sin el código de área."}>
+          <div className="flex flex-col sm:flex-row gap-2 min-w-0">
             <select value={f.codigoPais} onChange={(e) => set("codigoPais", e.target.value)} className={`${INPUT} sm:!w-[12rem] sm:shrink-0`} aria-label="Código de área del país" required>
               {PAISES.map((pa) => <option key={pa.id} value={pa.codigo}>{pa.nombre} (+{pa.codigo})</option>)}
             </select>
-            <input type="tel" value={f.telefono} onChange={(e) => set("telefono", e.target.value)} className={`${INPUT} sm:flex-1 sm:min-w-[14rem] !text-base !py-3 tracking-wide`} autoComplete="tel-national" inputMode="tel" placeholder={f.codigoPais === "56" ? "9 1234 5678" : "Número"} required />
+            <input type="tel" value={f.telefono} onChange={(e) => set("telefono", e.target.value)} className={`${INPUT} sm:flex-1 min-w-0 !text-base !py-3 tracking-wide`} autoComplete="tel-national" inputMode="tel" placeholder={f.codigoPais === "56" ? "9 1234 5678" : "Número"} required />
           </div>
         </Campo>
       </div>
