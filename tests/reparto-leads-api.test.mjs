@@ -23,7 +23,7 @@ async function pedir(tipo, extra = {}) {
   return ultimoLead();
 }
 const consulta = (veh) => pedir("consulta", { vehiculoId: veh });
-const vender = (modalidad) => pedir("vender", { modalidad, patente: `ZX${String(1000 + ++n)}`, marca: "Kia", modelo: "Rio", anio: 2019, km: 50000, duenos: 1, prenda: "no", mantenciones: "si", precioEsperado: 7000000 });
+const vender = (modalidad) => pedir("vender", { modalidad, patente: `ZX${String(1000 + ++n)}`, marca: "Kia", modelo: "Rio", anio: 2019, km: 50000, transmision: "Automática", combustible: "Bencina", duenos: 1, prenda: "no", mantenciones: "si", precioEsperado: 7000000 });
 const conteo = (leads) => leads.reduce((m, l) => { const k = nombreDe(l.asignado_a); m[k] = (m[k] || 0) + 1; return m; }, {});
 
 before(async () => {
@@ -87,7 +87,7 @@ test("Cada grupo rota por separado: recibir un lead de venta no quita el turno d
 });
 
 test("Cambiar mi auto por otro (renovar): es un lead de venta y rota con el resto de las ventas", async () => {
-  const renovar = () => pedir("renovar", { vehiculoId: U.vehiculo, patente: `RN${String(1000 + ++n)}`, marca: "Kia", modelo: "Rio", anio: 2016, km: 90000, duenos: 2, prenda: "no", mantenciones: "no", precioEsperado: 4000000 });
+  const renovar = () => pedir("renovar", { vehiculoId: U.vehiculo, patente: `RN${String(1000 + ++n)}`, marca: "Kia", modelo: "Rio", anio: 2016, km: 90000, transmision: "Automática", combustible: "Bencina", duenos: 2, prenda: "no", mantenciones: "no", precioEsperado: 4000000 });
   const seguidos = [await consulta(U.vehiculo), await renovar(), await consulta(U.vehiculo), await renovar()];
   assert.ok(seguidos.every((l) => l.tipo === "venta"));
   assert.ok(seguidos.every((l) => ["ventasYcompras", "soloVentas"].includes(nombreDe(l.asignado_a))), "solo con Ventas");

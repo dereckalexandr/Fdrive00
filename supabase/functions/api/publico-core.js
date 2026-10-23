@@ -3,7 +3,7 @@
 //
 // PRIVACIDAD: todo lo que sale hacia el público pasa por `vehiculoPublico`, que arma el vehículo con una lista cerrada de campos.
 // Nunca salen la patente, el costo, las notas internas ni quién lo creó.
-import { normalizarPatente, patenteValida, soloDigitos, cuotaEstimada } from "./ventas-core.js";
+import { normalizarPatente, patenteValida, soloDigitos, cuotaEstimada, TRANSMISIONES, COMBUSTIBLES } from "./ventas-core.js";
 
 /* ---------- Catálogo ---------- */
 export const ESTADOS_VISIBLES = ["disponible", "reservado"];
@@ -137,13 +137,15 @@ export function validarSolicitudWeb(input, ahora = new Date()) {
     const km = entero(i.km, 0, 2_000_000);
     if (km === null || Number.isNaN(km)) return { ok: false, error: "km_invalido" };
     const modalidad = tipo.id === "renovar" ? "cambiar" : i.modalidad === "consignar" ? "consignar" : "vender";
+    if (!TRANSMISIONES.includes(i.transmision)) return { ok: false, error: "transmision_invalida" };
+    if (!COMBUSTIBLES.includes(i.combustible)) return { ok: false, error: "combustible_invalido" };
     const duenos = entero(i.duenos, 1, 30);
     if (duenos === null || Number.isNaN(duenos)) return { ok: false, error: "duenos_invalido" };
     if (!["si", "no"].includes(i.prenda)) return { ok: false, error: "prenda_invalida" };
     if (!["si", "no"].includes(i.mantenciones)) return { ok: false, error: "mantenciones_invalidas" };
     const precioEsperado = entero(i.precioEsperado, 1, 2_000_000_000);
     if (precioEsperado === null || Number.isNaN(precioEsperado)) return { ok: false, error: "precio_esperado_invalido" };
-    base.vende = { patente, marca, modelo, anio, km, modalidad, duenos, prenda: i.prenda, mantenciones: i.mantenciones, precioEsperado };
+    base.vende = { patente, marca, modelo, anio, km, modalidad, transmision: i.transmision, combustible: i.combustible, duenos, prenda: i.prenda, mantenciones: i.mantenciones, precioEsperado };
   }
   return { ok: true, value: base };
 }
@@ -165,6 +167,7 @@ export function resumenSolicitud(v, vehiculoTexto = "") {
   if (v.tipo === "financiamiento") partes.push(`Cotiza financiamiento de ${vehiculoTexto}: pie $${Number(v.pie).toLocaleString("es-CL")}, ${v.plazo} cuotas`);
   if (v.tipo === "vender") partes.push(`${v.vende.modalidad === "consignar" ? "Quiere consignar" : "Quiere vender"}: ${v.vende.marca} ${v.vende.modelo} ${v.vende.anio} · ${v.vende.km.toLocaleString("es-CL")} km · ${v.vende.patente}`);
   if (v.tipo === "renovar") partes.push(`Quiere cambiar su ${v.vende.marca} ${v.vende.modelo} ${v.vende.anio} · ${v.vende.km.toLocaleString("es-CL")} km · ${v.vende.patente} por ${vehiculoTexto}`);
+  if ((v.tipo === "vender" || v.tipo === "renovar") && v.vende.transmision) partes.push(`${v.vende.transmision} · ${v.vende.combustible}`);
   if ((v.tipo === "vender" || v.tipo === "renovar") && v.vende.duenos) partes.push(`${v.vende.duenos} dueño${v.vende.duenos === 1 ? "" : "s"} · prenda: ${v.vende.prenda === "si" ? "sí" : "no"} · mantenciones en la marca: ${v.vende.mantenciones === "si" ? "sí" : "no"} · precio esperado $${Number(v.vende.precioEsperado).toLocaleString("es-CL")}`);
   if (v.mensaje) partes.push(`Mensaje: ${v.mensaje}`);
   return partes.join(". ");
@@ -184,6 +187,8 @@ export const MENSAJES_WEB = {
   codigo_pais_invalido: "Elige el código de área de tu país.",
   email_requerido: "Escribe tu correo electrónico.",
   mensaje_requerido: "Cuéntanos algo más de tu auto (escribe un comentario).",
+  transmision_invalida: "Elige la transmisión de tu auto.",
+  combustible_invalido: "Elige el combustible de tu auto.",
   duenos_invalido: "Indica cuántos dueños ha tenido el auto (un número entre 1 y 30).",
   prenda_invalida: "Indica si el auto tiene prenda (Sí o No).",
   mantenciones_invalidas: "Indica si tiene las mantenciones en la marca (Sí o No).",

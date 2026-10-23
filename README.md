@@ -835,3 +835,7 @@ Nueva pestaña **Hoy** (la primera de *Trabajo diario*): los leads abiertos orde
 - **Alertas por correo**: una tarea programada (pg_cron, cada 30 min) llama a la función con la acción `cronAlertas` y el secreto `CRON_SECRET`. Se avisa **una sola vez por lead y tipo** (tabla `alertas_leads`): primer contacto atrasado → ejecutivo (o Jefes si no tiene); sigue sin atender pasado el plazo del Jefe → Jefes del local; detenido → ejecutivo. Un correo resumen por persona. Sin `RESEND_API_KEY` o sin la tabla no se envía nada.
 - Instalación: `supabase-crm-alertas.sql` (tabla + tarea programada), secreto `CRON_SECRET` (mínimo 16 caracteres).
 - Código: `alertas-leads-core.js` (reglas puras), `alertas.ts` (envío), `tests/alertas-leads.test.mjs`.
+
+## Sitio web · transmisión y combustible obligatorios
+
+En «Vende o consigna tu auto» (y «Cambiar mi auto por otro») se agregaron dos listas obligatorias: **Transmisión** (Mecánica / Automática) y **Combustible** (Bencina / Diesel / Híbrido / Eléctrico). Se completan solas al buscar por patente si el proveedor las informa. El servidor las valida (`transmision_invalida`, `combustible_invalido`), las guarda en el vehículo ofrecido del lead y las incluye en el resumen que ve el ejecutivo. Sin SQL.

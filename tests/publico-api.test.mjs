@@ -212,7 +212,7 @@ test("Cotizar financiamiento: el lead guarda el pie y recibe la cuota referencia
 
 test("Vender o consignar: lead de compra o consignación y una tasación esperando al Tasador", async () => {
   nuevaIp();
-  const datos = { patente: "ab-cd 12", marca: "Toyota", modelo: "Yaris", anio: 2018, km: 78000, duenos: 2, prenda: "no", mantenciones: "si", precioEsperado: 8500000 };
+  const datos = { patente: "ab-cd 12", marca: "Toyota", modelo: "Yaris", anio: 2018, km: 78000, transmision: "Automática", combustible: "Bencina", duenos: 2, prenda: "no", mantenciones: "si", precioEsperado: 8500000 };
   const r = await sol("vender", { ...datos, modalidad: "consignar", localId: L1 });
   assert.equal(r.status, 200, JSON.stringify(r));
   const l = leadsWeb()[leadsWeb().length - 1];
@@ -245,7 +245,7 @@ test("Vender o consignar: lead de compra o consignación y una tasación esperan
 
 test("Vender o consignar: el teléfono lleva código de país y se guarda como número internacional", async () => {
   nuevaIp();
-  const datos = { patente: "PPPP11", marca: "Kia", modelo: "Rio", anio: 2020, km: 30000, duenos: 1, prenda: "si", mantenciones: "si", precioEsperado: 7000000, modalidad: "vender", localId: L1 };
+  const datos = { patente: "PPPP11", marca: "Kia", modelo: "Rio", anio: 2020, km: 30000, transmision: "Automática", combustible: "Bencina", duenos: 1, prenda: "si", mantenciones: "si", precioEsperado: 7000000, modalidad: "vender", localId: L1 };
   assert.equal((await sol("vender", { ...datos, codigoPais: "56", telefono: "9 8765 4321" })).status, 200);
   const l = leadsWeb()[leadsWeb().length - 1];
   const cli = db.tablas.clientes.find((c) => c.id === l.cliente_id);
@@ -259,7 +259,7 @@ test("Vender o consignar: el teléfono lleva código de país y se guarda como n
 
 test("Renovar (cambiar mi auto por otro): lead de venta con su auto como parte de pago y su tasación esperando al Tasador", async () => {
   nuevaIp();
-  const datos = { vehiculoId: U.disp.id, patente: "ab-cd 34", marca: "Chevrolet", modelo: "Sail", anio: 2017, km: 88000, duenos: 3, prenda: "si", mantenciones: "no", precioEsperado: 4500000 };
+  const datos = { vehiculoId: U.disp.id, patente: "ab-cd 34", marca: "Chevrolet", modelo: "Sail", anio: 2017, km: 88000, transmision: "Automática", combustible: "Bencina", duenos: 3, prenda: "si", mantenciones: "no", precioEsperado: 4500000 };
   const r = await sol("renovar", datos);
   assert.equal(r.status, 200, JSON.stringify(r));
   const l = leadsWeb()[leadsWeb().length - 1];
@@ -301,7 +301,7 @@ test("Sin ejecutivos habilitados el lead queda sin asignar; con varios locales h
   assert.ok(db.tablas.lead_eventos.some((e) => e.lead_id === l.id && /sin ejecutivos habilitados/.test(e.detalle)));
   // Dos locales y sin vehículo: se debe indicar cuál.
   nuevaIp();
-  const datos = { patente: "QQQQ11", marca: "Mazda", modelo: "3", anio: 2019, km: 50000, modalidad: "vender", duenos: 1, prenda: "no", mantenciones: "no", precioEsperado: 9000000 };
+  const datos = { patente: "QQQQ11", marca: "Mazda", modelo: "3", anio: 2019, km: 50000, modalidad: "vender", transmision: "Automática", combustible: "Bencina", duenos: 1, prenda: "no", mantenciones: "no", precioEsperado: 9000000 };
   assert.equal((await sol("vender", datos)).error, "sin_local");
   assert.equal((await sol("vender", { ...datos, localId: L2 })).status, 200);
   assert.equal(leadsWeb()[leadsWeb().length - 1].local_id, L2);

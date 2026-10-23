@@ -85,7 +85,7 @@ test("Financiamiento: pie y plazo, y la cuota referencial", () => {
 });
 
 test("Vender o consignar: datos del vehículo del visitante", () => {
-  const v = (o = {}) => base({ tipo: "vender", vehiculoId: undefined, patente: "ab-cd 12", marca: "Toyota", modelo: "Yaris", anio: 2018, km: 78000, modalidad: "consignar", duenos: 2, prenda: "no", mantenciones: "si", precioEsperado: 8500000, ...o });
+  const v = (o = {}) => base({ tipo: "vender", vehiculoId: undefined, patente: "ab-cd 12", marca: "Toyota", modelo: "Yaris", anio: 2018, km: 78000, modalidad: "consignar", transmision: "Automática", combustible: "Bencina", duenos: 2, prenda: "no", mantenciones: "si", precioEsperado: 8500000, ...o });
   const ok = validarSolicitudWeb(v(), AHORA);
   assert.ok(ok.ok, JSON.stringify(ok));
   assert.equal(ok.value.vende.patente, "ABCD12");
@@ -102,12 +102,16 @@ test("Vender o consignar: datos del vehículo del visitante", () => {
 });
 
 test("Vender o consignar: todos los datos son obligatorios", () => {
-  const v = (o = {}) => base({ tipo: "vender", vehiculoId: undefined, patente: "ABCD12", marca: "Toyota", modelo: "Yaris", anio: 2018, km: 78000, modalidad: "vender", duenos: 1, prenda: "no", mantenciones: "no", precioEsperado: 8000000, ...o });
+  const v = (o = {}) => base({ tipo: "vender", vehiculoId: undefined, patente: "ABCD12", marca: "Toyota", modelo: "Yaris", anio: 2018, km: 78000, modalidad: "vender", transmision: "Automática", combustible: "Bencina", duenos: 1, prenda: "no", mantenciones: "no", precioEsperado: 8000000, ...o });
   assert.ok(validarSolicitudWeb(v(), AHORA).ok);
   const e = (o) => validarSolicitudWeb(v(o), AHORA).error;
   assert.equal(e({ email: "" }), "email_requerido");
   assert.equal(e({ mensaje: "" }), "mensaje_requerido");
   assert.equal(e({ mensaje: "  " }), "mensaje_requerido");
+  assert.equal(e({ transmision: "" }), "transmision_invalida");
+  assert.equal(e({ transmision: "CVT" }), "transmision_invalida");
+  assert.equal(e({ combustible: "" }), "combustible_invalido");
+  assert.equal(e({ combustible: "Gas" }), "combustible_invalido");
   assert.equal(e({ duenos: "" }), "duenos_invalido");
   assert.equal(e({ duenos: 0 }), "duenos_invalido");
   assert.equal(e({ duenos: 31 }), "duenos_invalido");
@@ -166,7 +170,7 @@ test("Datos del sitio en la configuración", () => {
 });
 
 test("Renovar (cambiar mi auto por otro): exige el vehículo deseado y todos los datos del auto actual; es un lead de venta", () => {
-  const r = (o = {}) => base({ tipo: "renovar", vehiculoId: "v1", patente: "ab-cd 12", marca: "Toyota", modelo: "Yaris", anio: 2016, km: 90000, duenos: 2, prenda: "no", mantenciones: "si", precioEsperado: 5000000, ...o });
+  const r = (o = {}) => base({ tipo: "renovar", vehiculoId: "v1", patente: "ab-cd 12", marca: "Toyota", modelo: "Yaris", anio: 2016, km: 90000, transmision: "Automática", combustible: "Bencina", duenos: 2, prenda: "no", mantenciones: "si", precioEsperado: 5000000, ...o });
   const ok = validarSolicitudWeb(r(), AHORA);
   assert.ok(ok.ok, JSON.stringify(ok));
   assert.equal(tipoLeadDe(ok.value), "venta", "va al reparto de ventas");

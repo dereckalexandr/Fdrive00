@@ -113,7 +113,7 @@ const mananaALas11 = () => { const d = new Date(); d.setDate(d.getDate() + 1); d
 
 function Formulario({ tipo, vehiculo, locales = [], empresa, onCerrar }) {
   const [abiertoEn] = useState(() => Date.now()); // momento en que se abrió: los robots envían al instante
-  const [f, setF] = useState({ nombre: "", telefono: "", email: "", mensaje: "", fechaHora: mananaALas11(), pie: "", plazo: 48, patente: "", marca: "", modelo: "", anio: "", km: "", modalidad: "vender", codigoPais: "56", duenos: "", prenda: "", mantenciones: "", precioEsperado: "", localId: locales.length === 1 ? locales[0].id : "", acepta: false, web: "" });
+  const [f, setF] = useState({ nombre: "", telefono: "", email: "", mensaje: "", fechaHora: mananaALas11(), pie: "", plazo: 48, patente: "", marca: "", modelo: "", anio: "", km: "", modalidad: "vender", transmision: "", combustible: "", codigoPais: "56", duenos: "", prenda: "", mantenciones: "", precioEsperado: "", localId: locales.length === 1 ? locales[0].id : "", acepta: false, web: "" });
   const [estado, setEstado] = useState({ enviando: false, error: "", listo: null });
   const [verPrivacidad, setVerPrivacidad] = useState(false);
   const [buscandoPatente, setBuscandoPatente] = useState(false);
@@ -126,7 +126,7 @@ function Formulario({ tipo, vehiculo, locales = [], empresa, onCerrar }) {
     try {
       const r = await llamar("patente", { patente: f.patente.replace(/[^A-Z0-9]/g, "") });
       const c = camposDesdePatente(r.vehiculo);
-      setF((x) => ({ ...x, marca: c.marca || x.marca, modelo: c.modelo || x.modelo, anio: c.anio || x.anio }));
+      setF((x) => ({ ...x, marca: c.marca || x.marca, modelo: c.modelo || x.modelo, anio: c.anio || x.anio, transmision: ["Mecánica", "Automática"].includes(c.transmision) ? c.transmision : x.transmision, combustible: ["Bencina", "Diesel", "Híbrido", "Eléctrico"].includes(c.combustible) ? c.combustible : x.combustible }));
       setMsgPatente({ ok: true, texto: "Completamos la marca, el modelo y el año. Revísalos y agrega el kilometraje." });
     } catch (e) { setMsgPatente({ ok: false, texto: textoError(e) }); }
     setBuscandoPatente(false);
@@ -140,7 +140,7 @@ function Formulario({ tipo, vehiculo, locales = [], empresa, onCerrar }) {
       if (vehiculo) datos.vehiculoId = vehiculo.id;
       if (tipo === "visita") datos.fechaHora = f.fechaHora ? new Date(f.fechaHora).toISOString() : "";
       if (tipo === "financiamiento") { datos.pie = f.pie === "" ? "" : Number(f.pie); datos.plazo = Number(f.plazo); }
-      if (tipo === "vender" || tipo === "renovar") Object.assign(datos, { patente: f.patente, marca: f.marca, modelo: f.modelo, anio: f.anio === "" ? "" : Number(f.anio), km: f.km === "" ? "" : Number(f.km), modalidad: tipo === "vender" ? f.modalidad : "cambiar", duenos: f.duenos === "" ? "" : Number(f.duenos), prenda: f.prenda, mantenciones: f.mantenciones, precioEsperado: f.precioEsperado === "" ? "" : Number(f.precioEsperado) });
+      if (tipo === "vender" || tipo === "renovar") Object.assign(datos, { patente: f.patente, marca: f.marca, modelo: f.modelo, anio: f.anio === "" ? "" : Number(f.anio), km: f.km === "" ? "" : Number(f.km), modalidad: tipo === "vender" ? f.modalidad : "cambiar", transmision: f.transmision, combustible: f.combustible, duenos: f.duenos === "" ? "" : Number(f.duenos), prenda: f.prenda, mantenciones: f.mantenciones, precioEsperado: f.precioEsperado === "" ? "" : Number(f.precioEsperado) });
       const r = await llamar("solicitud", datos);
       setEstado({ enviando: false, error: "", listo: r });
     } catch (e) { setEstado({ enviando: false, error: textoError(e), listo: null }); }
@@ -180,6 +180,8 @@ function Formulario({ tipo, vehiculo, locales = [], empresa, onCerrar }) {
             <Campo etiqueta="Modelo"><input value={f.modelo} onChange={(e) => set("modelo", e.target.value)} className={INPUT} required /></Campo>
             <Campo etiqueta="Año"><input type="number" value={f.anio} onChange={(e) => set("anio", e.target.value)} className={INPUT} required /></Campo>
             <Campo etiqueta="Kilometraje"><input type="number" min="0" value={f.km} onChange={(e) => set("km", e.target.value)} className={INPUT} required /></Campo>
+            <Campo etiqueta="Transmisión"><select value={f.transmision} onChange={(e) => set("transmision", e.target.value)} className={INPUT} required><option value="">Elige…</option><option>Mecánica</option><option>Automática</option></select></Campo>
+            <Campo etiqueta="Combustible"><select value={f.combustible} onChange={(e) => set("combustible", e.target.value)} className={INPUT} required><option value="">Elige…</option><option>Bencina</option><option>Diesel</option><option>Híbrido</option><option>Eléctrico</option></select></Campo>
             <Campo etiqueta="Número de dueños"><input type="number" min="1" max="30" value={f.duenos} onChange={(e) => set("duenos", e.target.value)} className={INPUT} placeholder="Ej. 1" required /></Campo>
             <Campo etiqueta="¿Tiene prenda?"><select value={f.prenda} onChange={(e) => set("prenda", e.target.value)} className={INPUT} required><option value="">Elige…</option><option value="si">Sí</option><option value="no">No</option></select></Campo>
             <Campo etiqueta="¿Mantenciones en la marca?"><select value={f.mantenciones} onChange={(e) => set("mantenciones", e.target.value)} className={INPUT} required><option value="">Elige…</option><option value="si">Sí</option><option value="no">No</option></select></Campo>

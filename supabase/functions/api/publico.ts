@@ -211,7 +211,7 @@ export async function publicOp(ctx: CtxPublico, body: any): Promise<Response> {
     for (const l of lastQ.data ?? []) if (l.asignado_a && grupoDeReparto(l.tipo || "venta") === grupo && (!ultimas[l.asignado_a] || l.creado_en > ultimas[l.asignado_a])) ultimas[l.asignado_a] = l.creado_en;
     const asignado = elegirAsignado(elegibles, ultimas);
 
-    const vtWeb = s.tipo === "vender" || s.tipo === "renovar" ? validarVehiculoTasacion({ patente: s.vende.patente, marca: s.vende.marca, modelo: s.vende.modelo, anio: s.vende.anio, km: s.vende.km, duenos: s.vende.duenos, prenda: s.vende.prenda, mantenciones: s.vende.mantenciones, precioEsperado: s.vende.precioEsperado }) : null;
+    const vtWeb = s.tipo === "vender" || s.tipo === "renovar" ? validarVehiculoTasacion({ patente: s.vende.patente, marca: s.vende.marca, modelo: s.vende.modelo, anio: s.vende.anio, km: s.vende.km, transmision: s.vende.transmision, combustible: s.vende.combustible, duenos: s.vende.duenos, prenda: s.vende.prenda, mantenciones: s.vende.mantenciones, precioEsperado: s.vende.precioEsperado }) : null;
     const vehTexto = vehiculo ? `${vehiculo.marca} ${vehiculo.modelo} ${vehiculo.anio}` : "";
     const resumen = resumenSolicitud(s, vehTexto);
     let financiamiento: Record<string, unknown> = {};
@@ -225,7 +225,7 @@ export async function publicOp(ctx: CtxPublico, body: any): Promise<Response> {
       vehiculo_id: vehiculo ? vehiculo.id : null,
       vehiculo_interes: s.tipo === "vender" ? `${s.vende.modalidad === "consignar" ? "CONSIGNA" : "VENDE"}: ${s.vende.marca} ${s.vende.modelo} ${s.vende.anio} · ${s.vende.patente}` : null,
       // Renovar: su auto queda como vehículo en parte de pago del lead (el valor lo fija la tasación).
-      parte_pago: s.tipo === "renovar" ? { tiene: true, patente: s.vende.patente, marca: s.vende.marca, modelo: s.vende.modelo, anio: s.vende.anio, km: s.vende.km, valor: 0, duenos: s.vende.duenos, prenda: s.vende.prenda, mantenciones: s.vende.mantenciones, precioEsperado: s.vende.precioEsperado } : {}, financiamiento, asignado_a: asignado ? asignado.id : null, ...(vtWeb && vtWeb.ok ? { vehiculo_ofrecido: vtWeb.value } : {}),
+      parte_pago: s.tipo === "renovar" ? { tiene: true, patente: s.vende.patente, marca: s.vende.marca, modelo: s.vende.modelo, anio: s.vende.anio, km: s.vende.km, valor: 0, transmision: s.vende.transmision, combustible: s.vende.combustible, duenos: s.vende.duenos, prenda: s.vende.prenda, mantenciones: s.vende.mantenciones, precioEsperado: s.vende.precioEsperado } : {}, financiamiento, asignado_a: asignado ? asignado.id : null, ...(vtWeb && vtWeb.ok ? { vehiculo_ofrecido: vtWeb.value } : {}),
       notas: [resumen, cuota ? `Cuota referencial: $${cuota.cuota.toLocaleString("es-CL")} por mes (financiando $${cuota.montoFinanciar.toLocaleString("es-CL")} a ${s.plazo} cuotas, tasa ${cfg.tasa_mensual_web}% mensual). Sujeta a evaluación.` : ""].filter(Boolean).join("\n").slice(0, 1000),
     }).select().single();
     if (ins.error) return fallo(ins.error);
