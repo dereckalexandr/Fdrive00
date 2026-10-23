@@ -238,7 +238,7 @@ test("Vender o consignar: lead de compra o consignación y una tasación esperan
   assert.equal(leadsWeb()[leadsWeb().length - 1].tipo, "compra");
   // Todo es obligatorio al vender o consignar.
   nuevaIp();
-  for (const [campo, valor, error] of [["email", "", "email_requerido"], ["mensaje", "", "mensaje_requerido"], ["duenos", "", "duenos_invalido"], ["prenda", "", "prenda_invalida"], ["mantenciones", "", "mantenciones_invalidas"], ["precioEsperado", "", "precio_esperado_invalido"]]) {
+  for (const [campo, valor, error] of [["email", "", "email_requerido"], ["duenos", "", "duenos_invalido"], ["prenda", "", "prenda_invalida"], ["mantenciones", "", "mantenciones_invalidas"], ["precioEsperado", "", "precio_esperado_invalido"]]) {
     assert.equal((await sol("vender", { ...datos, patente: "YYYY11", modalidad: "vender", localId: L1, [campo]: valor })).error, error, campo);
   }
 });

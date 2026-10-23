@@ -193,11 +193,11 @@ function Formulario({ tipo, vehiculo, locales = [], empresa, onCerrar }) {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <Campo etiqueta="Tu nombre"><input value={f.nombre} onChange={(e) => set("nombre", e.target.value)} className={INPUT} autoComplete="name" required /></Campo>
         <Campo etiqueta="Teléfono" ayuda={f.codigoPais === "56" ? "Chile: 9 dígitos, por ejemplo 9 1234 5678." : "Escribe el número sin el código de área."}>
-          <div className="flex gap-2">
-            <select value={f.codigoPais} onChange={(e) => set("codigoPais", e.target.value)} className={`${INPUT} !w-[11.5rem] shrink-0`} aria-label="Código de área del país" required>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <select value={f.codigoPais} onChange={(e) => set("codigoPais", e.target.value)} className={`${INPUT} sm:!w-[12rem] sm:shrink-0`} aria-label="Código de área del país" required>
               {PAISES.map((pa) => <option key={pa.id} value={pa.codigo}>{pa.nombre} (+{pa.codigo})</option>)}
             </select>
-            <input type="tel" value={f.telefono} onChange={(e) => set("telefono", e.target.value)} className={INPUT} autoComplete="tel-national" inputMode="tel" placeholder={f.codigoPais === "56" ? "9 1234 5678" : "Número"} required />
+            <input type="tel" value={f.telefono} onChange={(e) => set("telefono", e.target.value)} className={`${INPUT} sm:flex-1 sm:min-w-[14rem] !text-base !py-3 tracking-wide`} autoComplete="tel-national" inputMode="tel" placeholder={f.codigoPais === "56" ? "9 1234 5678" : "Número"} required />
           </div>
         </Campo>
       </div>
@@ -209,7 +209,7 @@ function Formulario({ tipo, vehiculo, locales = [], empresa, onCerrar }) {
           <Campo etiqueta="Plazo"><select value={f.plazo} onChange={(e) => set("plazo", e.target.value)} className={INPUT}>{PLAZOS_FINANCIAMIENTO.map((p) => <option key={p} value={p}>{p} cuotas</option>)}</select></Campo>
         </div>
       )}
-      <Campo etiqueta={tipo === "consulta" ? "Tu consulta" : tipo === "vender" || tipo === "renovar" ? "Comentarios sobre tu auto" : "Algo que quieras contarnos (opcional)"}><textarea rows={3} maxLength={500} value={f.mensaje} onChange={(e) => set("mensaje", e.target.value)} className={INPUT} required={tipo === "vender" || tipo === "renovar"} minLength={tipo === "vender" || tipo === "renovar" ? 3 : undefined} /></Campo>
+      <Campo etiqueta={tipo === "consulta" ? "Tu consulta" : tipo === "vender" || tipo === "renovar" ? "Comentarios sobre tu auto (opcional)" : "Algo que quieras contarnos (opcional)"}><textarea rows={3} maxLength={500} value={f.mensaje} onChange={(e) => set("mensaje", e.target.value)} className={INPUT} /></Campo>
 
       {/* Campo trampa: está fuera de la pantalla; las personas no lo ven, los robots lo llenan. */}
       <div aria-hidden="true" style={{ position: "absolute", left: "-10000px", width: 1, height: 1, overflow: "hidden" }}>
@@ -242,7 +242,7 @@ function Ventana({ titulo, onCerrar, children }) {
   }, [onCerrar]);
   return (
     <div className="fixed inset-0 z-40 bg-stone-900/60 flex items-end md:items-center justify-center overflow-y-auto" onMouseDown={(e) => e.target === e.currentTarget && onCerrar()}>
-      <div className="bg-white w-full md:max-w-xl max-h-screen overflow-y-auto p-5 md:p-6 flex flex-col gap-4 relative rounded-t-2xl md:rounded-2xl shadow-elevada" role="dialog" aria-modal="true" aria-label={titulo}>
+      <div className="bg-white w-full md:max-w-2xl max-h-screen overflow-y-auto p-5 md:p-6 flex flex-col gap-4 relative rounded-t-2xl md:rounded-2xl shadow-elevada" role="dialog" aria-modal="true" aria-label={titulo}>
         <div className="flex items-start justify-between gap-3"><h2 className="font-serif text-xl text-stone-900">{titulo}</h2><button onClick={onCerrar} className="text-stone-500 hover:text-stone-900 px-2" aria-label="Cerrar">✕</button></div>
         {children}
       </div>

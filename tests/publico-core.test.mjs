@@ -106,8 +106,7 @@ test("Vender o consignar: todos los datos son obligatorios", () => {
   assert.ok(validarSolicitudWeb(v(), AHORA).ok);
   const e = (o) => validarSolicitudWeb(v(o), AHORA).error;
   assert.equal(e({ email: "" }), "email_requerido");
-  assert.equal(e({ mensaje: "" }), "mensaje_requerido");
-  assert.equal(e({ mensaje: "  " }), "mensaje_requerido");
+  assert.ok(validarSolicitudWeb(v({ mensaje: "" }), AHORA).ok, "el comentario es opcional");
   assert.equal(e({ transmision: "" }), "transmision_invalida");
   assert.equal(e({ transmision: "CVT" }), "transmision_invalida");
   assert.equal(e({ combustible: "" }), "combustible_invalido");
@@ -182,7 +181,6 @@ test("Renovar (cambiar mi auto por otro): exige el vehículo deseado y todos los
   const e = (o) => validarSolicitudWeb(r(o), AHORA).error;
   assert.equal(e({ vehiculoId: "" }), "vehiculo_requerido");
   assert.equal(e({ email: "" }), "email_requerido");
-  assert.equal(e({ mensaje: "" }), "mensaje_requerido");
   assert.equal(e({ patente: "12" }), "patente_invalida");
   assert.equal(e({ km: "" }), "km_invalido");
   assert.equal(e({ duenos: "" }), "duenos_invalido");

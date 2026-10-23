@@ -105,7 +105,6 @@ export function validarSolicitudWeb(input, ahora = new Date()) {
   const conAuto = tipo.id === "vender" || tipo.id === "renovar";
   if (conAuto) {
     if (!email) return { ok: false, error: "email_requerido" };
-    if (mensaje.length < 3) return { ok: false, error: "mensaje_requerido" };
   }
   const base = { tipo: tipo.id, contacto: { nombre, telefono, email: email || null }, mensaje: mensaje || null, localId: i.localId ? String(i.localId) : null };
 
@@ -186,7 +185,6 @@ export const MENSAJES_WEB = {
   patente_invalida: "La patente no es válida (formato ABCD12 o AB1234).",
   codigo_pais_invalido: "Elige el código de área de tu país.",
   email_requerido: "Escribe tu correo electrónico.",
-  mensaje_requerido: "Cuéntanos algo más de tu auto (escribe un comentario).",
   transmision_invalida: "Elige la transmisión de tu auto.",
   combustible_invalido: "Elige el combustible de tu auto.",
   duenos_invalido: "Indica cuántos dueños ha tenido el auto (un número entre 1 y 30).",
