@@ -492,3 +492,25 @@ test("La cuenta maestra mira pero no opera", async () => {
   assert.equal((await ve(admin, "consignaciones.list", { vista: "local", localId: L1 })).status, 200);
   assert.equal((await ve(admin, "compras.responder", { id: U.compra1.id, acepta: true, localId: L1 })).error, "compra_estado_invalido", "la compra ya está anulada: nada que responder");
 });
+
+test("Etapas automáticas del tablero: tasación pedida → oferta → aceptada → documentos y pago, y la lista trae próxima acción y foto", async () => {
+  const lead = await leadDe(U.c1.token, "compra");
+  const p = await ve(U.c1.token, "compras.pedirTasacion", { leadId: lead.id });
+  assert.equal(p.status, 200, JSON.stringify(p));
+  assert.equal(fila("leads", lead.id).etapa, "tasacion");
+  assert.ok(db.tablas.lead_eventos.some((e) => e.lead_id === lead.id && e.tipo === "etapa" && /Tasación pedida/.test(e.detalle)));
+  assert.equal((await ve(U.t1.token, "tasaciones.tomar", { id: p.tasacion.id })).status, 200);
+  const t = await ve(U.t1.token, "tasaciones.completar", { id: p.tasacion.id, borrador: { valorCompra: 6500000, valorVenta: 8500000 } });
+  assert.equal(t.status, 200, JSON.stringify(t));
+  const o = await ofertar(U.c1.token, lead.id, t.tasacion.id, 6000000);
+  assert.equal(fila("leads", lead.id).etapa, "cotizado");
+  assert.equal((await ve(U.c1.token, "compras.responder", { id: o.compra.id, acepta: true })).status, 200);
+  assert.equal(fila("leads", lead.id).etapa, "reservado");
+  assert.equal((await ve(U.c1.token, "compras.solicitarPago", { id: o.compra.id, datos: PAGO() })).status, 200);
+  assert.equal(fila("leads", lead.id).etapa, "documentos");
+  // Un lead que ya avanzó no retrocede por pedir otra tasación.
+  const lista = await ve(U.c1.token, "leads.list", {});
+  assert.equal(lista.status, 200);
+  assert.ok(lista.proximas && typeof lista.proximas === "object");
+  assert.ok(lista.leads.some((l) => l.id === lead.id && l.etapa === "documentos"));
+});

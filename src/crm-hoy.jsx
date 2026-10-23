@@ -26,7 +26,7 @@ export function fechaProxima(dias, desde = new Date()) {
   if (d.getDay() === 0) d.setDate(d.getDate() + 1);
   return d;
 }
-const cuando = (iso) => {
+export const cuando = (iso) => {
   const d = new Date(iso);
   const hoy = new Date();
   const mismoDia = d.toDateString() === hoy.toDateString();

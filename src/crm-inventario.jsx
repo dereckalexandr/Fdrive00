@@ -21,7 +21,7 @@ const estadoNombre = (id) => (ESTADOS_VEHICULO.find((e) => e.id === id) || {}).n
 const COLOR_ESTADO = { disponible: "bg-emerald-100 text-emerald-800", reservado: "bg-amber-100 text-amber-800", vendido: "bg-stone-200 text-stone-700", preparacion: "bg-sky-100 text-sky-800" };
 
 const cacheFotos = new Map();
-function Miniatura({ vehiculoId, fotoId, grande = false, onQuitar }) {
+export function Miniatura({ vehiculoId, fotoId, grande = false, onQuitar, tam: tamPropio }) {
   const [src, setSrc] = useState(cacheFotos.get(fotoId) || "");
   useEffect(() => {
     if (src) return undefined;
@@ -32,7 +32,7 @@ function Miniatura({ vehiculoId, fotoId, grande = false, onQuitar }) {
     })();
     return () => { vivo = false; };
   }, [vehiculoId, fotoId, src]);
-  const tam = grande ? "w-24 h-24" : "w-14 h-14";
+  const tam = tamPropio || (grande ? "w-24 h-24" : "w-14 h-14");
   return (
     <div className={`relative ${tam} bg-stone-200 border border-stone-300 shrink-0`}>
       {src ? <img src={src} alt="" className="w-full h-full object-cover" /> : <span className="absolute inset-0 flex items-center justify-center text-[10px] text-stone-400">…</span>}

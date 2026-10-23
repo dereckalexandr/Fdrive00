@@ -30,7 +30,7 @@ import {
 } from "./tasaciones-core.js";
 
 import {
-  folioCompra, folioConsignacion, COMPRA_ABIERTA, CONSIGNACION_ABIERTA, permisoDeTipo, validarVehiculoOfrecido, validarOferta, validarRespuestaOferta, validarPagoCompra,
+  folioCompra, folioConsignacion, etapaDeOperacion, COMPRA_ABIERTA, CONSIGNACION_ABIERTA, permisoDeTipo, validarVehiculoOfrecido, validarOferta, validarRespuestaOferta, validarPagoCompra,
   validarTransicionCompra, grupoDeReparto, vehiculoDeCompra, validarConsignacion, vencimientoConsignacion, diasParaVencer, validarTransicionConsignacion, validarExtension,
   vehiculoDeConsignacion, verificarPisoConsignado, filasConsignacion, metricasCompras,
 } from "./compras-core.js";
@@ -144,6 +144,19 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       if (!l.data) return false;
       return faltaProximaAccion(l.data, t.error ? [] : t.data ?? []);
     } catch { return false; }
+  }
+
+  /** Mueve un lead de compra o consignación a una etapa automática, solo si está en una de las etapas de partida (nunca retrocede ni pisa un cierre). */
+  async function avanzarEtapa(leadId: string | null | undefined, desde: string[], hacia: string, motivo: string, tipos: string[] = ["compra", "consignacion"]) {
+    try {
+      if (!leadId) return;
+      const { data: l } = await sb.from("leads").select("id, etapa, tipo").eq("id", leadId).maybeSingle();
+      if (!l || !tipos.includes(l.tipo || "venta") || !desde.includes(l.etapa)) return;
+      const up = await sb.from("leads").update({ etapa: hacia, actualizado_en: new Date().toISOString() }).eq("id", leadId).eq("etapa", l.etapa);
+      if (up.error) return;
+      const nombre = (e: string) => etapaDeOperacion(l.tipo, e, etapaNombre(e));
+      await evento(leadId, "etapa", `${nombre(l.etapa)} → ${nombre(hacia)} (${motivo})`);
+    } catch { /* la etapa es un reflejo: si no se pudo mover, la operación igual sigue */ }
   }
 
   async function evento(leadId: string, tipo: string, detalle: string) {
@@ -607,6 +620,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       const pp = { ...(lead.parte_pago || {}), tiene: true, patente: vh.patente, marca: vh.marca, modelo: vh.modelo, anio: vh.anio, km: vh.km };
       await sb.from("leads").update({ parte_pago: pp, actualizado_en: new Date().toISOString() }).eq("id", lead.id);
       await evento(lead.id, "tasacion", `Tasación ${folioTasacion(t.numero)} pedida por ${userName}: ${vh.marca} ${vh.modelo} ${vh.anio} (${vh.patente})`);
+      await avanzarEtapa(lead.id, ["nuevo", "contactado", "seguimiento"], "tasacion", "se pidió la tasación");
       await audit(ctx.actor, "tasacion.pedir", "tasacion", t.id, { numero: t.numero, patente: vh.patente, lead_id: lead.id });
       return json({ tasacion: (await enriquecer([t]))[0] });
     }
@@ -728,6 +742,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
           await evento(t.lead_id, "tasacion", `Tasación ${folioTasacion(t.numero)} completada por ${userName}: se reconoce ${dinero(data.valor_compra)} por el vehículo (venta esperada ${dinero(data.valor_venta)}). Las cotizaciones deben usar este valor o uno menor.`);
         }
         await audit(ctx.actor, "tasacion.completar", "tasacion", t.id, { numero: t.numero, valor_compra: data.valor_compra, valor_venta: data.valor_venta, lead_id: t.lead_id });
+        await avanzarEtapa(t.lead_id, ["tasacion", "nuevo", "contactado", "seguimiento"], "contrato", "la tasación está lista", ["consignacion"]);
         { const vh = data.vehiculo || {}; await avisarA([t.solicitante_id].filter(Boolean), "Tasación completada", [`${userName} completó la tasación ${folioTasacion(t.numero)}${vh.marca ? ` de ${vh.marca} ${vh.modelo || ""}` : ""}.`, `Se paga hasta ${dinero(data.valor_compra)}; venta esperada ${dinero(data.valor_venta)}.`]); }
         if (t.tipo === "directa") {
           const ya = await sb.from("validaciones").select("id").eq("tasacion_id", t.id);
@@ -1562,6 +1577,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       const vh = v.value.vehiculo;
       await anotar(ins.data, `Inspección ${folioInspeccion(ins.data.numero)} pedida por ${userName} para el ${fechaCL(v.value.fechaHora)}: ${vh.marca} ${vh.modelo} ${vh.anio} (${vh.patente}) en ${v.value.direccion}`);
       await audit(ctx.actor, "inspeccion.pedir", "inspeccion", ins.data.id, { numero: ins.data.numero, patente: vh.patente, origen });
+      await avanzarEtapa(ins.data.lead_id, ["nuevo", "contactado", "seguimiento"], "tasacion", "se pidió la inspección");
       return json({ inspeccion: (await enriquecer([ins.data]))[0] });
     }
 
@@ -1771,6 +1787,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
         fila = r.data;
       }
       await audit(ctx.actor, "inspeccion.registrar", "inspeccion", fila.id, { numero: fila.numero, patente: v.value.vehiculo.patente, origen: fila.origen, veredicto: v.value.resumen.veredicto });
+      await avanzarEtapa(fila.lead_id, ["tasacion"], "contrato", "la inspección está lista", ["consignacion"]);
       if (fila.origen !== "espontanea" && fila.solicitante_id) await avisarA([fila.solicitante_id], "Inspección realizada", [`${userName} realizó la inspección ${folioInspeccion(fila.numero)} de ${v.value.vehiculo.patente}.`, `Veredicto: ${VEREDICTOS[v.value.resumen.veredicto as keyof typeof VEREDICTOS]}.`]);
       return json({ inspeccion: (await enriquecer([fila]))[0] });
     }
@@ -1910,6 +1927,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       const ins = await sb.from("tasaciones").insert({ local_id: lead.local_id, tipo: "compra", lead_id: lead.id, solicitante_id: userId, vehiculo: vh.value, patente: vh.value.patente, notas_solicitud: "Para ofertar por la compra del vehículo", creado_por: userId }).select().single();
       if (ins.error) return fallar(ins.error);
       await evento(lead.id, "tasacion", `Tasación ${folioTasacion(ins.data.numero)} pedida por ${userName} para ofertar por la compra`);
+      await avanzarEtapa(lead.id, ["nuevo", "contactado", "seguimiento"], "tasacion", "se pidió la tasación");
       await audit(ctx.actor, "compra.pedir_tasacion", "tasacion", ins.data.id, { numero: ins.data.numero, patente: vh.value.patente, lead_id: lead.id });
       return json({ tasacion: { id: ins.data.id, folio: folioTasacion(ins.data.numero), estado: "pendiente" } });
     }
@@ -1974,6 +1992,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       const { data, error } = await sb.from("compras").update({ ...v.value, estado: "pago_pendiente", solicitado_por: userName, motivo_rechazo_pago: null, actualizado_en: new Date().toISOString() }).eq("id", c.id).select().single();
       if (error) return fallar(error);
       await evento(c.lead_id, "compra", `Pago de ${dinero(v.value.monto_final)} (${v.value.medio_pago}) solicitado por ${userName} para ${folioCompra(c.numero)}`);
+      await avanzarEtapa(c.lead_id, ["reservado"], "documentos", "se pidió aprobar el pago");
       await audit(ctx.actor, "compra.solicitar_pago", "compra", c.id, { numero: c.numero, monto: v.value.monto_final });
       if (!esSupervisor) await avisarSupervisores(c.local_id, "Pago de compra por aprobar", [`${userName} pidió aprobar el pago de ${dinero(v.value.monto_final)} (${v.value.medio_pago}) de la compra ${folioCompra(c.numero)}.`]);
       // El supervisor que registra su propia compra la aprueba, salvo que falten documentos por validar.
@@ -2006,6 +2025,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       const { data, error } = await sb.from("compras").update({ estado: "aceptada", motivo_rechazo_pago: motivo, actualizado_en: new Date().toISOString() }).eq("id", c.id).select().single();
       if (error) return fallar(error);
       await evento(c.lead_id, "compra", `Pago de ${folioCompra(c.numero)} rechazado por ${userName}: ${motivo}`);
+      await avanzarEtapa(c.lead_id, ["documentos"], "reservado", "se rechazó el pago");
       await audit(ctx.actor, "compra.rechazar_pago", "compra", c.id, { numero: c.numero, motivo });
       await avisarEjecutivoDe(c.lead_id, "Pago de compra rechazado", `${userName} rechazó el pago de la compra ${folioCompra(c.numero)}: ${motivo}`);
       return json(await compraDetalle(data));
@@ -2021,7 +2041,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       const { data, error } = await sb.from("compras").update({ estado: "cancelada", motivo, actualizado_en: ahora }).eq("id", c.id).select().single();
       if (error) return fallar(error);
       await sb.from("validaciones").update({ estado: "cancelada", actualizado_en: ahora }).eq("compra_id", c.id).neq("estado", "aprobada");
-      await sb.from("leads").update({ etapa: "contactado", actualizado_en: ahora }).eq("id", c.lead_id).in("etapa", ["cotizado", "reservado"]);
+      await sb.from("leads").update({ etapa: "contactado", actualizado_en: ahora }).eq("id", c.lead_id).in("etapa", ["cotizado", "reservado", "documentos"]);
       await evento(c.lead_id, "compra", `${folioCompra(c.numero)} cancelada por ${userName}: ${motivo}`);
       await audit(ctx.actor, "compra.cancelar", "compra", c.id, { numero: c.numero, motivo });
       return json(await compraDetalle(data));
@@ -2242,14 +2262,18 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     let leads: any[] = (data ?? []).filter((l: any) => !((l.etapa === "perdido" || l.etapa === "ganado") && Date.parse(l.actualizado_en) < hace30));
     if (!todos) leads = leads.filter((l) => l.asignado_a === userId);
     leads = leads.slice(0, MAX_LISTA);
-    const [clientes, vehiculos, usuarios, cp, ci, rs] = await Promise.all([
+    const [clientes, vehiculos, usuarios, cp, ci, rs, ta] = await Promise.all([
       porIds("clientes", leads.map((l) => l.cliente_id)),
       porIds("vehiculos", leads.map((l) => l.vehiculo_id)),
       porIds("usuarios", leads.map((l) => l.asignado_a)),
       scoped(sb.from("cotizaciones").select("lead_id, estado").eq("estado", "pendiente")),
       scoped(sb.from("cierres").select("lead_id").eq("estado", "pendiente")),
       scoped(sb.from("reservas").select("lead_id, vence_en").eq("estado", "activa")),
+      scoped(sb.from("tareas").select("id, lead_id, titulo, tipo, vence_en").eq("hecha", false).order("vence_en", { ascending: true })),
     ]);
+    // Próxima acción de cada lead (la tarea pendiente más cercana), para las tarjetas del tablero.
+    const proximas: Record<string, { id: string; titulo: string; tipo: string; vence_en: string }> = {};
+    if (!ta.error) for (const t of ta.data ?? []) if (t.lead_id && !proximas[t.lead_id]) proximas[t.lead_id] = { id: t.id, titulo: t.titulo, tipo: t.tipo, vence_en: t.vence_en };
     const puedeCosto = can("inventario.editar");
     // Marcas para las tarjetas del embudo: descuento esperando aprobación y reserva en curso.
     const marcas: Record<string, { pendiente?: boolean; reserva_vence_en?: string; cierre_pendiente?: boolean }> = {};
@@ -2257,9 +2281,9 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     if (!ci.error) for (const c of ci.data ?? []) marcas[c.lead_id] = { ...marcas[c.lead_id], cierre_pendiente: true };
     if (!rs.error) for (const r of rs.data ?? []) marcas[r.lead_id] = { ...marcas[r.lead_id], reserva_vence_en: r.vence_en };
     return json({
-      leads, marcas,
+      leads, marcas, proximas,
       clientes: clientes.map((c: any) => ({ id: c.id, nombre: c.nombre, telefono: c.telefono, email: c.email, rut: c.rut })),
-      vehiculos: vehiculos.map((v: any) => ocultarCosto({ id: v.id, patente: v.patente, marca: v.marca, modelo: v.modelo, anio: v.anio, precio_lista: v.precio_lista, costo: v.costo }, puedeCosto)),
+      vehiculos: vehiculos.map((v: any) => ocultarCosto({ id: v.id, patente: v.patente, marca: v.marca, modelo: v.modelo, anio: v.anio, precio_lista: v.precio_lista, costo: v.costo, fotos: (v.fotos ?? []).slice(0, 1) }, puedeCosto)),
       usuarios: usuarios.map((u: any) => ({ id: u.id, nombre: u.nombre })),
       puedeAsignar: esSupervisor, veTodo: veTodoElLocal,
     });

@@ -24,10 +24,20 @@ export const ETAPAS = [
   { id: "ganado", nombre: "Cerrado ganado", disponible: true, automatica: true },
   { id: "perdido", nombre: "Cerrado perdido", disponible: true },
 ];
+/**
+ * Etapas que solo existen en compras y consignaciones. Son automáticas (el sistema las mueve según lo que va pasando) y no se pueden elegir a mano.
+ * Se suman a las de siempre; los leads de venta no las usan.
+ */
+export const ETAPAS_EXTRA = [
+  { id: "tasacion", nombre: "Tasación", disponible: true, automatica: true },
+  { id: "contrato", nombre: "Contrato", disponible: true, automatica: true },
+  { id: "documentos", nombre: "Documentos y pago", disponible: true, automatica: true },
+];
+export const ETAPAS_TODAS = [...ETAPAS, ...ETAPAS_EXTRA];
 export const ETAPAS_MANUALES = ETAPAS.filter((e) => e.disponible && !e.automatica).map((e) => e.id);
 export const ETAPAS_ACTIVAS = ETAPAS.filter((e) => e.disponible).map((e) => e.id);
 export const ETAPAS_CERRADAS = ["ganado", "perdido"];
-export const etapaNombre = (id) => (ETAPAS.find((e) => e.id === id) || {}).nombre || id;
+export const etapaNombre = (id) => (ETAPAS_TODAS.find((e) => e.id === id) || {}).nombre || id;
 
 export const TIPOS_CONTACTO = [
   { id: "llamada", nombre: "Llamada" },
@@ -245,7 +255,7 @@ export function agruparTareas(tareas, ahora = new Date()) {
 /** Cuenta leads por etapa (todas las etapas, aunque estén en 0). */
 export function contarPorEtapa(leads) {
   const out = {};
-  for (const e of ETAPAS) out[e.id] = 0;
+  for (const e of ETAPAS_TODAS) out[e.id] = 0;
   for (const l of leads) if (out[l.etapa] !== undefined) out[l.etapa]++;
   return out;
 }
@@ -426,7 +436,7 @@ export const margenVenta = (precioFinal, costo) => (costo === null || costo === 
 
 /* ---------- Gestión del supervisor: alertas y embudo ---------- */
 export const ETAPAS_DETENIBLES = ["contactado", "seguimiento", "cotizado"];
-export const ETAPAS_ABIERTAS = ["nuevo", "contactado", "seguimiento", "cotizado", "reservado"];
+export const ETAPAS_ABIERTAS = ["nuevo", "contactado", "seguimiento", "tasacion", "contrato", "cotizado", "reservado", "documentos"];
 
 const marca = (t) => (t ? Date.parse(t) : NaN);
 export const horasDesde = (iso, ahora = new Date()) => (ahora.getTime() - Date.parse(iso)) / 3_600_000;
@@ -567,4 +577,16 @@ export function ordenarHoy(items) {
 export function faltaProximaAccion(lead, tareas = [], ahora = new Date()) {
   if (!lead || ETAPAS_CERRADAS.includes(lead.etapa)) return false;
   return !tareas.some((t) => !t.hecha && Date.parse(t.vence_en) > ahora.getTime());
+}
+
+/** Días que el lead lleva en su etapa actual (usa la marca de cambio de etapa; si aún no existe, la última actualización). */
+export function diasEnEtapa(lead, ahora = new Date()) {
+  const desde = lead && (lead.etapa_desde || lead.actualizado_en || lead.creado_en);
+  if (!desde || !Number.isFinite(Date.parse(desde))) return 0;
+  return Math.max(0, Math.floor((ahora.getTime() - Date.parse(desde)) / 86_400_000));
+}
+
+/** Semáforo de una tarjeta del tablero según los días en la etapa: verde (normal), ámbar (atento) o rojo (detenido). */
+export function colorDeAntiguedad(dias, { atento = 3, detenido = 7 } = {}) {
+  return dias >= detenido ? "rojo" : dias >= atento ? "ambar" : "verde";
 }

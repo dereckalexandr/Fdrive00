@@ -53,11 +53,32 @@ export const grupoDeReparto = (tipo) => (tipo === "compra" || tipo === "consigna
 
 export const permisoDeTipo = (tipo) => PERMISO_DE_TIPO[tipo] || PERMISO_DE_TIPO.venta;
 
-/** Nombre de la etapa del lead según su tipo (la etapa interna es la misma: cotizado, reservado, ganado). */
+/** Nombre de la etapa del lead según su tipo (la etapa interna es la misma para todos; cambia cómo se llama). */
 export function etapaDeOperacion(tipo, etapa, nombreBase) {
-  if (tipo === "compra") return { cotizado: "Oferta hecha", reservado: "Oferta aceptada", ganado: "Comprado" }[etapa] || nombreBase;
-  if (tipo === "consignacion") return { cotizado: "En validación", reservado: "En validación", ganado: "Consignado" }[etapa] || nombreBase;
+  if (tipo === "compra") return { tasacion: "Tasación pedida", cotizado: "Oferta hecha", reservado: "Oferta aceptada", documentos: "Documentos y pago", ganado: "Comprado" }[etapa] || nombreBase;
+  if (tipo === "consignacion") return { tasacion: "Tasación o inspección", contrato: "Contrato", cotizado: "En validación", reservado: "En validación", ganado: "Consignado" }[etapa] || nombreBase;
   return nombreBase;
+}
+
+/**
+ * Las columnas del tablero de cada tipo de lead, en orden (ids internos de etapa). Los leads de compra y de consignación que ya estaban «en seguimiento»
+ * siguen mostrándose (columna extra solo si hay alguno), para que nada quede fuera de vista.
+ *  - venta: Nuevo → Contactado → En seguimiento → Cotizado → Reservado → Ganado / Perdido
+ *  - compra: Nuevo → Contactado → Tasación pedida → Oferta hecha → Oferta aceptada → Documentos y pago → Comprado / Perdido
+ *  - consignación: Nuevo → Contactado → Tasación o inspección → Contrato → En validación → Consignado / Perdido
+ */
+export function etapasDeTipo(tipo, { conSeguimiento = false } = {}) {
+  if (tipo === "compra") return ["nuevo", "contactado", ...(conSeguimiento ? ["seguimiento"] : []), "tasacion", "cotizado", "reservado", "documentos", "ganado", "perdido"];
+  if (tipo === "consignacion") return ["nuevo", "contactado", ...(conSeguimiento ? ["seguimiento"] : []), "tasacion", "contrato", "cotizado", "ganado", "perdido"];
+  return ["nuevo", "contactado", "seguimiento", "cotizado", "reservado", "ganado", "perdido"];
+}
+
+/** Qué hay que hacer para que el lead entre en una etapa automática (se muestra en la columna del tablero). */
+export function ayudaDeEtapa(tipo, etapa) {
+  const venta = { cotizado: "Pasa sola al crear una cotización.", reservado: "Pasa sola al reservar el vehículo.", ganado: "Pasa sola cuando el Jefe Local aprueba la venta." };
+  const compra = { tasacion: "Pasa sola al pedir la tasación del vehículo.", cotizado: "Pasa sola al hacer la oferta.", reservado: "Pasa sola cuando el cliente acepta la oferta.", documentos: "Pasa sola al pedir aprobar el pago.", ganado: "Pasa sola cuando el Jefe Local aprueba el pago." };
+  const consignacion = { tasacion: "Pasa sola al pedir la tasación o la inspección.", contrato: "Pasa sola cuando la tasación o la inspección ya está lista.", cotizado: "Pasa sola al registrar el contrato.", ganado: "Pasa sola cuando los documentos se aprueban." };
+  return ({ venta, compra, consignacion }[tipo] || venta)[etapa] || "";
 }
 
 const texto = (v, max) => String(v ?? "").trim().replace(/\s+/g, " ").slice(0, max);

@@ -813,3 +813,11 @@ Nueva pestaña **Hoy** (la primera de *Trabajo diario*): los leads abiertos orde
 - **Plazos** (Administrador → Configuración): *plazo del primer contacto* (por defecto **2 h**, el lead aparece en rojo al ejecutivo) y el plazo existente *sin contacto* (**4 h**, también para el Jefe Local).
 - Sin SQL. Código: reglas en `ventas-core.js` (`clasificarLeadHoy`, `ordenarHoy`, `faltaProximaAccion`), servidor `leads.hoy` y `pedirProximaAccion` en `ventas.ts`, pantalla en `crm-hoy.jsx`. Pruebas: `tests/hoy-core.test.mjs` y `tests/hoy-api.test.mjs`.
 - Siguientes fases: pipeline por tipo con tarjetas nuevas y etapas por tipo, lista con filtros y exportación, y plazos con alertas por correo.
+
+## Rediseño de leads · Fase 2: tablero por tipo de lead
+
+- **Leads** ahora tiene una pestaña por tipo (Ventas / Compras / Consignaciones), cada una con sus propias columnas: Venta (Nuevo → Contactado → En seguimiento → Cotizado → Reservado → Ganado/Perdido), Compra (… → Tasación pedida → Oferta hecha → Oferta aceptada → Documentos y pago → Comprado) y Consignación (… → Tasación o inspección → Contrato → En validación → Consignado).
+- Las etapas nuevas (`tasacion`, `contrato`, `documentos`) son **automáticas**: el sistema mueve el lead cuando se pide la tasación/inspección, se completa, se pide aprobar el pago, etc. (`avanzarEtapa` en `ventas.ts`; solo avanza desde etapas de partida permitidas y deja un evento «etapa»). Las columnas automáticas llevan el candado «auto» y una ayuda de cuándo pasa el lead.
+- Tarjeta nueva: foto del vehículo, monto, días en la etapa (semáforo verde / ámbar desde 3 d / rojo desde 7 d), próxima acción y botones de llamar, WhatsApp, nota y agendar.
+- `supabase-crm-etapas.sql` agrega `leads.etapa_desde` (se renueva sola con un trigger al cambiar de etapa). Hasta ejecutarlo, los días se calculan desde la última actualización.
+- Pruebas: `tests/pipeline-core.test.mjs` y el caso de etapas automáticas en `tests/compras-api.test.mjs`.

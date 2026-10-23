@@ -11,7 +11,7 @@ import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { InputDinero } from "./campo-dinero.jsx";
 import {
   ETAPAS, ETAPAS_ACTIVAS, TIPOS_CONTACTO, TIPOS_TAREA, ESTADOS_FINANCIAMIENTO,
-  agruparTareas, claseTarea, textoVencimiento, contarPorEtapa, leadsPorAtender, etapaNombre, soloDigitos, validarCliente, validarLead, validarTarea,
+  agruparTareas, claseTarea, textoVencimiento, leadsPorAtender, diasEnEtapa, colorDeAntiguedad, etapaNombre, soloDigitos, validarCliente, validarLead, validarTarea,
 } from "../supabase/functions/api/ventas-core.js";
 import { Inventario, Clientes } from "./crm-inventario.jsx";
 import { SeccionCotizaciones } from "./crm-cotizaciones.jsx";
@@ -24,16 +24,17 @@ import { ModuloAnuncios } from "./crm-anuncios.jsx";
 import { ModuloMarketing } from "./crm-marketing.jsx";
 import { ErrorBoundary } from "./error-boundary.jsx";
 import { HabilitacionesEquipo } from "./crm-equipo.jsx";
-import { Hoy, ProximaAccionModal } from "./crm-hoy.jsx";
+import { Hoy, ProximaAccionModal, RegistrarContactoModal, cuando as cuandoTexto } from "./crm-hoy.jsx";
+import { Miniatura as MiniaturaVehiculo } from "./crm-inventario.jsx";
 import { SeccionCompra, SeccionConsignacion, ModuloCompras } from "./crm-compras.jsx";
-import { etapaDeOperacion, tipoLeadNombre, TIPOS_LEAD, validarVehiculoOfrecido } from "../supabase/functions/api/compras-core.js";
+import { etapaDeOperacion, etapasDeTipo, ayudaDeEtapa, tipoLeadNombre, TIPOS_LEAD, validarVehiculoOfrecido } from "../supabase/functions/api/compras-core.js";
 import {
   INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, NavegacionLateral, useGuardado, DatosDelDueno, CamposCondiciones, useCarga, mensajeError, CamposVehiculo, aVehiculoForm,
 } from "./crm-ui.jsx";
 
 const COLOR_ETAPA = {
-  nuevo: "border-t-sky-500", contactado: "border-t-amber-500", seguimiento: "border-t-violet-500",
-  cotizado: "border-t-teal-500", reservado: "border-t-orange-500", ganado: "border-t-emerald-600", perdido: "border-t-stone-400",
+  nuevo: "border-t-sky-500", contactado: "border-t-amber-500", seguimiento: "border-t-violet-500", tasacion: "border-t-indigo-500", contrato: "border-t-fuchsia-500",
+  cotizado: "border-t-teal-500", reservado: "border-t-orange-500", documentos: "border-t-lime-600", ganado: "border-t-emerald-600", perdido: "border-t-stone-400",
 };
 
 /** Número para wa.me: sin signos; si es chileno de 9 dígitos, antepone 56. */
@@ -420,30 +421,68 @@ function FormLead({ api, catalogos, lead, onCerrar, onGuardado }) {
 /* =========================================================
    EMBUDO EN COLUMNAS (KANBAN)
 ========================================================= */
-function TarjetaLead({ lead, cliente, vehiculo, asignado, marca = {}, mostrarAsignado, onAbrir, onMover, puedeMover }) {
+const SEMAFORO = { verde: "bg-emerald-100 text-emerald-800", ambar: "bg-amber-100 text-amber-800", rojo: "bg-rose-100 text-rose-800" };
+const TIPO_ICONO = { venta: "🚗", compra: "🏷️", consignacion: "🤝" };
+
+function TarjetaLead({ lead, cliente, vehiculo, asignado, marca = {}, proxima, mostrarAsignado, onAbrir, onMover, onAccion, puedeMover }) {
+  const tipo = lead.tipo || "venta";
   const sinContacto = lead.etapa === "nuevo" && !lead.ultimo_contacto;
+  const abierto = lead.etapa !== "ganado" && lead.etapa !== "perdido";
+  const dias = diasEnEtapa(lead);
+  const semaforo = abierto ? colorDeAntiguedad(dias) : "verde";
+  const ofr = lead.vehiculo_ofrecido || {};
+  const vehTexto = tipo === "venta" ? (vehiculo ? `${vehiculo.marca} ${vehiculo.modelo} ${vehiculo.anio}` : lead.vehiculo_interes || "") : (ofr.marca ? `${ofr.marca} ${ofr.modelo || ""} ${ofr.anio || ""}`.trim() : "");
+  const monto = tipo === "venta" ? (vehiculo && Number(vehiculo.precio_lista)) : Number(ofr.precioEsperado);
+  const tel = cliente && cliente.telefono;
+  const parar = (fn) => (e) => { e.stopPropagation(); fn(e); };
   return (
     <div draggable={puedeMover} onDragStart={(e) => { e.dataTransfer.setData("text/plain", lead.id); e.dataTransfer.effectAllowed = "move"; }}
-      className="bg-white border border-stone-200 p-3 text-sm cursor-pointer hover:border-amber-400 shadow-sm" onClick={onAbrir}>
-      <p className="font-medium text-stone-900">{cliente ? cliente.nombre : "Cliente"}</p>
-      <p className="text-stone-600 text-xs mt-0.5">{lead.tipo && lead.tipo !== "venta" ? <><span className="bg-stone-900 text-white px-1.5 py-0.5 mr-1">{lead.tipo === "compra" ? "Compra" : "Consignación"}</span>{lead.vehiculo_ofrecido && lead.vehiculo_ofrecido.marca ? `${lead.vehiculo_ofrecido.marca} ${lead.vehiculo_ofrecido.modelo || ""} ${lead.vehiculo_ofrecido.anio || ""}` : "Sin datos del vehículo"}</> : vehiculo ? `${vehiculo.marca} ${vehiculo.modelo} ${vehiculo.anio}` : lead.vehiculo_interes || "Sin vehículo definido"}</p>
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-2 text-[11px] text-stone-500">
-        {marca.pendiente && <span className="bg-amber-100 text-amber-800 px-1.5 py-0.5">Descuento por aprobar</span>}
-        {marca.cierre_pendiente && <span className="bg-emerald-100 text-emerald-800 px-1.5 py-0.5">Venta por aprobar</span>}
-        {marca.reserva_vence_en && <span className="bg-sky-100 text-sky-800 px-1.5 py-0.5">Reserva {textoVencimiento(marca.reserva_vence_en)}</span>}
-        {sinContacto && <span className="bg-sky-100 text-sky-800 px-1.5 py-0.5">Por atender</span>}
-        {lead.fuente && <span>{lead.fuente}</span>}
-        <span>{hace(lead.creado_en)}</span>
-        {mostrarAsignado && <span className={asignado ? "text-stone-700" : "text-rose-600"}>· {asignado ? asignado.nombre : "Sin asignar"}</span>}
+      className="bg-white border border-stone-200 rounded-xl p-3 text-sm cursor-pointer hover:border-amber-400 hover:shadow-suave" onClick={onAbrir}>
+      <div className="flex gap-2.5">
+        {tipo === "venta" && vehiculo && vehiculo.fotos && vehiculo.fotos[0]
+          ? <MiniaturaVehiculo vehiculoId={vehiculo.id} fotoId={vehiculo.fotos[0]} tam="w-12 h-12 rounded-lg overflow-hidden" />
+          : <span className="w-12 h-12 shrink-0 rounded-lg bg-stone-100 flex items-center justify-center text-xl" aria-hidden="true">{TIPO_ICONO[tipo]}</span>}
+        <div className="min-w-0 flex-1">
+          <p className="font-medium text-stone-900 truncate">{cliente ? cliente.nombre : "Cliente"}</p>
+          <p className="text-xs text-stone-500 truncate">{vehTexto || "Sin vehículo definido"}</p>
+          {monto > 0 && <p className="text-xs font-semibold tabular-nums text-stone-800">{tipo !== "venta" ? "Espera " : ""}{clp(monto)}</p>}
+        </div>
+        {abierto && <span className={`self-start text-[11px] px-1.5 py-0.5 rounded-full whitespace-nowrap ${SEMAFORO[semaforo]}`} title="Tiempo en esta etapa">{dias === 0 ? "hoy" : `${dias} d`}</span>}
       </div>
-      {puedeMover && (
+
+      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 mt-2 text-[11px] text-stone-500">
+        {marca.pendiente && <span className="bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded">Descuento por aprobar</span>}
+        {marca.cierre_pendiente && <span className="bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded">Venta por aprobar</span>}
+        {marca.reserva_vence_en && <span className="bg-sky-100 text-sky-800 px-1.5 py-0.5 rounded">Reserva {textoVencimiento(marca.reserva_vence_en)}</span>}
+        {sinContacto && <span className="bg-rose-100 text-rose-800 px-1.5 py-0.5 rounded">Por atender</span>}
+        {lead.fuente && <span className="bg-stone-100 px-1.5 py-0.5 rounded">{lead.fuente}</span>}
+        {mostrarAsignado && <span className={asignado ? "text-stone-700" : "text-rose-600 font-medium"}>{asignado ? asignado.nombre : "Sin asignar"}</span>}
+      </div>
+
+      {abierto && (
+        <p className={`mt-2 text-xs truncate ${proxima ? (new Date(proxima.vence_en) < new Date() ? "text-orange-700 font-medium" : "text-stone-600") : "text-violet-700"}`}>
+          {proxima ? `${new Date(proxima.vence_en) < new Date() ? "Venció: " : ""}${proxima.titulo} · ${cuandoTexto(proxima.vence_en)}` : "Sin próxima acción"}
+        </p>
+      )}
+
+      {abierto && (
+        <div className="flex items-center gap-1 mt-2" onClick={(e) => e.stopPropagation()}>
+          {tel && <a href={`tel:${tel}`} onClick={parar(() => onAccion("llamada"))} className="px-2 py-1 text-xs border border-stone-200 rounded-lg hover:bg-stone-50" title="Llamar">📞</a>}
+          {tel && <a href={`https://wa.me/${waNumero(tel)}`} target="_blank" rel="noreferrer" onClick={parar(() => onAccion("whatsapp"))} className="px-2 py-1 text-xs border border-stone-200 rounded-lg hover:bg-stone-50" title="WhatsApp">💬</a>}
+          <button type="button" onClick={parar(() => onAccion("nota"))} className="px-2 py-1 text-xs border border-stone-200 rounded-lg hover:bg-stone-50" title="Registrar nota o contacto">📝</button>
+          <button type="button" onClick={parar(() => onAccion("agendar"))} className="px-2 py-1 text-xs border border-stone-200 rounded-lg hover:bg-stone-50 ml-auto" title="Agendar la próxima acción">＋ Agendar</button>
+        </div>
+      )}
+      {puedeMover && abierto && (
         <select value={lead.etapa} onClick={(e) => e.stopPropagation()} onChange={(e) => onMover(e.target.value)} className="md:hidden mt-2 w-full border border-stone-300 bg-white px-2 py-1 text-xs">
-          {ETAPAS.filter((e) => (e.disponible && !e.automatica) || e.id === lead.etapa).map((e) => <option key={e.id} value={e.id}>{e.nombre}</option>)}
+          {ETAPAS.filter((e) => (e.disponible && !e.automatica) || e.id === lead.etapa).map((e) => <option key={e.id} value={e.id}>{etapaDeOperacion(tipo, e.id, e.nombre)}</option>)}
         </select>
       )}
     </div>
   );
 }
+
+const TIPOS_TABLERO = [{ id: "venta", nombre: "Ventas" }, { id: "compra", nombre: "Compras" }, { id: "consignacion", nombre: "Consignaciones" }];
 
 function Leads({ api, catalogos, abrirLead, version, onCambio }) {
   const [todos, setTodos] = useState(catalogos.puedeAsignar);
@@ -454,6 +493,8 @@ function Leads({ api, catalogos, abrirLead, version, onCambio }) {
   const [motivo, setMotivo] = useState("");
   const [sobre, setSobre] = useState("");
   const [siguiente, setSiguiente] = useState(null);
+  const [accion, setAccion] = useState(null); // { tipo: "llamada"|"whatsapp"|"nota"|"agendar", lead }
+  const [tipoVista, setTipoVista] = useGuardado("tablero-tipo", "venta", ["venta", "compra", "consignacion"]);
 
   const mapas = useMemo(() => {
     if (!datos) return {};
@@ -463,7 +504,10 @@ function Leads({ api, catalogos, abrirLead, version, onCambio }) {
   const mover = async (lead, etapa, motivoPerdida) => {
     setMsg("");
     if (etapa === lead.etapa) return;
-    if (ETAPAS.find((e) => e.id === etapa && e.automatica)) { setMsg(mensajeError({ message: "etapa_automatica" })); return; }
+    if (!ETAPAS.find((e) => e.id === etapa) || ETAPAS.find((e) => e.id === etapa && e.automatica) || ["tasacion", "contrato", "documentos"].includes(etapa)) {
+      setMsg(`Esa etapa se mueve sola: ${ayudaDeEtapa(lead.tipo || "venta", etapa) || mensajeError({ message: "etapa_automatica" })}`);
+      return;
+    }
     if (etapa === "perdido" && !motivoPerdida) { setPerdiendo(lead); return; }
     try { const r = await api("leads.mover", { id: lead.id, etapa, motivo: motivoPerdida }); await recargar(); onCambio(); if (r && r.pedirProximaAccion) setSiguiente(lead); }
     catch (e) { setMsg(mensajeError(e)); }
@@ -471,46 +515,61 @@ function Leads({ api, catalogos, abrirLead, version, onCambio }) {
 
   if (cargando && !datos) return <Cargando />;
   if (error && !datos) return <Aviso>{error}</Aviso>;
-  const porEtapa = contarPorEtapa(datos.leads);
+  const conteo = { venta: 0, compra: 0, consignacion: 0 };
+  for (const l of datos.leads) conteo[l.tipo || "venta"] = (conteo[l.tipo || "venta"] || 0) + 1;
+  const tabs = TIPOS_TABLERO.filter((t) => conteo[t.id] > 0 || (catalogos.tiposLead || ["venta"]).includes(t.id) || t.id === tipoVista);
+  const tipo = tabs.some((t) => t.id === tipoVista) ? tipoVista : (tabs[0] || TIPOS_TABLERO[0]).id;
+  const delTipo = datos.leads.filter((l) => (l.tipo || "venta") === tipo);
+  const columnas = etapasDeTipo(tipo, { conSeguimiento: delTipo.some((l) => l.etapa === "seguimiento") });
+  const proximas = datos.proximas || {};
+  const filaAccion = (l) => ({ id: l.id, cliente: { nombre: (mapas.c.get(l.cliente_id) || {}).nombre || "Cliente" } });
 
   return (
     <>
       <Tarjeta>
         <div className="flex flex-wrap items-center gap-3">
           <button onClick={() => setForm(true)} className={BTN_AMBAR}>+ Nuevo lead</button>
+          <div className="flex border border-stone-300 rounded-lg overflow-hidden">
+            {tabs.map((t) => (
+              <button key={t.id} onClick={() => setTipoVista(t.id)} className={`px-3 py-1.5 text-sm ${tipo === t.id ? "bg-stone-900 text-white" : "bg-white text-stone-700"}`}>{t.nombre} <span className="text-xs opacity-70">{conteo[t.id] || 0}</span></button>
+            ))}
+          </div>
           {datos.veTodo && (
-            <div className="flex border border-stone-300">
+            <div className="flex border border-stone-300 rounded-lg overflow-hidden">
               <button onClick={() => setTodos(false)} className={`px-3 py-1.5 text-sm ${!todos ? "bg-stone-900 text-white" : "bg-white text-stone-700"}`}>Mis leads</button>
               <button onClick={() => setTodos(true)} className={`px-3 py-1.5 text-sm ${todos ? "bg-stone-900 text-white" : "bg-white text-stone-700"}`}>Todo el local</button>
             </div>
           )}
-          <span className="text-xs text-stone-500 ml-auto">{datos.leads.length} leads · arrastra una tarjeta para cambiar de etapa</span>
+          <span className="text-xs text-stone-500 ml-auto">{delTipo.length} lead{delTipo.length === 1 ? "" : "s"} · arrastra una tarjeta para cambiar de etapa</span>
         </div>
       </Tarjeta>
       {msg && <Aviso>{msg}</Aviso>}
-      <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-7 gap-3 items-start">
-        {ETAPAS_ACTIVAS.map((id) => {
-          const leads = datos.leads.filter((l) => l.etapa === id);
+      <div className="flex flex-col md:flex-row gap-3 md:overflow-x-auto md:pb-3 items-start">
+        {columnas.map((id) => {
+          const leads = delTipo.filter((l) => l.etapa === id);
+          const auto = (ETAPAS.find((e) => e.id === id) || {}).automatica || ["tasacion", "contrato", "documentos"].includes(id);
+          const nombre = etapaDeOperacion(tipo, id, etapaNombre(id));
           return (
-            <div key={id} className={`bg-stone-50 border border-stone-200 border-t-4 ${COLOR_ETAPA[id]} ${sobre === id ? "ring-2 ring-amber-400" : ""}`}
+            <div key={id} className={`bg-stone-50 border border-stone-200 border-t-4 rounded-xl w-full md:w-[270px] md:shrink-0 ${COLOR_ETAPA[id]} ${sobre === id ? "ring-2 ring-amber-400" : ""}`}
               onDragOver={(e) => { e.preventDefault(); setSobre(id); }} onDragLeave={() => setSobre("")}
-              onDrop={(e) => { e.preventDefault(); setSobre(""); const lead = datos.leads.find((l) => l.id === e.dataTransfer.getData("text/plain")); if (lead) mover(lead, id); }}>
-              <div className="px-3 py-2 flex items-center justify-between">
-                <h3 className="text-sm font-medium text-stone-800">{etapaNombre(id)}</h3>
-                <span className="text-xs bg-white border border-stone-200 px-1.5">{porEtapa[id]}</span>
+              onDrop={(e) => { e.preventDefault(); setSobre(""); const lead = delTipo.find((l) => l.id === e.dataTransfer.getData("text/plain")); if (lead) mover(lead, id); }}>
+              <div className="px-3 py-2 flex items-center justify-between gap-2" title={ayudaDeEtapa(tipo, id)}>
+                <h3 className="text-sm font-medium text-stone-800 truncate">{nombre}{auto && <span className="ml-1.5 text-[10px] font-normal text-stone-400" aria-label="etapa automática">🔒 auto</span>}</h3>
+                <span className="text-xs bg-white border border-stone-200 px-1.5 rounded-full">{leads.length}</span>
               </div>
+              {auto && ayudaDeEtapa(tipo, id) && <p className="px-3 -mt-1 pb-1 text-[11px] text-stone-400">{ayudaDeEtapa(tipo, id)}</p>}
               <div className="px-2 pb-2 flex flex-col gap-2 min-h-[60px]">
                 {leads.length === 0 && <p className="text-xs text-stone-400 px-1 py-3 text-center">Sin leads</p>}
                 {leads.map((l) => (
-                  <TarjetaLead key={l.id} lead={l} cliente={mapas.c.get(l.cliente_id)} vehiculo={mapas.v.get(l.vehiculo_id)} asignado={mapas.u.get(l.asignado_a)} marca={(datos.marcas || {})[l.id]}
-                    mostrarAsignado={todos} onAbrir={() => abrirLead(l.id)} onMover={(e) => mover(l, e)} puedeMover />
+                  <TarjetaLead key={l.id} lead={l} cliente={mapas.c.get(l.cliente_id)} vehiculo={mapas.v.get(l.vehiculo_id)} asignado={mapas.u.get(l.asignado_a)} marca={(datos.marcas || {})[l.id]} proxima={proximas[l.id]}
+                    mostrarAsignado={todos} onAbrir={() => abrirLead(l.id)} onMover={(e) => mover(l, e)} onAccion={(t) => setAccion({ tipo: t, lead: l })} puedeMover />
                 ))}
               </div>
             </div>
           );
         })}
       </div>
-      <p className="text-xs text-stone-500">«Cotizado» y «Reservado» cambian solas: al crear una cotización y al reservar el vehículo desde la ficha del lead. «Cerrado ganado» llega con el cierre de venta (próxima entrega).</p>
+      <p className="text-xs text-stone-500">Las etapas marcadas «auto» se mueven solas según lo que vas haciendo (cotizar, reservar, pedir una tasación, hacer una oferta, aprobar el cierre…). El número de color en cada tarjeta son los días que lleva en su etapa: verde, normal; ámbar desde 3 días; rojo desde 7.</p>
 
       {perdiendo && (
         <Modal titulo="Marcar como perdido" onCerrar={() => { setPerdiendo(null); setMotivo(""); }} ancho="max-w-md">
@@ -525,6 +584,8 @@ function Leads({ api, catalogos, abrirLead, version, onCambio }) {
       )}
       {form && <FormLead api={api} catalogos={catalogos} onCerrar={() => setForm(false)} onGuardado={async () => { setForm(false); await recargar(); onCambio(); }} />}
       {siguiente && <ProximaAccionModal api={api} leadId={siguiente.id} cliente={(mapas.c.get(siguiente.cliente_id) || {}).nombre || "el cliente"} onCerrar={() => setSiguiente(null)} onAgendada={async () => { await recargar(); onCambio(); }} />}
+      {accion && accion.tipo === "agendar" && <ProximaAccionModal api={api} leadId={accion.lead.id} cliente={(mapas.c.get(accion.lead.cliente_id) || {}).nombre || "el cliente"} titulo="Agendar la próxima acción" onCerrar={() => setAccion(null)} onAgendada={async () => { await recargar(); onCambio(); }} />}
+      {accion && accion.tipo !== "agendar" && <RegistrarContactoModal api={api} lead={filaAccion(accion.lead)} tipoInicial={accion.tipo} onCerrar={() => setAccion(null)} onRegistrado={async () => { await recargar(); onCambio(); }} />}
     </>
   );
 }
