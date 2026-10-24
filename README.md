@@ -839,3 +839,7 @@ Nueva pestaña **Hoy** (la primera de *Trabajo diario*): los leads abiertos orde
 ## Sitio web · transmisión y combustible obligatorios
 
 En «Vende o consigna tu auto» (y «Cambiar mi auto por otro») se agregaron dos listas obligatorias: **Transmisión** (Mecánica / Automática) y **Combustible** (Bencina / Diesel / Híbrido / Eléctrico). Se completan solas al buscar por patente si el proveedor las informa. El servidor las valida (`transmision_invalida`, `combustible_invalido`), las guarda en el vehículo ofrecido del lead y las incluye en el resumen que ve el ejecutivo. Sin SQL.
+
+## Aviso a los Tasadores por solicitudes del sitio web
+
+Cuando una persona pide **vender, consignar o cambiar su auto** desde el sitio y la solicitud deja una tasación en la cola, todos los Tasadores activos del local con correo en su ficha reciben un correo («Nueva tasación del sitio web», con el folio, el auto, el precio esperado y el kilometraje). Cualquiera puede tomarla desde Tasaciones. Si ningún Tasador tiene correo, queda un «aviso omitido» en la Bitácora. Sin SQL.

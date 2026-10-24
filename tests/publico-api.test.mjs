@@ -3,7 +3,7 @@
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { iniciarFuncion, api, nuevaIp, loginAdmin, crm, db } from "./helpers/api-env.mjs";
+import { iniciarFuncion, api, nuevaIp, loginAdmin, crm, db, correos } from "./helpers/api-env.mjs";
 import { cuotaEstimada } from "../supabase/functions/api/ventas-core.js";
 
 const pub = (op, extra = {}) => api({ action: "public", op, ...extra });
@@ -64,6 +64,28 @@ test("Catálogo: disponibles y reservados; sin patente, costo ni vehículos que 
   assert.deepEqual(r.locales.map((l) => l.nombre), ["Casa matriz"], "solo locales con vehículos a la vista");
   assert.equal(r.empresa.nombre, "Drive Futuro");
   assert.equal(r.empresa.tasaMensual, 1.5);
+});
+
+test("Vender, consignar o cambiar: los Tasadores con correo reciben el aviso de la tasación; los demás no", async () => {
+  db.tablas.usuarios.find((u) => u.id === U.t1.id).email = "tito@tasa.cl";
+  nuevaIp();
+  const datos = { patente: "TTTT11", marca: "Kia", modelo: "Rio", anio: 2020, km: 30000, transmision: "Automática", combustible: "Bencina", duenos: 1, prenda: "no", mantenciones: "si", precioEsperado: 7000000, modalidad: "consignar", localId: L1 };
+  correos.length = 0;
+  assert.equal((await sol("vender", datos)).status, 200);
+  const aTasador = correos.filter((c) => c.to.includes("tito@tasa.cl"));
+  assert.equal(aTasador.length, 1);
+  assert.match(aTasador[0].html, /Nueva tasación del sitio web/);
+  assert.match(aTasador[0].html, /consignar/);
+  assert.match(aTasador[0].html, /Kia Rio 2020/);
+  assert.equal(correos.filter((c) => c.to.includes("tito@tasa.cl") && /Nuevo lead/.test(c.subject || "")).length, 0, "el Tasador no recibe el aviso del lead");
+  correos.length = 0;
+  nuevaIp();
+  assert.equal((await sol("consulta", { vehiculoId: U.disp.id, mensaje: "¿Sigue disponible?" })).status, 200);
+  assert.equal(correos.filter((c) => c.to.includes("tito@tasa.cl")).length, 0, "una consulta no genera tasación");
+  correos.length = 0;
+  nuevaIp();
+  assert.equal((await sol("renovar", { ...datos, vehiculoId: U.disp.id, patente: "TTTT22" })).status, 200);
+  assert.equal(correos.filter((c) => c.to.includes("tito@tasa.cl")).length, 1);
 });
 
 test("Detalle: descripción sin patente; los no visibles dan 404", async () => {

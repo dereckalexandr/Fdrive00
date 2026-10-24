@@ -6,7 +6,7 @@
 import { permisosEfectivos, configCompleta } from "./crm-core.js";
 import { elegirAsignado } from "./ventas-core.js";
 import { permisoDeTipo, grupoDeReparto } from "./compras-core.js";
-import { validarVehiculoTasacion } from "./tasaciones-core.js";
+import { validarVehiculoTasacion, folioTasacion as folioTas } from "./tasaciones-core.js";
 import { sugerirAviso } from "./anuncios-core.js";
 import { enviarAviso, enSegundoPlano, correoActivo } from "./correo.ts";
 import { consultarPatente } from "./patentes.ts";
@@ -51,7 +51,7 @@ const QUE_PIDIO: Record<string, string> = { consulta: "una consulta", visita: "u
 
 export async function publicOp(ctx: CtxPublico, body: any): Promise<Response> {
   /** Avisos por correo de una solicitud del sitio: al ejecutivo asignado (o a los Jefes Local si no hay) y la confirmación al cliente. Nunca frenan la solicitud. */
-  async function avisarSolicitud(d: { s: any; lead: any; cliente: any; asignado: any; local: string; vehTexto: string; empresa?: string }) {
+  async function avisarSolicitud(d: { s: any; lead: any; cliente: any; asignado: any; local: string; vehTexto: string; empresa?: string; tasacion?: { numero: number; auto: string } | null }) {
     try {
       if (!correoActivo()) return;
       const { sb } = ctx;
@@ -80,6 +80,20 @@ export async function publicOp(ctx: CtxPublico, body: any): Promise<Response> {
           lineas: [`Hola ${d.s.contacto.nombre}, recibimos tu solicitud de ${que}${d.vehTexto ? ` por el ${d.vehTexto}` : ""}.`, "Un ejecutivo se pondrá en contacto contigo a la brevedad al teléfono que nos dejaste.", d.empresa ? `Equipo ${d.empresa}` : ""],
           ruta: "/", enlaceTexto: "Ver nuestros vehículos",
         }, alFallar));
+      }
+      // Si la solicitud dejó una tasación en la cola, se avisa a los Tasadores del local (cualquiera puede tomarla).
+      if (d.tasacion) {
+        const overrides = await ctx.rolePermOverrides();
+        const tq = await sb.from("usuarios").select("email, roles, permisos_extra, activo").eq("local_id", d.local);
+        const tasadores = (tq.data ?? []).filter((u: any) => u.activo && u.email && permisosEfectivos(u.roles ?? [], overrides, u.permisos_extra).includes("tasaciones.realizar")).map((u: any) => u.email);
+        if (tasadores.length === 0) await ctx.audit({ tipo: "sistema", nombre: "Sitio web" }, "aviso.omitido", "aviso", undefined, { asunto: "tasación del sitio web", motivo: "ningún Tasador tiene correo en su ficha" });
+        else {
+          const modalidad = d.s.tipo === "renovar" ? "quiere cambiar su auto" : d.s.vende.modalidad === "consignar" ? "quiere consignar su auto" : "quiere vender su auto";
+          tareas.push(enviarAviso({
+            para: tasadores, asunto: "Nueva tasación del sitio web", titulo: "Nueva tasación del sitio web",
+            lineas: [`${folioTas(d.tasacion.numero)}: un cliente ${modalidad} (${d.tasacion.auto}) y espera tu tasación.`, `Espera ${"$"}${Number(d.s.vende.precioEsperado).toLocaleString("es-CL")} · ${d.s.vende.km.toLocaleString("es-CL")} km.`, "Entra a Tasaciones, toma la solicitud y complétala."],
+          }, alFallar));
+        }
       }
       await enSegundoPlano(Promise.all(tareas));
     } catch (e) { console.error("avisarSolicitud:", String((e as any)?.message ?? e)); }
@@ -238,11 +252,13 @@ export async function publicOp(ctx: CtxPublico, body: any): Promise<Response> {
       await sb.from("tareas").insert({ lead_id: lead.id, asignado_a: asignado.id, local_id: local, titulo: `Visita pedida por el sitio web: ${vehTexto}`.slice(0, 120), tipo: "visita", vence_en: s.fechaHora });
     }
     // Renovar: la tasación de SU auto queda en la cola de los Tasadores, ligada al lead (al completarse, fija el valor en parte de pago).
+    let tasacionWeb: { numero: number; auto: string } | null = null;
     if (s.tipo === "renovar" && vtWeb && vtWeb.ok) {
       const t = await sb.from("tasaciones").insert({
         local_id: local, tipo: "parte_pago", lead_id: lead.id, solicitante_id: asignado ? asignado.id : null, vehiculo: vtWeb.value, patente: vtWeb.value.patente,
         estado: "pendiente", notas_solicitud: `Cambia su auto por un ${vehTexto} (pedido desde el sitio web). Espera $${Number(s.vende.precioEsperado).toLocaleString("es-CL")} · ${s.vende.duenos} dueño(s) · prenda: ${s.vende.prenda === "si" ? "sí" : "no"} · mantenciones en la marca: ${s.vende.mantenciones === "si" ? "sí" : "no"}.`.slice(0, 300), creado_por: "sitio web",
       }).select().single();
+      if (!t.error) tasacionWeb = { numero: t.data.numero, auto: `${s.vende.marca} ${s.vende.modelo} ${s.vende.anio}` };
       if (!t.error) await sb.from("lead_eventos").insert({ lead_id: lead.id, usuario_id: "sistema", usuario_nombre: "Sitio web", tipo: "tasacion", detalle: `Tasación pedida desde el sitio web para su auto ${s.vende.marca} ${s.vende.modelo} ${s.vende.anio} (${s.vende.patente})` });
     }
     // Vender o consignar: además queda una tasación esperando al Tasador.
@@ -254,11 +270,11 @@ export async function publicOp(ctx: CtxPublico, body: any): Promise<Response> {
           local_id: local, tipo: "directa", contacto: { nombre: s.contacto.nombre, telefono: s.contacto.telefono }, vehiculo: vt.value, patente: vt.value.patente,
           estado: "pendiente", notas_solicitud: `${s.vende.modalidad === "consignar" ? "Quiere consignar" : "Quiere vender"} (pedido desde el sitio web). Espera $${Number(s.vende.precioEsperado).toLocaleString("es-CL")} · ${s.vende.duenos} dueño(s) · prenda: ${s.vende.prenda === "si" ? "sí" : "no"} · mantenciones en la marca: ${s.vende.mantenciones === "si" ? "sí" : "no"}.${s.mensaje ? ` ${s.mensaje}` : ""}`.slice(0, 300), creado_por: "sitio web",
         }).select().single();
-        if (!t.error) folioTasacion = t.data.numero;
+        if (!t.error) { folioTasacion = t.data.numero; tasacionWeb = { numero: t.data.numero, auto: `${s.vende.marca} ${s.vende.modelo} ${s.vende.anio}` }; }
       }
     }
     await ctx.audit(sistema, "web.solicitud", "lead", lead.id, { tipo: s.tipo, vehiculo_id: vehiculo ? vehiculo.id : null, asignado: asignado ? asignado.nombre : null, ip: ctx.ip.slice(0, 45) });
-    await avisarSolicitud({ s, lead, cliente, asignado, local, vehTexto, empresa: cfg.sitio_nombre });
+    await avisarSolicitud({ s, lead, cliente, asignado, local, vehTexto, empresa: cfg.sitio_nombre, tasacion: tasacionWeb });
     return json({ ok: true, cuota });
   }
 
