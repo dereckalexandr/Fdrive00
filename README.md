@@ -656,8 +656,7 @@ no del código. Revisa esto en orden:
    código (búscala en `src/App.jsx`, constante `MASTER_ADMIN`) y
    **cámbiala antes de compartir el enlace con otras personas** —
    está visible en el código fuente, así que no es un secreto real.
-3. Crea los perfiles de ejecutivos e inspectores desde el panel
-   administrador; cada uno recibe un enlace/código de acceso propio.
+3. Crea las personas del equipo desde Usuarios (RUT y clave provisoria).
 
 ## Reforzar la seguridad más adelante (opcional)
 
@@ -697,7 +696,7 @@ drive-futuro/
 
 En **Comercial → Fichas de inspectores** (sin SQL nuevo) el **Jefe Local** (las de su local) y la **cuenta maestra** (las de todos los locales) ven, en **solo lectura**, el detalle completo de cada **inspección** del Inspector (checklist ítem por ítem, ficha del vehículo, fotos, observaciones, **nombre y RUN del propietario** y descarga del **PDF con el CAV**) y cada **tasación** (valorización) que el Inspector hace en su propio checklist, con sus valores y PDF. Hay pestañas Inspecciones / Tasaciones del Inspector y un buscador por inspector, patente, vehículo o propietario.
 
-Servidor: `inspecciones.fichas_equipo` (quiénes inspeccionan en el local) y una lectura (`get` / `list`) del almacén para las claves `inspeccion::`, `tasacion::` y `foto::` de personas del **mismo local** del Jefe Local; nunca escritura ni borrado. Solo incluye a los Inspectores del CRM (con RUT); los perfiles antiguos por código siguen en *Versión anterior → Inspectores (código)*. Esto reemplaza la regla anterior de que los datos del propietario eran solo del Inspector y el Administrador. Pruebas: `tests/inspecciones-api.test.mjs`.
+Servidor: `inspecciones.fichas_equipo` (quiénes inspeccionan en el local) y una lectura (`get` / `list`) del almacén para las claves `inspeccion::`, `tasacion::` y `foto::` de personas del **mismo local** del Jefe Local; nunca escritura ni borrado. Solo incluye a los Inspectores del CRM (con RUT). Esto reemplaza la regla anterior de que los datos del propietario eran solo del Inspector y el Administrador. Pruebas: `tests/inspecciones-api.test.mjs`.
 
 ## CRM · Avisos automáticos por correo
 
@@ -843,3 +842,7 @@ En «Vende o consigna tu auto» (y «Cambiar mi auto por otro») se agregaron do
 ## Aviso a los Tasadores por solicitudes del sitio web
 
 Cuando una persona pide **vender, consignar o cambiar su auto** desde el sitio y la solicitud deja una tasación en la cola, todos los Tasadores activos del local con correo en su ficha reciben un correo («Nueva tasación del sitio web», con el folio, el auto, el precio esperado y el kilometraje). Cualquiera puede tomarla desde Tasaciones. Si ningún Tasador tiene correo, queda un «aviso omitido» en la Bitácora. Sin SQL.
+
+## Cierre de la versión anterior del CRM
+
+Se eliminó por completo la versión anterior: el ingreso por código (ejecutivos e inspectores), los enlaces `?vendor=` y `?inspector=`, la producción mensual y anual, las liquidaciones, las pestañas *Resumen mensual*, *Ejecutivos (código)* e *Inspectores (código)*, y el servidor ya no acepta `profileLogin` ni sesiones de esos perfiles. **Solo se movió** a *Administración → Configuración* la tarjeta **AFP y comisiones** (comisión de cada AFP y valor de la UF, claves `afp_config` y `uf_valor`, que el administrador edita). Los datos viejos guardados en el almacén (`vendors`, `inspectors`, `record::*`) no se borraron de la base: simplemente ya nada los usa. Para despejarlos hay que hacerlo con SQL, con respaldo previo.

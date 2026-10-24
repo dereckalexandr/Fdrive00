@@ -95,13 +95,6 @@ const authShim = {
   async adminSetup() { throw new Error("server_not_configured"); },
   async adminRecoverCheck() { throw new Error("server_not_configured"); },
   async adminReset() { throw new Error("server_not_configured"); },
-  async profileLogin(role, code) {
-    const res = await storageShim.get(role === "inspector" ? "inspectors" : "vendors", true);
-    const list = res ? JSON.parse(res.value) : [];
-    const profile = list.find((p) => String(p.id).toUpperCase() === String(code).trim().toUpperCase());
-    if (!profile) throw new Error("invalid_code");
-    return profile;
-  },
   // El CRM (usuarios, permisos, bitácora) vive en el servidor: sin Supabase no está disponible.
   async userLogin() { throw new Error("server_not_configured"); },
   async userChangePassword() { throw new Error("server_not_configured"); },

@@ -732,6 +732,61 @@ function EstadoTab() {
   );
 }
 
+/* ---- AFP y valor UF (venían de la versión anterior del CRM) ---- */
+const AFP_POR_DEFECTO = [
+  { id: "uno", nombre: "AFP Uno", comision: 0.46 }, { id: "modelo", nombre: "AFP Modelo", comision: 0.58 }, { id: "planvital", nombre: "AFP PlanVital", comision: 1.16 },
+  { id: "habitat", nombre: "AFP Habitat", comision: 1.27 }, { id: "capital", nombre: "AFP Capital", comision: 1.44 }, { id: "cuprum", nombre: "AFP Cuprum", comision: 1.44 },
+  { id: "provida", nombre: "AFP ProVida", comision: 1.45 },
+];
+const UF_POR_DEFECTO = 39000;
+
+function AfpYUfConfig() {
+  const { cargando, error, datos } = useCarga(async () => {
+    const leer = async (clave, defecto) => { try { const r = await window.storage.get(clave, true); return r ? JSON.parse(r.value) : defecto; } catch (e) { return defecto; } };
+    return { afp: await leer("afp_config", AFP_POR_DEFECTO), uf: await leer("uf_valor", UF_POR_DEFECTO) };
+  }, []);
+  const [afp, setAfp] = useState(null);
+  const [uf, setUf] = useState(UF_POR_DEFECTO);
+  const [sucio, setSucio] = useState(false);
+  const [msg, setMsg] = useState({ tipo: "", texto: "" });
+  useEffect(() => { if (datos) { setAfp(datos.afp); setUf(datos.uf); } }, [datos]);
+  if (cargando && !datos) return <Cargando />;
+  if (error) return <Aviso>{error}</Aviso>;
+  if (!afp) return <Cargando />;
+  const guardar = async () => {
+    try {
+      await window.storage.set("afp_config", JSON.stringify(afp.map((a) => ({ ...a, comision: Number(a.comision) || 0 }))), true);
+      await window.storage.set("uf_valor", JSON.stringify(Number(uf) || 0), true);
+      setSucio(false); setMsg({ tipo: "ok", texto: "Guardado ✓" });
+    } catch (e) { setMsg({ tipo: "error", texto: "No se pudo guardar, intenta de nuevo." }); }
+  };
+  return (
+    <Tarjeta titulo="AFP y comisiones" ayuda="Porcentaje de comisión vigente de cada AFP y valor de la UF. Solo el administrador los edita.">
+      {msg.texto && <div className="mb-3"><Aviso tipo={msg.tipo}>{msg.texto}</Aviso></div>}
+      <table className="w-full text-sm">
+        <thead><tr className="text-left text-xs uppercase tracking-wide text-stone-400 border-b border-stone-200"><th className="py-2 pr-2">AFP</th><th className="py-2 pr-2 text-right w-40">Comisión (%)</th></tr></thead>
+        <tbody>
+          {afp.map((a) => (
+            <tr key={a.id} className="border-b border-stone-100">
+              <td className="py-2 pr-2 text-stone-900">{a.nombre}</td>
+              <td className="py-2 pr-2"><div className="flex items-center justify-end gap-1">
+                <input type="number" step="0.01" min="0" value={a.comision} onChange={(e) => { setAfp(afp.map((x) => (x.id === a.id ? { ...x, comision: e.target.value === "" ? "" : parseFloat(e.target.value) } : x))); setSucio(true); setMsg({ tipo: "", texto: "" }); }} className={`${INPUT} w-24 text-right font-mono`} aria-label={`Comisión de ${a.nombre}`} />
+                <span className="text-stone-500">%</span>
+              </div></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="flex items-center gap-2 py-3 border-b border-stone-100">
+        <span className="flex-1 text-sm text-stone-800">Valor de la UF</span>
+        <span className="text-stone-500">$</span>
+        <input type="number" step="1" min="0" value={uf} onChange={(e) => { setUf(e.target.value === "" ? 0 : parseFloat(e.target.value)); setSucio(true); setMsg({ tipo: "", texto: "" }); }} className={`${INPUT} w-32 text-right font-mono`} aria-label="Valor de la UF" />
+      </div>
+      <div className="mt-3"><button onClick={guardar} disabled={!sucio} className={BTN_PRIMARIO}>Guardar cambios</button></div>
+    </Tarjeta>
+  );
+}
+
 function ConfigTab() {
   const { cargando, error, datos, recargar } = useCarga(() => crm("config.get"), []);
   const [msg, setMsg] = useState({ tipo: "", texto: "" });
@@ -752,6 +807,7 @@ function ConfigTab() {
         <NumeroEditor clave="dias_reserva" etiqueta="Duración de una reserva" valor={c.dias_reserva} sufijo="días" paso="1" onGuardado={ok} onError={mal} />
       </Tarjeta>
       <SitioWebConfig c={c} ok={ok} mal={mal} />
+      <AfpYUfConfig />
       <TextoEditor clave="condiciones_cotizacion" titulo="Condiciones en el PDF de la cotización" ayuda="Este texto aparece al final de cada cotización que se entrega al cliente. Redáctalo con tus condiciones comerciales." valor={c.condiciones_cotizacion} onGuardado={ok} onError={mal} />
       <Tarjeta titulo="Alertas del panel de gestión" ayuda="Cuándo el panel del Jefe Local marca un lead como desatendido o detenido.">
         <NumeroEditor clave="horas_primer_contacto" etiqueta="Plazo para el primer contacto: el lead aparece en rojo al ejecutivo después de" valor={c.horas_primer_contacto} sufijo="horas" paso="1" onGuardado={ok} onError={mal} />
@@ -803,13 +859,7 @@ function ultimosMeses(n) {
 function ReportesTab() {
   const { cargando, error, datos } = useCarga(async () => {
     const [u, l, act] = await Promise.all([crm("usuarios.list"), crm("locales.list"), cargarActividad()]);
-    let antiguos = { ejecutivos: 0, inspectores: 0 };
-    try {
-      const v = await window.storage.get("vendors", true);
-      const i = await window.storage.get("inspectors", true);
-      antiguos = { ejecutivos: v ? JSON.parse(v.value).length : 0, inspectores: i ? JSON.parse(i.value).length : 0 };
-    } catch (e) { /* sin perfiles antiguos */ }
-    return { usuarios: u.usuarios, locales: l.locales, actividad: act, antiguos };
+    return { usuarios: u.usuarios, locales: l.locales, actividad: act };
   }, []);
 
   const resumen = useMemo(() => {
@@ -874,7 +924,6 @@ function ReportesTab() {
             {resumen.porLocal.map((l) => <tr key={l.nombre} className="border-b border-stone-100"><td className="py-1.5 text-stone-800">{l.nombre}</td><td className="py-1.5 text-right font-mono">{l.n}</td></tr>)}
             {resumen.sinLocal > 0 && <tr className="border-b border-stone-100"><td className="py-1.5 text-stone-500">Sin local</td><td className="py-1.5 text-right font-mono">{resumen.sinLocal}</td></tr>}
           </tbody></table>
-          <p className="text-xs text-stone-500 mt-3">Perfiles anteriores por código: {datos.antiguos.ejecutivos} ejecutivos y {datos.antiguos.inspectores} inspectores.</p>
         </Tarjeta>
       </div>
 

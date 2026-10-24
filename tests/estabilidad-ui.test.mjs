@@ -31,11 +31,9 @@ test("Las pantallas principales están protegidas con la red de seguridad contra
   assert.match(readFileSync(join(SRC, "crm-ventas.jsx"), "utf8"), /<ErrorBoundary clave=\{tabVigente\}>/);
 });
 
-test("El sitio público y el CRM conviven: «/plataforma» y los enlaces antiguos (?vendor, ?inspector) abren el CRM", () => {
+test("El sitio público y el CRM conviven: «/plataforma» abre el CRM", () => {
   const s = readFileSync(join(SRC, "main.jsx"), "utf8");
   assert.match(s, /"\/plataforma"/);
-  assert.match(s, /q\.has\("vendor"\)/);
-  assert.match(s, /q\.has\("inspector"\)/);
   assert.match(s, /import\("\.\/sitio-publico\.jsx"\)/);
   assert.match(readFileSync(join(SRC, "sitio-publico.jsx"), "utf8"), /href="\/plataforma"/);
 });

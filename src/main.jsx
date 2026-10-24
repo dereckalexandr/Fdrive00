@@ -21,15 +21,14 @@ if (hasSupabaseConfig()) {
 }
 
 // Dos aplicaciones en un mismo sitio, cada una se descarga solo cuando hace falta:
-//   - «/plataforma» (y los enlaces antiguos con ?vendor= o ?inspector=): el CRM del personal.
+//   - «/plataforma»: el CRM del personal.
 //   - cualquier otra dirección: el sitio web público con el catálogo de vehículos.
 const App = lazy(() => import("./App.jsx"));
 const SitioPublico = lazy(() => import("./sitio-publico.jsx"));
 
 function esPlataforma() {
   const ruta = window.location.pathname.replace(/\/+$/, "");
-  const q = new URLSearchParams(window.location.search);
-  return ruta === "/plataforma" || ruta.startsWith("/plataforma/") || q.has("vendor") || q.has("inspector");
+  return ruta === "/plataforma" || ruta.startsWith("/plataforma/");
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(

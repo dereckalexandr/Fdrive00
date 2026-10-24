@@ -114,7 +114,7 @@ test("Permisos y almacenamiento: cada persona solo toca lo suyo y solo con el pe
 
   // El ejecutivo no tiene permisos de inspección: aunque use su propio id, no escribe.
   assert.equal((await kv(tEje, "set", `inspeccion::${eje.id}::a`, { value: "1" })).status, 403);
-  assert.equal((await kv(tEje, "get", "uf_valor")).status, 200, "lo compartido de solo lectura sí");
+  assert.equal((await kv(tEje, "get", "uf_valor")).status, 403, "AFP y UF los ve solo el administrador");
   assert.equal((await kv(tEje, "set", "uf_valor", { value: "1" })).status, 403);
 
   // Dar el permiso a la persona (extra) lo habilita de inmediato; quitarlo, lo cierra.
@@ -235,12 +235,11 @@ test("Si faltan las tablas del CRM, el servidor lo dice claramente en vez de fal
   } finally { Object.assign(db.tablas, guardadas); }
 });
 
-test("Las sesiones antiguas (ejecutivo/inspector por código) siguen funcionando", async () => {
+test("El ingreso por código (perfiles anteriores) ya no existe", async () => {
   const admin = await loginAdmin();
   await api({ action: "kv", token: admin, op: "set", key: "inspectors", value: JSON.stringify([{ id: "ABC123", nombre: "Viejo" }]) });
   nuevaIp();
   const l = await api({ action: "profileLogin", role: "inspector", code: "abc123" });
-  assert.equal(l.status, 200);
-  assert.equal((await api({ action: "kv", token: l.token, op: "set", key: "inspeccion::ABC123::1", value: "{}" })).status, 200);
-  assert.equal((await api({ action: "kv", token: l.token, op: "set", key: "inspeccion::OTRO::1", value: "{}" })).status, 403);
+  assert.notEqual(l.status, 200);
+  assert.ok(!l.token);
 });

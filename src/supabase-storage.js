@@ -60,22 +60,11 @@ async function call(payload) {
   return data;
 }
 
-// Último ingreso por código (ejecutivo/inspector). El código ES la credencial, así que si la
-// sesión vence (8 h) se reingresa en silencio y se reintenta una vez, sin perder lo que el
-// usuario tiene en pantalla. Para el administrador no hay reingreso automático: se avisa.
-let lastProfileLogin = null;
-
 async function kv(op, extra, retry = true) {
   try {
     return await call({ action: "kv", token: sessionToken, op, ...extra });
   } catch (e) {
     if (e.status === 401 && retry) {
-      if (lastProfileLogin) {
-        try {
-          await supabaseAuth.profileLogin(lastProfileLogin.role, lastProfileLogin.code);
-          return await kv(op, extra, false);
-        } catch (e2) { /* sigue abajo: se avisa que la sesión venció */ }
-      }
       olvidarSesion();
       window.dispatchEvent(new Event("df-session-expired"));
     }
@@ -146,20 +135,11 @@ const supabaseAuth = {
   async adminReset(code, newPassword) {
     return (await call({ action: "adminReset", code, newPassword })).recoveryCode;
   },
-  // role: "vendor" | "inspector". Devuelve el perfil del usuario.
-  async profileLogin(role, code) {
-    const { token, profile } = await call({ action: "profileLogin", role, code });
-    sessionToken = token;
-    lastProfileLogin = { role, code };
-    guardarSesion({ tipo: role, token, code });
-    return profile;
-  },
   // Personas del CRM: ingresan con RUT y clave. Devuelve sus datos y permisos.
   // No se guarda la clave para reingresar en silencio: si la sesión vence, se avisa.
   async userLogin(rut, password) {
     const { token, me } = await call({ action: "userLogin", rut, password });
     sessionToken = token;
-    lastProfileLogin = null;
     guardarSesion({ tipo: "user", token });
     return me;
   },
@@ -179,10 +159,6 @@ const supabaseAuth = {
       if (g.tipo === "admin") {
         await call({ action: "crm", token: g.token, op: "locales.list" });
         return { tipo: "admin" };
-      }
-      if ((g.tipo === "vendor" || g.tipo === "inspector") && g.code) {
-        const profile = await supabaseAuth.profileLogin(g.tipo, g.code);
-        return { tipo: g.tipo, profile };
       }
     } catch (e) {
       // Sesión vencida o rechazada: se descarta. Si solo fue un corte de red, se conserva para el siguiente intento.
@@ -221,7 +197,7 @@ const supabaseAuth = {
       throw e;
     }
   },
-  logout() { sessionToken = null; lastProfileLogin = null; olvidarSesion(); },
+  logout() { sessionToken = null; olvidarSesion(); },
 };
 
 export function installSupabaseStorage() {

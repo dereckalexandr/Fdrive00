@@ -1,30 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import {
   MODULOS_COMISION, TRAMOS_ESTANDAR, etiquetaTramo, getTramo, proximoTramo, validarTramos, validarComision,
   tramosDe, tramosEfectivos, modulosPersonalizados, calcularProduccion,
 } from "../supabase/functions/api/comisiones-core.js";
 
-/** Lee los tramos estándar directamente de src/App.jsx para comprobar que no se desfasen. */
-function tramosDeApp(nombre) {
-  const fuente = readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8");
-  const bloque = new RegExp(`const ${nombre} = \\[([\\s\\S]*?)\\];`).exec(fuente);
-  assert.ok(bloque, `no se encontró ${nombre} en App.jsx`);
-  return [...bloque[1].matchAll(/min: (\d+), max: (Infinity|\d+), rate: ([\d.]+)/g)].map((m) => ({
-    min: Number(m[1]), max: m[2] === "Infinity" ? null : Number(m[2]), rate: Number(m[3]),
-  }));
-}
-
-test("Los tramos estándar coinciden con los del perfil de Ejecutivo actual (App.jsx)", () => {
-  assert.deepEqual(TRAMOS_ESTANDAR.compras, tramosDeApp("TIERS_COMPRAS"));
-  assert.deepEqual(TRAMOS_ESTANDAR.ventas, tramosDeApp("TIERS_VENTAS"));
-  assert.deepEqual(TRAMOS_ESTANDAR.seguros, tramosDeApp("TIERS_SEGUROS"));
-  assert.deepEqual(TRAMOS_ESTANDAR.creditos, tramosDeApp("TIERS_CREDITOS"));
-  assert.deepEqual(TRAMOS_ESTANDAR.consignaciones, tramosDeApp("TIERS_CONSIGNACIONES"));
-  // Inspecciones usa la misma tabla en todos los perfiles.
-  assert.deepEqual(TRAMOS_ESTANDAR.inspecciones, tramosDeApp("TIERS_INSPECCIONES_DERECK"));
+test("Los módulos de comisión estándar", () => {
   assert.equal(MODULOS_COMISION.length, 6);
+  for (const m of MODULOS_COMISION) assert.ok(TRAMOS_ESTANDAR[m.key] && TRAMOS_ESTANDAR[m.key].length > 0, m.key);
 });
 
 test("Tramo según la cantidad: el último rige para cantidades mayores", () => {

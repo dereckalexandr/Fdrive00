@@ -38,10 +38,6 @@ before(async () => {
 test("Sin sesión o con una sesión que no corresponde, no se entra al módulo", async () => {
   assert.equal((await ve(null, "leads.list")).status, 401);
   assert.equal((await ve("x.y", "leads.list")).status, 401);
-  await api({ action: "kv", token: admin, op: "set", key: "inspectors", value: JSON.stringify([{ id: "ABC123", nombre: "Viejo" }]) });
-  nuevaIp();
-  const insp = await api({ action: "profileLogin", role: "inspector", code: "ABC123" });
-  assert.equal((await ve(insp.token, "leads.list")).status, 401, "el inspector por código no usa el CRM");
   assert.equal((await ve(U.tasador.token, "leads.list")).status, 403, "un tasador no tiene permisos de leads");
 });
 

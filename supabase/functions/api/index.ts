@@ -4,9 +4,6 @@
 // que usa la service_role (solo existe aquí, en el servidor) y decide qué
 // puede leer o escribir cada sesión:
 //   admin      -> todo, salvo la clave interna "admin_auth"
-//   vendor     -> record::<id>::*  (lectura/escritura), afp_config y uf_valor (solo lectura)
-//   inspector  -> inspeccion::<id>::*, tasacion::<id>::* y foto::<id>::* (lectura/escritura/eliminación),
-//                 afp_config y uf_valor (solo lectura)
 //   user       -> persona del CRM (ingresa con RUT y clave). Sus permisos se leen de la base en cada
 //                 petición (se pueden cambiar o quitar en el momento): "inspecciones.usar" abre
 //                 inspeccion::<id>::*; "tasaciones.usar" abre tasacion::<id>::* y foto::<id>::*.
@@ -37,10 +34,8 @@ const ADMIN_EMAIL = (Deno.env.get("ADMIN_EMAIL") ?? "").trim().toLowerCase();
 const ADMIN_PASSWORD_HASH = Deno.env.get("ADMIN_PASSWORD_HASH") ?? "";
 
 const ADMIN_TTL_S = 60 * 60 * 12;
-const PROFILE_TTL_S = 60 * 60 * 8;
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
 const PBKDF2_ITER = 150_000;
-const READ_ONLY_SHARED = new Set(["afp_config", "uf_valor"]);
 
 const enc = new TextEncoder();
 
@@ -79,7 +74,7 @@ async function hmacKey() {
   return crypto.subtle.importKey("raw", enc.encode(SESSION_SECRET), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
 }
 
-type Session = { role: "admin" | "vendor" | "inspector" | "user"; id: string; exp: number; perms?: string[]; localId?: string | null };
+type Session = { role: "admin" | "user"; id: string; exp: number; perms?: string[]; localId?: string | null };
 
 async function signSession(role: Session["role"], id: string, ttl: number) {
   const body = b64url(enc.encode(JSON.stringify({ role, id, exp: Math.floor(Date.now() / 1000) + ttl })));
@@ -95,6 +90,8 @@ async function readSession(token: unknown): Promise<Session | null> {
     const ok = await crypto.subtle.verify("HMAC", await hmacKey(), unb64url(sig), enc.encode(body));
     if (!ok) return null;
     const s = JSON.parse(new TextDecoder().decode(unb64url(body))) as Session;
+    // Las sesiones del ingreso por código (ejecutivo/inspector de la versión anterior) ya no se aceptan.
+    if (s.role !== "admin" && s.role !== "user") return null;
     return s.exp > Date.now() / 1000 ? s : null;
   } catch {
     return null;
@@ -156,16 +153,12 @@ function ownPrefixes(s: Session): string[] {
     if (p.includes("tasaciones.usar")) out.push(`tasacion::${s.id}::`, `foto::${s.id}::`);
     return out;
   }
-  if (s.role === "vendor") return [`record::${s.id}::`];
-  // foto::<id>::* son las fotos de las tasaciones (un registro por foto, ya reducida en el dispositivo).
-  if (s.role === "inspector") return [`inspeccion::${s.id}::`, `tasacion::${s.id}::`, `foto::${s.id}::`];
   return [];
 }
 
 function canKv(s: Session, op: string, key: string): boolean {
   if (key === "admin_auth") return false; // solo uso interno de esta función
   if (s.role === "admin") return true;
-  if ((op === "get") && READ_ONLY_SHARED.has(key)) return true;
   // Fotos del inventario (vfoto::<vehiculo>::<foto>): las ve quien ve el inventario; las sube o borra quien lo edita.
   if (s.role === "user" && key.startsWith("vfoto::")) {
     const p = s.perms ?? [];
@@ -193,8 +186,8 @@ function canKv(s: Session, op: string, key: string): boolean {
     return sube;
   }
   if (op === "get" || op === "set") return ownPrefixes(s).some((p) => key.startsWith(p));
-  // El inspector puede eliminar SUS PROPIAS inspecciones y tasaciones (no las de otros, ni los ejecutivos nada).
-  if (op === "delete" && (s.role === "inspector" || s.role === "user")) return ownPrefixes(s).some((p) => key.startsWith(p));
+  // Quien inspecciona o tasa puede eliminar SUS PROPIAS inspecciones y tasaciones (no las de otros).
+  if (op === "delete" && s.role === "user") return ownPrefixes(s).some((p) => key.startsWith(p));
   return false;
 }
 
@@ -665,20 +658,6 @@ Deno.serve(async (req) => {
         updatedAt: new Date().toISOString(),
       }));
       return json({ recoveryCode: next });
-    }
-
-    if (action === "profileLogin") {
-      if (blocked(ip, "profile")) return json({ error: "too_many_attempts" }, 429);
-      const role = body.role === "inspector" ? "inspector" : body.role === "vendor" ? "vendor" : null;
-      const code = String(body.code ?? "").trim().toUpperCase();
-      if (!role || !code) return json({ error: "invalid_input" }, 400);
-      const list = await dbJsonList(role === "vendor" ? "vendors" : "inspectors");
-      const profile = list.find((p) => String(p?.id ?? "").toUpperCase() === code);
-      if (!profile) {
-        await fail(ip, "profile");
-        return json({ error: "invalid_code" }, 401);
-      }
-      return json({ token: await signSession(role, profile.id, PROFILE_TTL_S), profile });
     }
 
     /* ----- personas del CRM (RUT y clave) ----- */
