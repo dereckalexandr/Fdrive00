@@ -849,3 +849,14 @@ Se eliminó por completo la versión anterior: el ingreso por código (ejecutivo
 ## Leads perdidos: guardados pero fuera del dashboard
 
 Los leads **no se eliminan nunca**. Al marcar uno como perdido (botón ✕ de la tarjeta, arrastrándolo a la zona «perdido» o desde su ficha) se pide el motivo, queda guardado con todo su historial y **sale del tablero y de la lista**. Para consultarlos: Leads → Lista → Atención → «Perdidos (archivados)», que muestra todos (sin límite de 30 días) con su motivo; la operación `leads.list` acepta `perdidos: true`. Sin SQL.
+
+## Tasador: precios de compra, consignación y retoma, y decisión sobre el vehículo
+
+Al completar una tasación, el Tasador ahora:
+- **Decide a qué aplica el vehículo:** *Compra*, *Consignación* o *No aplica* (en este caso debe explicar el motivo en las observaciones). Es obligatorio, salvo en las tasaciones de retoma.
+- **Pone los precios:** *precio de compra* (con la venta esperada), *precio de consignación* (publicación sugerida) y *valor de retoma* (lo que se reconoce en parte de pago). Los obligatorios dependen de la decisión; los demás son opcionales. En una tasación de **retoma** (pedida desde un lead de venta o «cambiar mi auto») el valor de retoma y la venta esperada son obligatorios; ese valor sigue siendo el tope en cotizaciones y cierres.
+- **El resultado vuelve al ejecutivo:** queda en el historial del lead, se avisa por correo a quien pidió la tasación y al ejecutivo del lead, y la ficha muestra la decisión y los precios. Con la decisión *No aplica* o *Consignación* no se puede ofertar la compra (`tasacion_no_aplica_compra`); en el contrato de consignación el precio de publicación se precarga con el precio de consignación.
+- **Cambio de tipo:** si el Tasador decide lo contrario del tipo del lead (compra ↔ consignación), el lead cambia de tipo; sigue con el mismo ejecutivo si está habilitado para el nuevo tipo y, si no, pasa a quien corresponda por el reparto rotativo (con aviso).
+- Las solicitudes de «vender o consignar» del sitio web ahora quedan ligadas a su lead (y a su ejecutivo) para poder devolver el resultado.
+
+Requiere ejecutar `supabase-crm-tasador-precios.sql` (3 columnas nuevas en `tasaciones`). Pruebas: `tests/tasaciones-core.test.mjs` y `tests/compras-api.test.mjs`.

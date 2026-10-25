@@ -102,6 +102,7 @@ export function validarVehiculoOfrecido(input) {
  * (lo que se reconoce al cliente es el «valor de compra» de la tasación).
  */
 export function validarOferta(input, tasacion, patenteLead) {
+  if (tasacion && tasacion.estado === "completada" && (tasacion.aplica_para === "consignacion" || tasacion.aplica_para === "ninguna")) return { ok: false, error: "tasacion_no_aplica_compra" };
   if (!tasacion || tasacion.estado !== "completada" || !(Number(tasacion.valor_compra) > 0)) return { ok: false, error: "tasacion_incompleta" };
   if (patenteLead && normalizarPatente(tasacion.patente) !== normalizarPatente(patenteLead)) return { ok: false, error: "tasacion_no_corresponde" };
   const monto = entero(input && input.monto, 1, 2_000_000_000);

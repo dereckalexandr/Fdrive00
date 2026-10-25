@@ -3,7 +3,7 @@
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { iniciarFuncion, api, nuevaIp, loginAdmin, crm, db } from "./helpers/api-env.mjs";
+import { iniciarFuncion, api, nuevaIp, loginAdmin, crm, db, correos } from "./helpers/api-env.mjs";
 import { mesChile } from "../supabase/functions/api/ventas-core.js";
 
 const ve = (token, op, extra = {}) => api({ action: "ventas", token, op, ...extra });
@@ -34,7 +34,7 @@ async function tasar(lead, { compra = 6500000, venta = 8500000 } = {}) {
   const p = await ve(U.c1.token, "compras.pedirTasacion", { leadId: lead.id });
   assert.equal(p.status, 200, JSON.stringify(p));
   assert.equal((await ve(U.t1.token, "tasaciones.tomar", { id: p.tasacion.id })).status, 200);
-  const r = await ve(U.t1.token, "tasaciones.completar", { id: p.tasacion.id, borrador: { valorCompra: compra, valorVenta: venta } });
+  const r = await ve(U.t1.token, "tasaciones.completar", { id: p.tasacion.id, borrador: { aplicaPara: "compra", valorCompra: compra, valorVenta: venta } });
   assert.equal(r.status, 200, JSON.stringify(r));
   return r.tasacion;
 }
@@ -116,7 +116,7 @@ test("Tasación para la compra: queda en la cola del Tasador y NO toca la parte 
   assert.deepEqual(lt.tasaciones, []);
   assert.equal(lt.pendiente.id, t.id);
   await ve(U.t1.token, "tasaciones.tomar", { id: t.id });
-  const fin = await ve(U.t1.token, "tasaciones.completar", { id: t.id, borrador: { valorCompra: 6500000, valorVenta: 8500000 } });
+  const fin = await ve(U.t1.token, "tasaciones.completar", { id: t.id, borrador: { aplicaPara: "compra", valorCompra: 6500000, valorVenta: 8500000 } });
   assert.equal(fin.status, 200, JSON.stringify(fin));
   const lead = fila("leads", U.lead1.id);
   assert.deepEqual(lead.parte_pago, {}, "una tasación de compra no es parte de pago");
@@ -280,7 +280,7 @@ test("Lead que llega por el sitio web: se asigna a quien compra y se ofrece su t
   const t = db.tablas.tasaciones.find((x) => x.patente === pat);
   const dueño = lead.asignado_a === U.c1.id ? U.c1 : U.c2;
   await ve(U.t1.token, "tasaciones.tomar", { id: t.id });
-  await ve(U.t1.token, "tasaciones.completar", { id: t.id, borrador: { valorCompra: 7000000, valorVenta: 9000000 } });
+  await ve(U.t1.token, "tasaciones.completar", { id: t.id, borrador: { aplicaPara: "compra", valorCompra: 7000000, valorVenta: 9000000 } });
   const lt = await ve(dueño.token, "compras.tasaciones", { leadId: lead.id });
   assert.equal(lt.tasaciones.length, 1);
   const o = await ofertar(dueño.token, lead.id, lt.tasaciones[0].id, 6800000);
@@ -500,7 +500,7 @@ test("Etapas automáticas del tablero: tasación pedida → oferta → aceptada 
   assert.equal(fila("leads", lead.id).etapa, "tasacion");
   assert.ok(db.tablas.lead_eventos.some((e) => e.lead_id === lead.id && e.tipo === "etapa" && /Tasación pedida/.test(e.detalle)));
   assert.equal((await ve(U.t1.token, "tasaciones.tomar", { id: p.tasacion.id })).status, 200);
-  const t = await ve(U.t1.token, "tasaciones.completar", { id: p.tasacion.id, borrador: { valorCompra: 6500000, valorVenta: 8500000 } });
+  const t = await ve(U.t1.token, "tasaciones.completar", { id: p.tasacion.id, borrador: { aplicaPara: "compra", valorCompra: 6500000, valorVenta: 8500000 } });
   assert.equal(t.status, 200, JSON.stringify(t));
   const o = await ofertar(U.c1.token, lead.id, t.tasacion.id, 6000000);
   assert.equal(fila("leads", lead.id).etapa, "cotizado");
@@ -527,4 +527,62 @@ test("Leads perdidos: quedan guardados para siempre y solo se traen al pedirlos"
   assert.equal(l.etapa, "perdido");
   assert.equal(l.motivo_perdida, "Precio");
   assert.ok(db.tablas.leads.some((x) => x.id === lead.id), "sigue guardado");
+});
+
+/** Pide la tasación de un lead, la toma el Tasador y la completa con el borrador dado; devuelve la respuesta de «completar». */
+async function tasarCon(lead, borrador, token = U.c1.token) {
+  const p = await ve(token, "compras.pedirTasacion", { leadId: lead.id });
+  assert.equal(p.status, 200, JSON.stringify(p));
+  assert.equal((await ve(U.t1.token, "tasaciones.tomar", { id: p.tasacion.id })).status, 200);
+  return { id: p.tasacion.id, r: await ve(U.t1.token, "tasaciones.completar", { id: p.tasacion.id, borrador }) };
+}
+
+test("Tasador: debe decidir a qué aplica y poner el precio que corresponde", async () => {
+  const lead = await leadDe(U.c1.token, "compra");
+  const p = await ve(U.c1.token, "compras.pedirTasacion", { leadId: lead.id });
+  await ve(U.t1.token, "tasaciones.tomar", { id: p.tasacion.id });
+  const completar = (borrador) => ve(U.t1.token, "tasaciones.completar", { id: p.tasacion.id, borrador });
+  assert.equal((await completar({ valorCompra: 6000000, valorVenta: 8000000 })).error, "aplica_para_requerido");
+  assert.equal((await completar({ aplicaPara: "otra" })).error, "aplica_para_invalido");
+  assert.equal((await completar({ aplicaPara: "compra", valorCompra: 0, valorVenta: 8000000 })).error, "valor_compra_invalido");
+  assert.equal((await completar({ aplicaPara: "consignacion", valorConsignacion: 0 })).error, "valor_consignacion_invalido");
+  assert.equal((await completar({ aplicaPara: "ninguna", observaciones: "" })).error, "motivo_no_aplica_requerido");
+  const ok = await completar({ aplicaPara: "compra", valorCompra: 6000000, valorVenta: 8000000, valorConsignacion: 8300000, valorRetoma: 5800000 });
+  assert.equal(ok.status, 200, JSON.stringify(ok));
+  const t = fila("tasaciones", p.tasacion.id);
+  assert.deepEqual([t.aplica_para, t.valor_compra, t.valor_consignacion, t.valor_retoma], ["compra", 6000000, 8300000, 5800000]);
+});
+
+test("Tasador: el resultado vuelve al ejecutivo (historial y correo) y la oferta solo va si aplica a compra", async () => {
+  db.tablas.usuarios.find((u) => u.id === U.c1.id).email = "carla@x.cl";
+  correos.length = 0;
+  const lead = await leadDe(U.c1.token, "compra");
+  const { id, r } = await tasarCon(lead, { aplicaPara: "ninguna", observaciones: "Chasis dañado" });
+  assert.equal(r.status, 200, JSON.stringify(r));
+  assert.ok(db.tablas.lead_eventos.some((e) => e.lead_id === lead.id && e.tipo === "tasacion" && /NO aplica/.test(e.detalle) && /Chasis dañado/.test(e.detalle)));
+  assert.ok(correos.some((c) => c.to.includes("carla@x.cl") && /Tasación completada/.test(c.html || "")), "le llega el correo a la ejecutiva");
+  const of = await ofertar(U.c1.token, lead.id, id, 1000000);
+  assert.equal(of.error, "tasacion_no_aplica_compra");
+});
+
+test("Tasador: si decide consignación en un lead de compra, el lead cambia de tipo y sigue con quien está habilitado", async () => {
+  const lead = await leadDe(U.c1.token, "compra");
+  const { r } = await tasarCon(lead, { aplicaPara: "consignacion", valorConsignacion: 9000000 });
+  assert.equal(r.status, 200, JSON.stringify(r));
+  const l = fila("leads", lead.id);
+  assert.equal(l.tipo, "consignacion");
+  assert.equal(l.asignado_a, U.c1.id, "Carla tiene Consignaciones: se queda con ella");
+  assert.equal(l.etapa, "contrato", "pasa a la etapa del contrato");
+  assert.ok(db.tablas.lead_eventos.some((e) => e.lead_id === lead.id && e.tipo === "tipo" && /Compra a Consignación/.test(e.detalle)));
+  const c = await ve(U.c1.token, "consignaciones.crear", { leadId: lead.id, datos: { precioPiso: 8000000, precioPublicacion: 9000000, plazoDias: 90 } });
+  assert.equal(c.status, 200, JSON.stringify(c));
+});
+
+test("Tasador: si el ejecutivo no está habilitado para el nuevo tipo, el lead pasa a quien sí lo está", async () => {
+  const lead = await leadDe(U.c2.token, "compra"); // Camilo solo tiene Compras
+  const { r } = await tasarCon(lead, { aplicaPara: "consignacion", valorConsignacion: 9000000 }, U.c2.token);
+  assert.equal(r.status, 200, JSON.stringify(r));
+  const l = fila("leads", lead.id);
+  assert.equal(l.tipo, "consignacion");
+  assert.equal(l.asignado_a, U.c1.id, "Carla es la única con Consignaciones");
 });

@@ -102,16 +102,25 @@ export function limpiarInspeccionRef(r) {
 
 const limpiarFotos = (f) => (Array.isArray(f) ? Array.from(new Set(f.map(String))).filter((x) => FOTO_ID.test(x)).slice(0, MAX_FOTOS_TASACION) : []);
 
+/** A qué aplica el vehículo tasado, según el Tasador: se compra, se consigna o no aplica a ninguno. */
+export const APLICA_PARA = ["compra", "consignacion", "ninguna"];
+export const aplicaParaNombre = (id) => ({ compra: "Compra", consignacion: "Consignación", ninguna: "No aplica" }[id] || "");
+
 /** Borrador: lo que el Tasador va guardando antes de terminar. Todo es opcional, pero lo que venga debe ser válido. */
 export function validarBorradorTasacion(input) {
   const i = input || {};
   const out = {};
   if (i.vehiculo !== undefined) { const v = validarVehiculoTasacion(i.vehiculo); if (!v.ok) return v; out.vehiculo = v.value; }
-  for (const [campo, columna] of [["valorCompra", "valor_compra"], ["valorVenta", "valor_venta"]]) {
+  const ERR = { valorCompra: "valor_compra_invalido", valorVenta: "valor_venta_invalido", valorConsignacion: "valor_consignacion_invalido", valorRetoma: "valor_retoma_invalido" };
+  for (const [campo, columna] of [["valorCompra", "valor_compra"], ["valorVenta", "valor_venta"], ["valorConsignacion", "valor_consignacion"], ["valorRetoma", "valor_retoma"]]) {
     if (i[campo] === undefined) continue;
     const n = entero(i[campo], 0, 2_000_000_000);
-    if (Number.isNaN(n)) return { ok: false, error: campo === "valorCompra" ? "valor_compra_invalido" : "valor_venta_invalido" };
+    if (Number.isNaN(n)) return { ok: false, error: ERR[campo] };
     out[columna] = n;
+  }
+  if (i.aplicaPara !== undefined) {
+    if (i.aplicaPara !== "" && i.aplicaPara !== null && !APLICA_PARA.includes(i.aplicaPara)) return { ok: false, error: "aplica_para_invalido" };
+    out.aplica_para = i.aplicaPara || null;
   }
   if (i.observaciones !== undefined) out.observaciones = texto(i.observaciones, 1000) || null;
   if (i.estimacion !== undefined) out.estimacion = limpiarEstimacion(i.estimacion);
@@ -120,14 +129,46 @@ export function validarBorradorTasacion(input) {
   return { ok: true, value: out };
 }
 
-/** Para completar: el valor de compra y el de venta esperado son obligatorios, y se espera vender por más de lo que se paga. */
+/**
+ * Para completar. Según el tipo de tasación:
+ *  - parte_pago (retoma, pedida desde un lead de venta): obligatorio el valor de retoma (lo que se reconoce al cliente) y la venta esperada.
+ *  - las demás (compra, consignación, directa): el Tasador decide a qué aplica el vehículo. Compra → valor de compra y venta esperada;
+ *    consignación → precio de consignación; no aplica → solo la observación con el motivo. El valor de retoma es opcional.
+ * Sin `tipo` se aplica la regla anterior (valor de compra y de venta obligatorios).
+ */
 export function validarCompletarTasacion(actual) {
-  const compra = entero(actual && actual.valor_compra, 1, 2_000_000_000);
+  const a = actual || {};
+  const opcional = (v) => { const n = entero(v, 1, 2_000_000_000); return n === null || Number.isNaN(n) ? null : n; };
+  const base = (extra) => ({ ok: true, value: { valor_compra: null, valor_venta: null, valor_consignacion: opcional(a.valor_consignacion), valor_retoma: opcional(a.valor_retoma), aplica_para: null, margen_esperado: null, ...extra } });
+  if (a.tipo === "parte_pago") {
+    // Una tasación en proceso desde antes de existir «retoma» trae el valor en valor_compra: se toma de ahí.
+    const retoma = entero(Number(a.valor_retoma) > 0 ? a.valor_retoma : a.valor_compra, 1, 2_000_000_000);
+    if (retoma === null || Number.isNaN(retoma)) return { ok: false, error: "valor_retoma_invalido" };
+    const venta = entero(a.valor_venta, 1, 2_000_000_000);
+    if (venta === null || Number.isNaN(venta)) return { ok: false, error: "valor_venta_invalido" };
+    if (venta < retoma) return { ok: false, error: "valor_venta_menor" };
+    // El valor reconocido en parte de pago queda también como valor de compra: así lo usan el tope del lead y las métricas.
+    return base({ valor_compra: retoma, valor_retoma: retoma, valor_venta: venta, margen_esperado: venta - retoma });
+  }
+  if (a.tipo !== undefined) {
+    if (!APLICA_PARA.includes(a.aplica_para)) return { ok: false, error: "aplica_para_requerido" };
+    if (a.aplica_para === "ninguna") {
+      if (String(a.observaciones || "").trim().length < 3) return { ok: false, error: "motivo_no_aplica_requerido" };
+      return base({ aplica_para: "ninguna" });
+    }
+    if (a.aplica_para === "consignacion") {
+      const cons = entero(a.valor_consignacion, 1, 2_000_000_000);
+      if (cons === null || Number.isNaN(cons)) return { ok: false, error: "valor_consignacion_invalido" };
+      return base({ aplica_para: "consignacion", valor_consignacion: cons, valor_compra: opcional(a.valor_compra), valor_venta: opcional(a.valor_venta) });
+    }
+  }
+  const compra = entero(a.valor_compra, 1, 2_000_000_000);
   if (compra === null || Number.isNaN(compra)) return { ok: false, error: "valor_compra_invalido" };
-  const venta = entero(actual && actual.valor_venta, 1, 2_000_000_000);
+  const venta = entero(a.valor_venta, 1, 2_000_000_000);
   if (venta === null || Number.isNaN(venta)) return { ok: false, error: "valor_venta_invalido" };
   if (venta < compra) return { ok: false, error: "valor_venta_menor" };
-  return { ok: true, value: { valor_compra: compra, valor_venta: venta, margen_esperado: venta - compra } };
+  if (a.tipo === undefined) return { ok: true, value: { valor_compra: compra, valor_venta: venta, margen_esperado: venta - compra } };
+  return base({ aplica_para: "compra", valor_compra: compra, valor_venta: venta, margen_esperado: venta - compra });
 }
 
 /* ---------- Estados ---------- */

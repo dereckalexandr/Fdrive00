@@ -12,7 +12,7 @@
 import React, { useState, useEffect } from "react";
 import { InputDinero } from "./campo-dinero.jsx";
 import { mesChile } from "../supabase/functions/api/ventas-core.js";
-import { tasacionNombre, validarVehiculoTasacion, validarTasacionDirecta, MAX_FOTOS_TASACION } from "../supabase/functions/api/tasaciones-core.js";
+import { tasacionNombre, aplicaParaNombre, validarVehiculoTasacion, validarTasacionDirecta, MAX_FOTOS_TASACION } from "../supabase/functions/api/tasaciones-core.js";
 import { compressImage, makePhotoId } from "./photos.js";
 import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, useCarga, mensajeError, CamposVehiculo, aVehiculoForm, VEH_VACIO, apiPorDefecto } from "./crm-ui.jsx";
 import { SeccionInspeccion, Miniatura as MiniaturaInspeccion } from "./crm-inspecciones.jsx";
@@ -140,7 +140,7 @@ function TasacionDetalle({ api, id, renderEstimador, onCerrar, onCambio }) {
   useEffect(() => {
     if (!datos) return;
     const t = datos.tasacion;
-    setF({ vehiculo: aVehiculoForm(t.vehiculo), valorCompra: t.valor_compra ?? "", valorVenta: t.valor_venta ?? "", observaciones: t.observaciones || "", estimacion: t.estimacion || {}, inspeccion: t.inspeccion || {} });
+    setF({ vehiculo: aVehiculoForm(t.vehiculo), valorCompra: t.valor_compra ?? "", valorVenta: t.valor_venta ?? "", valorConsignacion: t.valor_consignacion ?? "", valorRetoma: t.valor_retoma ?? "", aplicaPara: t.aplica_para || "", observaciones: t.observaciones || "", estimacion: t.estimacion || {}, inspeccion: t.inspeccion || {} });
     setFotos(t.fotos || []); setNuevas([]); setQuitadas([]);
   }, [datos]);
   useEffect(() => { if (datos && datos.puedeGestionar && asignando) api("tasaciones.equipo").then((r) => setTasadores(r.tasadores)).catch(() => {}); }, [api, datos, asignando]);
@@ -152,7 +152,16 @@ function TasacionDetalle({ api, id, renderEstimador, onCerrar, onCambio }) {
   const editable = datos.puedeEditar;
   const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
   const total = fotos.length + nuevas.length;
-  const margen = Number(f.valorVenta) - Number(f.valorCompra);
+  const esRetoma = t.tipo === "parte_pago";
+  const margen = Number(f.valorVenta) - Number(esRetoma ? f.valorRetoma : f.valorCompra);
+  // Qué falta para poder completar, según el tipo de tasación y lo que el Tasador decida.
+  const falta = (() => {
+    if (esRetoma) return f.valorRetoma === "" || f.valorVenta === "" || margen < 0 ? "Escribe el valor de retoma y la venta esperada." : "";
+    if (!f.aplicaPara) return "Indica si el vehículo aplica para compra, consignación o ninguna.";
+    if (f.aplicaPara === "ninguna") return String(f.observaciones || "").trim().length < 3 ? "Explica en las observaciones por qué no aplica." : "";
+    if (f.aplicaPara === "consignacion") return f.valorConsignacion === "" ? "Escribe el precio de consignación." : "";
+    return f.valorCompra === "" || f.valorVenta === "" || margen < 0 ? "Escribe el valor de compra y la venta esperada." : "";
+  })();
 
   const agregarFotos = async (ev) => {
     const archivos = Array.from(ev.target.files || []);
@@ -168,7 +177,7 @@ function TasacionDetalle({ api, id, renderEstimador, onCerrar, onCambio }) {
   const armarBorrador = async () => {
     const ids = [...fotos];
     for (const n of nuevas) { const ok = await window.storage.set(fotoKey(t.id, n.id), n.dataUrl, true); if (ok) { ids.push(n.id); cacheFotos.set(n.id, n.dataUrl); } }
-    return { vehiculo: f.vehiculo, valorCompra: f.valorCompra === "" ? 0 : f.valorCompra, valorVenta: f.valorVenta === "" ? 0 : f.valorVenta, observaciones: f.observaciones, estimacion: f.estimacion, inspeccion: f.inspeccion, fotos: ids };
+    return { vehiculo: f.vehiculo, valorCompra: f.valorCompra === "" ? 0 : f.valorCompra, valorVenta: f.valorVenta === "" ? 0 : f.valorVenta, valorConsignacion: f.valorConsignacion === "" ? 0 : f.valorConsignacion, valorRetoma: f.valorRetoma === "" ? 0 : f.valorRetoma, aplicaPara: esRetoma ? "" : f.aplicaPara, observaciones: f.observaciones, estimacion: f.estimacion, inspeccion: f.inspeccion, fotos: ids };
   };
   const limpiarQuitadas = async () => { for (const q of quitadas) { try { await window.storage.delete(fotoKey(t.id, q), true); } catch (e) { /* se limpia luego */ } } };
 
@@ -180,7 +189,7 @@ function TasacionDetalle({ api, id, renderEstimador, onCerrar, onCambio }) {
   };
   const guardar = () => correr(async () => { const b = await armarBorrador(); await api("tasaciones.guardar", { id: t.id, borrador: b }); await limpiarQuitadas(); }, "Borrador guardado ✓");
   const completar = async () => {
-    if (!window.confirm("¿Completar la tasación? Ya no podrás editarla, y el valor de compra quedará como el valor reconocido al cliente en el lead.")) return;
+    if (!window.confirm("¿Completar la tasación? Ya no podrás editarla. El resultado se devuelve al ejecutivo del lead.")) return;
     await correr(async () => { const b = await armarBorrador(); await api("tasaciones.completar", { id: t.id, borrador: b }); await limpiarQuitadas(); }, "Tasación completada ✓");
   };
 
@@ -209,19 +218,33 @@ function TasacionDetalle({ api, id, renderEstimador, onCerrar, onCambio }) {
       )}
       {!editable && f.estimacion && f.estimacion.compra ? <ResumenEstimacion e={f.estimacion} /> : null}
 
-      <Tarjeta titulo="Valores" ayuda={t.tipo === "parte_pago" ? "El valor de compra es lo que se le reconoce al cliente por su vehículo y queda como tope en el lead." : "El valor de compra es lo que se ofrece pagar."}>
+      <Tarjeta titulo="Resultado y valores" ayuda={esRetoma ? "Retoma: el valor de retoma es lo que se le reconoce al cliente por su vehículo en parte de pago y queda como tope en el lead." : "Decide para qué aplica el vehículo; el resultado vuelve al ejecutivo del lead. Los precios que no correspondan a tu decisión son opcionales."}>
+        {!esRetoma && (
+          <div className="mb-4">
+            <p className="text-sm text-stone-700 mb-2">¿Para qué aplica este vehículo?</p>
+            <div className="flex flex-wrap gap-2">
+              {[["compra", "Compra"], ["consignacion", "Consignación"], ["ninguna", "No aplica"]].map(([id, nombre]) => (
+                <button key={id} type="button" disabled={!editable} onClick={() => set("aplicaPara", id)}
+                  className={`px-4 py-2 text-sm border ${f.aplicaPara === id ? (id === "ninguna" ? "bg-rose-600 text-white border-rose-600" : "bg-stone-900 text-white border-stone-900") : "bg-white text-stone-700 border-stone-300"} disabled:opacity-60`}>{nombre}</button>
+              ))}
+            </div>
+          </div>
+        )}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
-          <Campo etiqueta="Valor de compra ($)"><InputDinero value={f.valorCompra} disabled={!editable} onChange={(e) => set("valorCompra", e.target.value)} className={`${INPUT} font-mono`} /></Campo>
-          <Campo etiqueta="Valor de venta esperado ($)"><InputDinero value={f.valorVenta} disabled={!editable} onChange={(e) => set("valorVenta", e.target.value)} className={`${INPUT} font-mono`} /></Campo>
-          <div className="text-sm"><p className="text-xs text-stone-500">Margen esperado</p><p className={`font-mono text-lg ${margen < 0 ? "text-rose-600" : "text-stone-900"}`}>{f.valorCompra !== "" && f.valorVenta !== "" ? clp(margen) : "—"}</p></div>
+          {!esRetoma && <Campo etiqueta={`Precio de compra ($)${f.aplicaPara === "compra" ? " *" : ""}`} ayuda="Lo máximo que se ofrece pagar por comprarlo."><InputDinero value={f.valorCompra} disabled={!editable} onChange={(e) => set("valorCompra", e.target.value)} className={`${INPUT} font-mono`} /></Campo>}
+          {!esRetoma && <Campo etiqueta={`Precio de consignación ($)${f.aplicaPara === "consignacion" ? " *" : ""}`} ayuda="Precio de publicación sugerido si se consigna."><InputDinero value={f.valorConsignacion} disabled={!editable} onChange={(e) => set("valorConsignacion", e.target.value)} className={`${INPUT} font-mono`} /></Campo>}
+          <Campo etiqueta={`Valor de retoma ($)${esRetoma ? " *" : ""}`} ayuda="Lo que se reconoce si el cliente lo entrega en parte de pago."><InputDinero value={f.valorRetoma} disabled={!editable} onChange={(e) => set("valorRetoma", e.target.value)} className={`${INPUT} font-mono`} /></Campo>
+          {(esRetoma || f.aplicaPara === "compra") && <Campo etiqueta="Valor de venta esperado ($) *"><InputDinero value={f.valorVenta} disabled={!editable} onChange={(e) => set("valorVenta", e.target.value)} className={`${INPUT} font-mono`} /></Campo>}
+          {(esRetoma || f.aplicaPara === "compra") && <div className="text-sm"><p className="text-xs text-stone-500">Margen esperado</p><p className={`font-mono text-lg ${margen < 0 ? "text-rose-600" : "text-stone-900"}`}>{(esRetoma ? f.valorRetoma : f.valorCompra) !== "" && f.valorVenta !== "" ? clp(margen) : "—"}</p></div>}
         </div>
         {editable && f.estimacion.compra && (
           <div className="flex flex-wrap gap-2 mt-3">
-            <button type="button" onClick={() => set("valorCompra", f.estimacion.compra)} className={BTN}>Usar la compra sugerida ({clp(f.estimacion.compra)})</button>
+            <button type="button" onClick={() => set(esRetoma ? "valorRetoma" : "valorCompra", f.estimacion.compra)} className={BTN}>Usar la compra sugerida ({clp(f.estimacion.compra)})</button>
             <button type="button" onClick={() => set("valorVenta", f.estimacion.publicacion)} className={BTN}>Usar la publicación sugerida ({clp(f.estimacion.publicacion)})</button>
+            {!esRetoma && <button type="button" onClick={() => set("valorConsignacion", f.estimacion.publicacion)} className={BTN}>Usar la publicación como precio de consignación</button>}
           </div>
         )}
-        {editable && f.valorCompra !== "" && f.valorVenta !== "" && margen < 0 && <p className="text-xs text-rose-600 mt-2">El valor de venta esperado no puede ser menor que el de compra.</p>}
+        {editable && falta && <p className="text-xs text-rose-600 mt-2">{falta}</p>}
       </Tarjeta>
 
       {t.tipo === "directa" && <SeccionValidacion api={api} origen={{ tipo: "tasacion", id: t.id }} titulo="Validación de documentos de la compra" />}
@@ -258,11 +281,11 @@ function TasacionDetalle({ api, id, renderEstimador, onCerrar, onCambio }) {
 
       <Campo etiqueta="Observaciones del Tasador"><textarea rows={3} maxLength={1000} value={f.observaciones} disabled={!editable} onChange={(e) => set("observaciones", e.target.value)} className={INPUT} /></Campo>
 
-      {t.estado === "completada" && <Aviso tipo="ok">Completada {fechaHora(t.completada_en)}. Valor reconocido: <strong>{clp(t.valor_compra)}</strong> · venta esperada {clp(t.valor_venta)}.</Aviso>}
+      {t.estado === "completada" && <Aviso tipo="ok">Completada {fechaHora(t.completada_en)}. <ResultadoTasacion t={t} /></Aviso>}
 
       <div className="flex flex-wrap gap-2 items-center">
         {editable && <button onClick={guardar} disabled={ocupado} className={BTN}>Guardar borrador</button>}
-        {editable && <button onClick={completar} disabled={ocupado || f.valorCompra === "" || f.valorVenta === "" || margen < 0} className={BTN_AMBAR}>Completar tasación</button>}
+        {editable && <button onClick={completar} disabled={ocupado || !!falta} className={BTN_AMBAR}>Completar tasación</button>}
         {editable && <button onClick={() => correr(() => api("tasaciones.liberar", { id: t.id }), "Devuelta a la cola")} disabled={ocupado} className={BTN}>Devolver a la cola</button>}
         {datos.puedeGestionar && (t.estado === "pendiente" || t.estado === "en_proceso") && <button onClick={() => setAsignando(!asignando)} className={BTN}>Asignar a otro Tasador…</button>}
         {(t.estado === "pendiente" || t.estado === "en_proceso") && <button onClick={() => setCancelando(!cancelando)} className={BTN}>Cancelar tasación…</button>}
@@ -281,6 +304,24 @@ function TasacionDetalle({ api, id, renderEstimador, onCerrar, onCambio }) {
         </div>
       )}
     </Modal>
+  );
+}
+
+/** Valor principal de una tasación completada, según lo que decidió el Tasador (o null si no aplica). */
+export const valorPrincipal = (t) => (t.aplica_para === "ninguna" ? null : t.aplica_para === "consignacion" ? Number(t.valor_consignacion) || null : Number(t.valor_compra) || null);
+
+/** Resultado de una tasación completada: a qué aplica y sus precios. */
+export function ResultadoTasacion({ t }) {
+  if (t.tipo === "parte_pago") return <>Valor reconocido: <strong>{clp(t.valor_retoma || t.valor_compra)}</strong> · venta esperada {clp(t.valor_venta)}.</>;
+  const aplica = aplicaParaNombre(t.aplica_para);
+  return (
+    <>
+      {aplica ? <>Aplica para <strong>{aplica.toLowerCase()}</strong>. </> : null}
+      {t.aplica_para === "ninguna" ? "No se compra ni se consigna." : null}
+      {t.aplica_para !== "ninguna" && Number(t.valor_compra) > 0 && <>Compra: <strong>{clp(t.valor_compra)}</strong>{t.valor_venta ? ` (venta esperada ${clp(t.valor_venta)})` : ""}. </>}
+      {t.aplica_para !== "ninguna" && Number(t.valor_consignacion) > 0 && <>Consignación: <strong>{clp(t.valor_consignacion)}</strong>. </>}
+      {Number(t.valor_retoma) > 0 && <>Retoma: <strong>{clp(t.valor_retoma)}</strong>.</>}
+    </>
   );
 }
 
@@ -310,7 +351,7 @@ export function SeccionTasacion({ api, lead, datos, catalogos, onCambio, avisar 
   return (
     <div className="bg-white border border-stone-200 p-4 flex flex-col gap-3">
       <div className="flex items-center justify-between gap-3">
-        <p className="text-sm text-stone-700">Tasación del vehículo en parte de pago</p>
+        <p className="text-sm text-stone-700">{lead.tipo === "venta" || !lead.tipo ? "Tasación del vehículo en parte de pago" : "Tasación del vehículo"}</p>
         {catalogos.puedePedirTasacion && datos.puedeEditar && !cerrado && !abierta && <button onClick={() => setPidiendo(true)} className={BTN_AMBAR}>{completada ? "Pedir una nueva tasación" : "Pedir tasación"}</button>}
       </div>
       {vigente && vigente.estado === "completada" && (
@@ -325,11 +366,11 @@ export function SeccionTasacion({ api, lead, datos, catalogos, onCambio, avisar 
             <span className="font-mono text-xs text-stone-500">{t.folio}</span>
             <span className="text-stone-900">{nombreVeh(t.vehiculo)}</span>
             <Estado id={t.estado} />
-            {t.estado === "completada" && <span className="ml-auto font-mono text-stone-900">{clp(t.valor_compra)}</span>}
+            {t.estado === "completada" && <span className="ml-auto font-mono text-stone-900">{valorPrincipal(t) ? clp(valorPrincipal(t)) : "No aplica"}</span>}
           </div>
           <p className="text-xs text-stone-500 mt-1">
             Pedida {hace(t.solicitada_en)}{t.tasador ? ` · Tasador: ${t.tasador}` : t.estado === "pendiente" ? " · esperando que un Tasador la tome" : ""}
-            {t.estado === "completada" && t.valor_venta ? ` · venta esperada ${clp(t.valor_venta)}` : ""}{t.nFotos ? ` · ${t.nFotos} foto(s)` : ""}
+            {t.estado === "completada" && t.aplica_para ? ` · aplica: ${aplicaParaNombre(t.aplica_para).toLowerCase()}` : ""}{t.estado === "completada" && t.valor_venta ? ` · venta esperada ${clp(t.valor_venta)}` : ""}{t.nFotos ? ` · ${t.nFotos} foto(s)` : ""}
           </p>
           {t.estado === "cancelada" && t.motivo_cancelacion && <p className="text-xs text-stone-500 mt-1">Cancelada: {t.motivo_cancelacion}</p>}
           <div className="flex flex-wrap gap-2 mt-2">
@@ -357,7 +398,7 @@ export function MisTasaciones({ api, version, abrirLead }) {
           <li key={t.id}><button onClick={() => t.lead_id && abrirLead(t.lead_id)} className="w-full text-left py-2 text-sm hover:bg-amber-50 px-1 flex flex-wrap items-center gap-x-3 gap-y-1">
             <span className="font-mono text-xs text-stone-500">{t.folio}</span><Estado id={t.estado} />
             <span className="text-stone-900">{t.cliente}</span><span className="text-stone-600">{nombreVeh(t.vehiculo)}</span>
-            {t.estado === "completada" && <span className="font-mono text-emerald-700">{clp(t.valor_compra)}</span>}
+            {t.estado === "completada" && <span className="font-mono text-emerald-700">{valorPrincipal(t) ? clp(valorPrincipal(t)) : "No aplica"}</span>}
           </button></li>
         ))}
       </ul>
@@ -423,7 +464,7 @@ function ListaTasaciones({ api, vista, estadoFiltro, version, onAbrir, onTomar, 
                 <td className="py-2.5 px-4 text-stone-900">{nombreVeh(t.vehiculo)}<div className="text-xs text-stone-500">{Number(t.vehiculo.km).toLocaleString("es-CL")} km{t.vehiculo.transmision ? ` · ${t.vehiculo.transmision}` : ""}</div></td>
                 <td className="py-2.5 px-4 text-stone-700">{t.cliente || "—"}<div className="text-xs text-stone-500">{t.tipo === "directa" ? "Tasación directa" : `Pidió ${t.solicitante || "—"}`}</div></td>
                 <td className="py-2.5 px-4 text-stone-700">{t.tasador || "—"}</td>
-                <td className="py-2.5 px-4"><Estado id={t.estado} />{t.estado === "completada" && <div className="font-mono text-xs mt-1">{clp(t.valor_compra)}</div>}</td>
+                <td className="py-2.5 px-4"><Estado id={t.estado} />{t.estado === "completada" && <div className="font-mono text-xs mt-1">{valorPrincipal(t) ? clp(valorPrincipal(t)) : "No aplica"}{t.aplica_para && t.aplica_para !== "ninguna" ? ` · ${aplicaParaNombre(t.aplica_para)}` : ""}</div>}</td>
                 <td className="py-2.5 px-4 text-right whitespace-nowrap">
                   {t.estado === "pendiente" && datos.puedeRealizar && <button onClick={() => tomar(t)} className={BTN_AMBAR}>Tomar</button>}{" "}
                   <button onClick={() => onAbrir(t.id)} className={BTN}>Abrir</button>

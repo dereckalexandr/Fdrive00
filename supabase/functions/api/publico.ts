@@ -267,7 +267,7 @@ export async function publicOp(ctx: CtxPublico, body: any): Promise<Response> {
       const vt = vtWeb!;
       if (vt.ok) {
         const t = await sb.from("tasaciones").insert({
-          local_id: local, tipo: "directa", contacto: { nombre: s.contacto.nombre, telefono: s.contacto.telefono }, vehiculo: vt.value, patente: vt.value.patente,
+          local_id: local, tipo: "directa", lead_id: lead.id, solicitante_id: asignado ? asignado.id : null, contacto: { nombre: s.contacto.nombre, telefono: s.contacto.telefono }, vehiculo: vt.value, patente: vt.value.patente,
           estado: "pendiente", notas_solicitud: `${s.vende.modalidad === "consignar" ? "Quiere consignar" : "Quiere vender"} (pedido desde el sitio web). Espera $${Number(s.vende.precioEsperado).toLocaleString("es-CL")} · ${s.vende.duenos} dueño(s) · prenda: ${s.vende.prenda === "si" ? "sí" : "no"} · mantenciones en la marca: ${s.vende.mantenciones === "si" ? "sí" : "no"}.${s.mensaje ? ` ${s.mensaje}` : ""}`.slice(0, 300), creado_por: "sitio web",
         }).select().single();
         if (!t.error) { folioTasacion = t.data.numero; tasacionWeb = { numero: t.data.numero, auto: `${s.vende.marca} ${s.vende.modelo} ${s.vende.anio}` }; }

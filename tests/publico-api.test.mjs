@@ -248,7 +248,7 @@ test("Vender o consignar: lead de compra o consignación y una tasación esperan
   assert.equal(t.estado, "pendiente");
   assert.equal(t.tipo, "directa");
   assert.equal(t.contacto.nombre, "Pedro Soto");
-  assert.equal(t.lead_id ?? null, null, "no se liga al lead para no tocar su parte de pago");
+  assert.ok(t.lead_id, "queda ligada al lead para devolver el resultado al ejecutivo (no es de parte de pago: no toca su valor)");
   assert.match(t.notas_solicitud, /Espera \$8\.500\.000 · 2 dueño\(s\) · prenda: no · mantenciones en la marca: sí/, "el Tasador ve lo que declaró el dueño");
   // El Tasador la ve en su cola.
   const cola = await ve(U.t1.token, "tasaciones.list", { vista: "cola" });
@@ -302,7 +302,7 @@ test("Renovar (cambiar mi auto por otro): lead de venta con su auto como parte d
   assert.ok(cola.tasaciones.some((x) => x.id === t.id), "el Tasador la ve en su cola");
   // El Tasador la completa y el valor queda como parte de pago del lead.
   assert.equal((await ve(U.t1.token, "tasaciones.tomar", { id: t.id })).status, 200);
-  assert.equal((await ve(U.t1.token, "tasaciones.completar", { id: t.id, borrador: { valorCompra: 4000000, valorVenta: 5200000 } })).status, 200);
+  assert.equal((await ve(U.t1.token, "tasaciones.completar", { id: t.id, borrador: { aplicaPara: "compra", valorCompra: 4000000, valorVenta: 5200000 } })).status, 200);
   assert.equal(db.tablas.leads.find((x) => x.id === l.id).parte_pago.valor, 4000000);
   // Obligatorios: el auto deseado y todos los datos del actual.
   nuevaIp();

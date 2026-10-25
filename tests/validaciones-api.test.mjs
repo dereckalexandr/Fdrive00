@@ -254,7 +254,7 @@ test("Cierre antiguo sin validación: al aprobar se crea y bloquea", async () =>
 test("Tasación directa completada: pide la validación de la compra", async () => {
   const t = (await ve(U.t1.token, "tasaciones.directa", { datos: { vehiculo: { patente: "CCCC33", marca: "Mazda", modelo: "3", anio: 2018, km: 60000 }, contacto: { nombre: "Don Pedro", telefono: "912345678" } } })).tasacion;
   assert.equal(db.tablas.validaciones.filter((v) => v.tasacion_id === t.id).length, 0);
-  const done = await ve(U.t1.token, "tasaciones.completar", { id: t.id, borrador: { valorCompra: 5000000, valorVenta: 6500000 } });
+  const done = await ve(U.t1.token, "tasaciones.completar", { id: t.id, borrador: { aplicaPara: "compra", valorCompra: 5000000, valorVenta: 6500000 } });
   assert.equal(done.status, 200, JSON.stringify(done));
   const v = db.tablas.validaciones.find((x) => x.tasacion_id === t.id);
   assert.ok(v);

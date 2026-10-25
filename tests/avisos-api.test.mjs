@@ -90,7 +90,7 @@ test("Tasación completada: avisa a quien la pidió", async () => {
   assert.ok(t);
   assert.equal((await ve(U.t1.token, "tasaciones.tomar", { id: t.id })).status, 200);
   vaciar();
-  assert.equal((await ve(U.t1.token, "tasaciones.completar", { id: t.id, borrador: { valorCompra: 5000000, valorVenta: 6000000 } })).status, 200);
+  assert.equal((await ve(U.t1.token, "tasaciones.completar", { id: t.id, borrador: { aplicaPara: "compra", valorCompra: 5000000, valorVenta: 6000000 } })).status, 200);
   assert.deepEqual(enviados(), ["e1@prueba.cl | Tasación completada"]);
 });
 

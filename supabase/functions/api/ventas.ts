@@ -160,6 +160,45 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     } catch { /* la etapa es un reflejo: si no se pudo mover, la operación igual sigue */ }
   }
 
+  const tipoCorto = (t: string) => (t === "compra" ? "Compra" : t === "consignacion" ? "Consignación" : "Venta");
+
+  /** Texto con la decisión del Tasador y sus precios (para el historial del lead y el aviso al ejecutivo). */
+  function resultadoTasacion(t: any) {
+    const retoma = Number(t.valor_retoma) > 0 ? ` Retoma: ${dinero(t.valor_retoma)}.` : "";
+    if (t.aplica_para === "consignacion") return `aplica para CONSIGNACIÓN, precio de consignación ${dinero(t.valor_consignacion)}${Number(t.valor_compra) > 0 ? ` (compra referencial ${dinero(t.valor_compra)})` : ""}.${retoma} Ya se puede registrar el contrato.`;
+    if (t.aplica_para === "ninguna") return `NO aplica para compra ni consignación${t.observaciones ? `: ${t.observaciones}` : ""}.${retoma}`;
+    return `aplica para COMPRA, se paga hasta ${dinero(t.valor_compra)} (venta esperada ${dinero(t.valor_venta)}).${retoma} Ya se puede hacer la oferta.`;
+  }
+
+  /**
+   * El resultado vuelve al ejecutivo del lead (y a quien pidió la tasación). Si el Tasador decidió que el vehículo aplica para el otro tipo
+   * (compra ↔ consignación), el lead cambia de tipo; sigue con el mismo ejecutivo si está habilitado para ese tipo y, si no, pasa a quien corresponda por el reparto.
+   */
+  async function devolverResultadoAlEjecutivo(t: any, data: any) {
+    try {
+      const lead = await cargarLead(t.lead_id);
+      if (!lead) return;
+      const vh = data.vehiculo || {};
+      const lineas = [`${userName} completó la tasación ${folioTasacion(t.numero)}${vh.marca ? ` de ${vh.marca} ${vh.modelo || ""}` : ""}: ${resultadoTasacion(data)}`];
+      const nuevoTipo = data.aplica_para === "compra" || data.aplica_para === "consignacion" ? data.aplica_para : null;
+      let destinatarios: string[] = [t.solicitante_id, lead.asignado_a].filter(Boolean);
+      if (nuevoTipo && lead.tipo !== nuevoTipo && ["compra", "consignacion"].includes(lead.tipo) && !ETAPAS_CERRADAS.includes(lead.etapa)) {
+        const cands = await elegibles(lead.local_id, nuevoTipo);
+        let asignado = lead.asignado_a && cands.some((c: any) => c.id === lead.asignado_a) ? { id: lead.asignado_a, nombre: "" } : null;
+        if (!asignado) asignado = elegirAsignado(cands, await ultimasAsignaciones(nuevoTipo)) ?? null;
+        const up = await sb.from("leads").update({ tipo: nuevoTipo, asignado_a: asignado ? asignado.id : lead.asignado_a, actualizado_en: new Date().toISOString() }).eq("id", lead.id);
+        if (!up.error) {
+          const cambio = asignado && asignado.id !== lead.asignado_a;
+          await evento(lead.id, "tipo", `El lead pasó de ${tipoCorto(lead.tipo)} a ${tipoCorto(nuevoTipo)} por decisión del Tasador${cambio ? "; se reasignó a un ejecutivo habilitado para ese tipo" : ""}`);
+          lineas.push(`El lead pasó de ${tipoCorto(lead.tipo)} a ${tipoCorto(nuevoTipo)}${cambio ? " y se reasignó a un ejecutivo habilitado" : ""}.`);
+          if (cambio) destinatarios = [...destinatarios, asignado!.id];
+          await audit(ctx.actor, "lead.cambiar_tipo", "lead", lead.id, { de: lead.tipo, a: nuevoTipo, por_tasacion: t.id, reasignado: !!cambio });
+        }
+      }
+      await avisarA(destinatarios, "Tasación completada", lineas);
+    } catch (e) { console.error("devolverResultadoAlEjecutivo:", String((e as any)?.message ?? e)); }
+  }
+
   async function evento(leadId: string, tipo: string, detalle: string) {
     const { error } = await sb.from("lead_eventos").insert({ lead_id: leadId, usuario_id: userId, usuario_nombre: userName, tipo, detalle });
     if (error) console.error("lead_eventos error:", error.message);
@@ -734,10 +773,14 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       const patch: Record<string, any> = { ...b.value, actualizado_en: new Date().toISOString() };
       if (b.value.vehiculo) { patch.patente = b.value.vehiculo.patente; }
       if (completar) {
-        const fin = validarCompletarTasacion({ valor_compra: patch.valor_compra ?? t.valor_compra, valor_venta: patch.valor_venta ?? t.valor_venta });
+        const pick = (k: string) => (patch[k] !== undefined ? patch[k] : t[k]);
+        const fin = validarCompletarTasacion({ tipo: t.tipo, valor_compra: pick("valor_compra"), valor_venta: pick("valor_venta"), valor_consignacion: pick("valor_consignacion"), valor_retoma: pick("valor_retoma"), aplica_para: pick("aplica_para"), observaciones: pick("observaciones") });
         if (!fin.ok) return err(fin.error!);
         patch.valor_compra = fin.value.valor_compra;
         patch.valor_venta = fin.value.valor_venta;
+        patch.valor_consignacion = fin.value.valor_consignacion;
+        patch.valor_retoma = fin.value.valor_retoma;
+        patch.aplica_para = fin.value.aplica_para;
         patch.estado = "completada";
         patch.completada_en = new Date().toISOString();
       }
@@ -746,7 +789,8 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       if (completar) {
         // El valor tasado queda como el valor del vehículo en parte de pago del lead (y como su tope).
         if (t.lead_id && t.tipo !== "parte_pago") {
-          await evento(t.lead_id, "tasacion", `Tasación ${folioTasacion(t.numero)} completada por ${userName}: se paga hasta ${dinero(data.valor_compra)} (venta esperada ${dinero(data.valor_venta)}). Ya se puede hacer la oferta.`);
+          await evento(t.lead_id, "tasacion", `Tasación ${folioTasacion(t.numero)} completada por ${userName}: ${resultadoTasacion(data)}`);
+          await devolverResultadoAlEjecutivo(t, data);
         } else if (t.lead_id) {
           const lead = await cargarLead(t.lead_id);
           if (lead) {
@@ -757,8 +801,8 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
           await evento(t.lead_id, "tasacion", `Tasación ${folioTasacion(t.numero)} completada por ${userName}: se reconoce ${dinero(data.valor_compra)} por el vehículo (venta esperada ${dinero(data.valor_venta)}). Las cotizaciones deben usar este valor o uno menor.`);
         }
         await audit(ctx.actor, "tasacion.completar", "tasacion", t.id, { numero: t.numero, valor_compra: data.valor_compra, valor_venta: data.valor_venta, lead_id: t.lead_id });
-        await avanzarEtapa(t.lead_id, ["tasacion", "nuevo", "contactado", "seguimiento"], "contrato", "la tasación está lista", ["consignacion"]);
-        { const vh = data.vehiculo || {}; await avisarA([t.solicitante_id].filter(Boolean), "Tasación completada", [`${userName} completó la tasación ${folioTasacion(t.numero)}${vh.marca ? ` de ${vh.marca} ${vh.modelo || ""}` : ""}.`, `Se paga hasta ${dinero(data.valor_compra)}; venta esperada ${dinero(data.valor_venta)}.`]); }
+        if (data.aplica_para !== "ninguna") await avanzarEtapa(t.lead_id, ["tasacion", "nuevo", "contactado", "seguimiento"], "contrato", "la tasación está lista", ["consignacion"]);
+        if (!(t.lead_id && t.tipo !== "parte_pago")) { const vh = data.vehiculo || {}; await avisarA([t.solicitante_id].filter(Boolean), "Tasación completada", [`${userName} completó la tasación ${folioTasacion(t.numero)}${vh.marca ? ` de ${vh.marca} ${vh.modelo || ""}` : ""}.`, `Se paga hasta ${dinero(data.valor_compra)}; venta esperada ${dinero(data.valor_venta)}.`]); }
         if (t.tipo === "directa") {
           const ya = await sb.from("validaciones").select("id").eq("tasacion_id", t.id);
           if (!ya.error && (ya.data ?? []).length === 0) await crearValidacion({ tipo: "compra", local_id: t.local_id, tasacion_id: t.id, sujeto: sujetoDeVehiculo(data.vehiculo || {}, { vendedor: (t.contacto && t.contacto.nombre) || "" }) });
@@ -1924,7 +1968,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       const todas: any[] = q.data ?? [];
       const pendiente = todas.find((t) => t.estado === "pendiente" || t.estado === "en_proceso");
       return json({
-        tasaciones: todas.filter((t) => t.estado === "completada").map((t) => ({ id: t.id, folio: folioTasacion(t.numero), valor_compra: t.valor_compra, valor_venta: t.valor_venta, completada_en: t.completada_en })),
+        tasaciones: todas.filter((t) => t.estado === "completada").map((t) => ({ id: t.id, folio: folioTasacion(t.numero), valor_compra: t.valor_compra, valor_venta: t.valor_venta, valor_consignacion: t.valor_consignacion, valor_retoma: t.valor_retoma, aplica_para: t.aplica_para, tipo: t.tipo, observaciones: t.observaciones, completada_en: t.completada_en })),
         pendiente: pendiente ? { id: pendiente.id, folio: folioTasacion(pendiente.numero), estado: pendiente.estado } : null,
       });
     }

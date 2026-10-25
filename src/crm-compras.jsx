@@ -12,6 +12,7 @@ import React, { useState } from "react";
 import { InputDinero } from "./campo-dinero.jsx";
 import { MEDIOS_PAGO } from "../supabase/functions/api/ventas-core.js";
 import { compraNombre, consignacionNombre, COMPRA_ABIERTA, CONSIGNACION_ABIERTA, validarOferta, validarConsignacion } from "../supabase/functions/api/compras-core.js";
+import { ResultadoTasacion } from "./crm-tasaciones.jsx";
 import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, hace, Aviso, Cargando, Tarjeta, Campo, Pestanas, useCarga, mensajeError, DatosDelDueno } from "./crm-ui.jsx";
 
 const COLOR_COMPRA = { oferta: "bg-amber-100 text-amber-800", aceptada: "bg-sky-100 text-sky-800", pago_pendiente: "bg-violet-100 text-violet-800", comprada: "bg-emerald-100 text-emerald-800", rechazada: "bg-stone-200 text-stone-600", anulada: "bg-stone-200 text-stone-600", cancelada: "bg-stone-200 text-stone-600" };
@@ -96,8 +97,10 @@ export function SeccionCompra({ api, lead, datos, onCambio, avisar }) {
   const puedeOperar = datos.puedeEditar;
   const abierta = lista.compras.some((c) => COMPRA_ABIERTA.includes(c.estado));
   const completas = tas.tasaciones;
+  // Solo se puede ofertar sobre tasaciones que el Tasador dejó como aplicables a compra (o anteriores a esta decisión).
+  const ofertables = completas.filter((t) => !t.aplica_para || t.aplica_para === "compra");
   const cambio = async () => { await recargar(); await recargarTas(); await onCambio(); };
-  const elegida = completas.find((t) => t.id === (oferta.tasacionId || (completas[0] && completas[0].id)));
+  const elegida = ofertables.find((t) => t.id === (oferta.tasacionId || (ofertables[0] && ofertables[0].id)));
   const o = lead.vehiculo_ofrecido || {};
 
   const pedirTasacion = async () => { avisar(""); setOcupado(true); try { await api("compras.pedirTasacion", { leadId: lead.id }); await cambio(); } catch (e) { avisar(mensajeError(e)); } setOcupado(false); };
@@ -121,17 +124,21 @@ export function SeccionCompra({ api, lead, datos, onCambio, avisar }) {
         <div className="border border-stone-200 bg-stone-50 p-3 flex flex-col gap-3">
           <p className="text-xs uppercase tracking-wide text-stone-400">1 · Tasación</p>
           {completas.length > 0 ? (
-            <p className="text-sm text-stone-700">Tasada en <strong className="font-mono">{clp(completas[0].valor_compra)}</strong> (venta esperada {clp(completas[0].valor_venta)}). Es lo máximo que puedes ofrecer.</p>
+            <div className="text-sm text-stone-700">
+              <p><span className="text-xs uppercase text-stone-400">Resultado del Tasador · {completas[0].folio}: </span><ResultadoTasacion t={completas[0]} /> {ofertables.length > 0 && "El monto de compra es lo máximo que puedes ofrecer."}</p>
+              {completas[0].observaciones && <p className="text-xs text-stone-500 mt-1">Observaciones: {completas[0].observaciones}</p>}
+              {ofertables.length === 0 && <p className="mt-2 text-rose-700">El Tasador indicó que este vehículo no aplica para compra, así que no se puede ofertar. {completas[0].aplica_para === "consignacion" ? "Si el lead cambió a Consignación, sigue desde la ficha." : "Puedes pedir una nueva tasación o marcar el lead como perdido."}</p>}
+            </div>
           ) : tas.pendiente ? (
             <p className="text-sm text-stone-700">La tasación {tas.pendiente.folio} está {tas.pendiente.estado === "pendiente" ? "esperando a un Tasador" : "en proceso"}. Cuando termine podrás ofertar.</p>
           ) : (
             <div className="flex items-center gap-3"><p className="text-sm text-stone-700">Aún no hay una tasación de este vehículo.</p><button disabled={ocupado} onClick={pedirTasacion} className={BTN_AMBAR}>Pedir tasación</button></div>
           )}
-          {completas.length > 0 && (
+          {ofertables.length > 0 && elegida && (
             <>
               <p className="text-xs uppercase tracking-wide text-stone-400">2 · Oferta al cliente</p>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
-                {completas.length > 1 && <Campo etiqueta="Tasación"><select value={oferta.tasacionId || completas[0].id} onChange={(e) => setOferta({ ...oferta, tasacionId: e.target.value })} className={INPUT}>{completas.map((t) => <option key={t.id} value={t.id}>{t.folio} · {clp(t.valor_compra)}</option>)}</select></Campo>}
+                {ofertables.length > 1 && <Campo etiqueta="Tasación"><select value={oferta.tasacionId || ofertables[0].id} onChange={(e) => setOferta({ ...oferta, tasacionId: e.target.value })} className={INPUT}>{ofertables.map((t) => <option key={t.id} value={t.id}>{t.folio} · {clp(t.valor_compra)}</option>)}</select></Campo>}
                 <Campo etiqueta="Monto ofrecido ($)" ayuda={`Máximo ${clp(elegida.valor_compra)}`}><InputDinero value={oferta.monto === "" ? elegida.valor_compra : oferta.monto} onChange={(e) => setOferta({ ...oferta, monto: e.target.value })} className={`${INPUT} font-mono`} /></Campo>
                 <Campo etiqueta="Nota (opcional)"><input value={oferta.notas} maxLength={300} onChange={(e) => setOferta({ ...oferta, notas: e.target.value })} className={INPUT} /></Campo>
               </div>
@@ -195,7 +202,8 @@ function Consignacion({ api, c, puedeOperar, onCambio, avisar }) {
 
 export function SeccionConsignacion({ api, lead, datos, onCambio, avisar }) {
   const { datos: lista, recargar } = useCarga(() => api("consignaciones.list", { vista: "lead", leadId: lead.id }), [api, lead.id, datos.eventos.length]);
-  const [f, setF] = useState({ precioPiso: "", precioPublicacion: lead.vehiculo_ofrecido && lead.vehiculo_ofrecido.precioEsperado ? String(lead.vehiculo_ofrecido.precioEsperado) : "", plazoDias: 90, notas: "" });
+  const tasada = (datos.tasaciones || []).find((t) => t.estado === "completada" && t.tipo !== "parte_pago");
+  const [f, setF] = useState({ precioPiso: "", precioPublicacion: tasada && Number(tasada.valor_consignacion) > 0 ? String(tasada.valor_consignacion) : lead.vehiculo_ofrecido && lead.vehiculo_ofrecido.precioEsperado ? String(lead.vehiculo_ofrecido.precioEsperado) : "", plazoDias: 90, notas: "" });
   const [error, setError] = useState("");
   const [ocupado, setOcupado] = useState(false);
   if (!lista) return <Cargando />;
@@ -216,6 +224,12 @@ export function SeccionConsignacion({ api, lead, datos, onCambio, avisar }) {
       <p className="text-sm text-stone-700">Consignación del vehículo</p>
       <DatosDelDueno o={o} />
       <p className="text-xs text-stone-500">Vehículo del dueño: <strong className="text-stone-800">{nombreVeh(o) || "sin datos"}</strong>{o.km != null ? ` · ${Number(o.km).toLocaleString("es-CL")} km` : ""}</p>
+      {tasada && (
+        <div className={`border p-3 text-sm ${tasada.aplica_para === "ninguna" ? "border-rose-300 bg-rose-50" : "border-emerald-300 bg-emerald-50"}`}>
+          <span className="text-xs uppercase text-stone-500">Resultado del Tasador · {tasada.folio}: </span><ResultadoTasacion t={tasada} />
+          {tasada.observaciones && <p className="text-xs text-stone-600 mt-1">Observaciones: {tasada.observaciones}</p>}
+        </div>
+      )}
       {!abierta && !cerrado && datos.puedeEditar && lista.consignaciones.every((c) => !["vendida"].includes(c.estado)) && (
         <div className="border border-stone-200 bg-stone-50 p-3 flex flex-col gap-3">
           <p className="text-xs uppercase tracking-wide text-stone-400">Contrato de consignación</p>

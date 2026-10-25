@@ -35,7 +35,7 @@ async function tasar(tokenEje, leadId, tasador, { compra = 6500000, venta = 8500
   const t = (await pedir(tokenEje, leadId, vehiculo)).tasacion;
   assert.ok(t, "no se pudo pedir");
   assert.equal((await ve(tasador.token, "tasaciones.tomar", { id: t.id })).status, 200);
-  const r = await ve(tasador.token, "tasaciones.completar", { id: t.id, borrador: { valorCompra: compra, valorVenta: venta } });
+  const r = await ve(tasador.token, "tasaciones.completar", { id: t.id, borrador: { aplicaPara: "compra", valorCompra: compra, valorVenta: venta } });
   assert.equal(r.status, 200, JSON.stringify(r));
   return r.tasacion;
 }
@@ -163,7 +163,7 @@ test("Guardar un borrador: solo quien la tiene; los datos se limpian", async () 
     estimacion: { promedio: 8500000, compra: 6500000, hackeo: "<script>" }, inspeccion: { key: "vendors" }, vehiculo: { ...VEH, km: 80000 } };
   assert.equal((await ve(U.t1.token, "tasaciones.guardar", { id, borrador })).status, 403, "Tito ya no la tiene");
   assert.equal((await ve(U.e1.token, "tasaciones.guardar", { id, borrador })).status, 403);
-  assert.equal((await ve(U.t2.token, "tasaciones.guardar", { id, borrador: { valorCompra: "abc" } })).error, "valor_compra_invalido");
+  assert.equal((await ve(U.t2.token, "tasaciones.guardar", { id, borrador: { aplicaPara: "compra", valorCompra: "abc" } })).error, "valor_compra_invalido");
   const r = await ve(U.t2.token, "tasaciones.guardar", { id, borrador });
   assert.equal(r.status, 200, JSON.stringify(r));
   const t = fila(id);
@@ -182,9 +182,9 @@ test("Completar: valores obligatorios; al terminar el lead queda con el valor re
   const id = U.t1a.id;
   assert.equal((await ve(U.t1.token, "tasaciones.completar", { id })).status, 403);
   assert.equal((await ve(U.t2.token, "tasaciones.completar", { id, borrador: { valorVenta: 0 } })).error, "valor_venta_invalido");
-  assert.equal((await ve(U.t2.token, "tasaciones.completar", { id, borrador: { valorCompra: 9000000, valorVenta: 8500000 } })).error, "valor_venta_menor");
+  assert.equal((await ve(U.t2.token, "tasaciones.completar", { id, borrador: { aplicaPara: "compra", valorCompra: 9000000, valorVenta: 8500000 } })).error, "valor_venta_menor");
   assert.equal(fila(id).estado, "en_proceso", "un intento fallido no la termina");
-  const r = await ve(U.t2.token, "tasaciones.completar", { id, borrador: { valorCompra: 6500000, valorVenta: 8500000 } });
+  const r = await ve(U.t2.token, "tasaciones.completar", { id, borrador: { aplicaPara: "compra", valorCompra: 6500000, valorVenta: 8500000 } });
   assert.equal(r.status, 200, JSON.stringify(r));
   assert.equal(r.tasacion.estado, "completada");
   assert.ok(fila(id).completada_en);
@@ -285,7 +285,7 @@ test("Tasación directa: el Tasador la crea y la toma; sin lead ni ejecutivo", a
   assert.equal(r.tasacion.tasador, "Tito Tasador");
   assert.equal(r.tasacion.cliente, "Pedro Soto");
   assert.ok(!r.tasacion.lead_id, "no está ligada a ningún lead");
-  const c = await ve(U.t1.token, "tasaciones.completar", { id: r.tasacion.id, borrador: { valorCompra: 4000000, valorVenta: 5200000 } });
+  const c = await ve(U.t1.token, "tasaciones.completar", { id: r.tasacion.id, borrador: { aplicaPara: "compra", valorCompra: 4000000, valorVenta: 5200000 } });
   assert.equal(c.tasacion.estado, "completada");
   assert.equal((await ve(U.t1.token, "tasaciones.directa", { datos: { vehiculo: { patente: "1" } } })).error, "patente_invalida");
   assert.equal((await ve(U.t1.token, "tasaciones.directa", { datos: { vehiculo: { patente: "ZZZZ98", marca: "Suzuki", modelo: "Swift", anio: 2016, km: 1 }, contacto: { nombre: "Al" } } })).error, "nombre_invalido");

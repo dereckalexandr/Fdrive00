@@ -174,3 +174,28 @@ test("Cola de solicitudes: cuántas esperan y cuáles ya pasaron el plazo", () =
   assert.deepEqual(c.atrasadas.map((t) => t.id), ["a"]);
   assert.deepEqual(colaTasaciones([], ahora, 8), { pendientes: 0, masAntiguaHoras: 0, atrasadas: [] });
 });
+
+test("Completar con decisión del Tasador: compra, consignación, no aplica y retoma", () => {
+  const e = (o) => validarCompletarTasacion(o).error;
+  // Retoma (parte de pago): el valor de retoma manda y queda también como valor de compra.
+  const rt = validarCompletarTasacion({ tipo: "parte_pago", valor_retoma: 5000000, valor_venta: 6000000 });
+  assert.deepEqual([rt.ok, rt.value.valor_compra, rt.value.valor_retoma, rt.value.margen_esperado], [true, 5000000, 5000000, 1000000]);
+  assert.equal(validarCompletarTasacion({ tipo: "parte_pago", valor_compra: 5000000, valor_venta: 6000000 }).value.valor_retoma, 5000000, "tasaciones en proceso de antes: se toma el valor de compra");
+  assert.equal(e({ tipo: "parte_pago", valor_venta: 6000000 }), "valor_retoma_invalido");
+  assert.equal(e({ tipo: "parte_pago", valor_retoma: 7000000, valor_venta: 6000000 }), "valor_venta_menor");
+  // Las demás: hay que decidir.
+  assert.equal(e({ tipo: "directa", valor_compra: 5000000, valor_venta: 6000000 }), "aplica_para_requerido");
+  const c = validarCompletarTasacion({ tipo: "directa", aplica_para: "compra", valor_compra: 5000000, valor_venta: 6000000, valor_retoma: 4800000 });
+  assert.deepEqual([c.value.aplica_para, c.value.valor_compra, c.value.valor_retoma, c.value.valor_consignacion], ["compra", 5000000, 4800000, null]);
+  assert.equal(e({ tipo: "directa", aplica_para: "compra", valor_compra: 5000000 }), "valor_venta_invalido");
+  const k = validarCompletarTasacion({ tipo: "directa", aplica_para: "consignacion", valor_consignacion: 7000000 });
+  assert.deepEqual([k.ok, k.value.aplica_para, k.value.valor_consignacion, k.value.valor_compra], [true, "consignacion", 7000000, null]);
+  assert.equal(e({ tipo: "directa", aplica_para: "consignacion" }), "valor_consignacion_invalido");
+  const n = validarCompletarTasacion({ tipo: "directa", aplica_para: "ninguna", observaciones: "Siniestro grave" });
+  assert.deepEqual([n.ok, n.value.aplica_para, n.value.valor_compra], [true, "ninguna", null]);
+  assert.equal(e({ tipo: "directa", aplica_para: "ninguna" }), "motivo_no_aplica_requerido");
+  // El borrador acepta los nuevos campos y rechaza una decisión inválida.
+  const b = validarBorradorTasacion({ valorConsignacion: 7000000, valorRetoma: 4800000, aplicaPara: "consignacion" });
+  assert.deepEqual([b.value.valor_consignacion, b.value.valor_retoma, b.value.aplica_para], [7000000, 4800000, "consignacion"]);
+  assert.equal(validarBorradorTasacion({ aplicaPara: "x" }).error, "aplica_para_invalido");
+});
