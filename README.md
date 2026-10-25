@@ -846,3 +846,6 @@ Cuando una persona pide **vender, consignar o cambiar su auto** desde el sitio y
 ## Cierre de la versión anterior del CRM
 
 Se eliminó por completo la versión anterior: el ingreso por código (ejecutivos e inspectores), los enlaces `?vendor=` y `?inspector=`, la producción mensual y anual, las liquidaciones, las pestañas *Resumen mensual*, *Ejecutivos (código)* e *Inspectores (código)*, y el servidor ya no acepta `profileLogin` ni sesiones de esos perfiles. **Solo se movió** a *Administración → Configuración* la tarjeta **AFP y comisiones** (comisión de cada AFP y valor de la UF, claves `afp_config` y `uf_valor`, que el administrador edita). Los datos viejos guardados en el almacén (`vendors`, `inspectors`, `record::*`) no se borraron de la base: simplemente ya nada los usa. Para despejarlos hay que hacerlo con SQL, con respaldo previo.
+## Leads perdidos: guardados pero fuera del dashboard
+
+Los leads **no se eliminan nunca**. Al marcar uno como perdido (botón ✕ de la tarjeta, arrastrándolo a la zona «perdido» o desde su ficha) se pide el motivo, queda guardado con todo su historial y **sale del tablero y de la lista**. Para consultarlos: Leads → Lista → Atención → «Perdidos (archivados)», que muestra todos (sin límite de 30 días) con su motivo; la operación `leads.list` acepta `perdidos: true`. Sin SQL.

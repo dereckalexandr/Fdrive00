@@ -67,3 +67,14 @@ test("CSV: separador «;», comillas y sin fórmulas", () => {
   assert.ok(cab.startsWith("Cliente;Teléfono;Correo;Tipo;Etapa"));
   assert.ok(dato.startsWith("'=cmd;912345678"));
 });
+
+test("Los leads perdidos no aparecen en la lista salvo que se pidan, y conservan su motivo", () => {
+  const abierto = fila();
+  const perdido = fila({ lead: { id: "p", etapa: "perdido", motivo_perdida: "Precio" } });
+  assert.equal(perdido.motivoPerdida, "Precio");
+  const todas = [abierto, perdido];
+  assert.deepEqual(filtrarFilas(todas, {}).map((r) => r.id), ["l1"]);
+  assert.deepEqual(filtrarFilas(todas, { atencion: "abiertos" }).map((r) => r.id), ["l1"]);
+  assert.deepEqual(filtrarFilas(todas, { atencion: "perdidos" }).map((r) => r.id), ["p"]);
+  assert.deepEqual(filtrarFilas(todas, { atencion: "perdidos", texto: "sofia" }).map((r) => r.id), ["p"]);
+});

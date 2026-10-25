@@ -16,7 +16,7 @@ export function armarFilaLead({ lead, cliente, vehiculo, asignado, proxima }, ah
     id: lead.id, tipo, tipoNombre: tipoLeadNombre(tipo), etapa: lead.etapa, etapaNombre: etapaDeOperacion(tipo, lead.etapa, etapaNombre(lead.etapa)),
     cliente: (cliente && cliente.nombre) || "", telefono: (cliente && cliente.telefono) || "", email: (cliente && cliente.email) || "",
     vehiculo: vehiculoTexto, monto, fuente: lead.fuente || "", asignadoId: lead.asignado_a || "", asignado: (asignado && asignado.nombre) || "",
-    creado: lead.creado_en || "", dias: abierto ? diasEnEtapa(lead, ahora) : 0, abierto,
+    motivoPerdida: lead.motivo_perdida || "", creado: lead.creado_en || "", dias: abierto ? diasEnEtapa(lead, ahora) : 0, abierto,
     proxima: proxima ? proxima.titulo : "", proximaFecha: proxima ? proxima.vence_en : "", proximaVencida: vencida,
     sinProxima: abierto && !proxima, porAtender: lead.etapa === "nuevo" && !lead.ultimo_contacto,
     vehiculoId: vehiculo ? vehiculo.id : "", foto: vehiculo && vehiculo.fotos ? vehiculo.fotos[0] || "" : "",
@@ -25,11 +25,13 @@ export function armarFilaLead({ lead, cliente, vehiculo, asignado, proxima }, ah
 
 const sinTildes = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 
-/** Filtros: texto (cliente, teléfono, vehículo, fuente), tipo, etapa, asignado ("sin" = sin asignar), fuente y «atención» (abiertos|porAtender|sinProxima|vencida|detenido). */
+/** Filtros: texto (cliente, teléfono, vehículo, fuente), tipo, etapa, asignado ("sin" = sin asignar), fuente y «atención» (abiertos|porAtender|sinProxima|vencida|detenido|perdidos). */
 export function filtrarFilas(filas, f = {}) {
   const q = sinTildes(f.texto).trim();
   const dig = String(f.texto || "").replace(/\D/g, "");
   return filas.filter((r) => {
+    // Los leads perdidos quedan guardados pero no ensucian la lista: solo se ven al pedirlos expresamente.
+    if (f.atencion === "perdidos" ? r.etapa !== "perdido" : r.etapa === "perdido") return false;
     if (f.tipo && r.tipo !== f.tipo) return false;
     if (f.etapa && r.etapa !== f.etapa) return false;
     if (f.asignado === "sin" ? r.asignadoId : (f.asignado && r.asignadoId !== f.asignado)) return false;

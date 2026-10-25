@@ -472,6 +472,7 @@ function TarjetaLead({ lead, cliente, vehiculo, asignado, marca = {}, proxima, m
           {tel && <a href={`https://wa.me/${waNumero(tel)}`} target="_blank" rel="noreferrer" onClick={parar(() => onAccion("whatsapp"))} className="px-2 py-1 text-xs border border-stone-200 rounded-lg hover:bg-stone-50" title="WhatsApp">💬</a>}
           <button type="button" onClick={parar(() => onAccion("nota"))} className="px-2 py-1 text-xs border border-stone-200 rounded-lg hover:bg-stone-50" title="Registrar nota o contacto">📝</button>
           <button type="button" onClick={parar(() => onAccion("agendar"))} className="px-2 py-1 text-xs border border-stone-200 rounded-lg hover:bg-stone-50 ml-auto" title="Agendar la próxima acción">＋ Agendar</button>
+          {puedeMover && <button type="button" onClick={parar(() => onAccion("perdido"))} className="px-2 py-1 text-xs border border-stone-200 rounded-lg hover:bg-rose-50 text-rose-700" title="Marcar como perdido (queda guardado, sale del tablero)">✕</button>}
         </div>
       )}
       {puedeMover && abierto && (
@@ -487,7 +488,8 @@ const TIPOS_TABLERO = [{ id: "venta", nombre: "Ventas" }, { id: "compra", nombre
 
 function Leads({ api, catalogos, abrirLead, version, onCambio }) {
   const [todos, setTodos] = useState(catalogos.puedeAsignar);
-  const { cargando, error, datos, recargar } = useCarga(() => api("leads.list", { todos }), [api, todos, version]);
+  const [conPerdidos, setConPerdidos] = useState(false);
+  const { cargando, error, datos, recargar } = useCarga(() => api("leads.list", { todos, perdidos: conPerdidos }), [api, todos, version, conPerdidos]);
   const [form, setForm] = useState(false);
   const [msg, setMsg] = useState("");
   const [perdiendo, setPerdiendo] = useState(null);
@@ -518,11 +520,12 @@ function Leads({ api, catalogos, abrirLead, version, onCambio }) {
   if (cargando && !datos) return <Cargando />;
   if (error && !datos) return <Aviso>{error}</Aviso>;
   const conteo = { venta: 0, compra: 0, consignacion: 0 };
-  for (const l of datos.leads) conteo[l.tipo || "venta"] = (conteo[l.tipo || "venta"] || 0) + 1;
+  for (const l of datos.leads) if (l.etapa !== "perdido") conteo[l.tipo || "venta"] = (conteo[l.tipo || "venta"] || 0) + 1;
   const tabs = TIPOS_TABLERO.filter((t) => conteo[t.id] > 0 || (catalogos.tiposLead || ["venta"]).includes(t.id) || t.id === tipoVista);
   const tipo = tabs.some((t) => t.id === tipoVista) ? tipoVista : (tabs[0] || TIPOS_TABLERO[0]).id;
-  const delTipo = datos.leads.filter((l) => (l.tipo || "venta") === tipo);
-  const columnas = etapasDeTipo(tipo, { conSeguimiento: delTipo.some((l) => l.etapa === "seguimiento") });
+  // Los perdidos quedan guardados, pero no se muestran en el tablero (se consultan en Lista → Perdidos).
+  const delTipo = datos.leads.filter((l) => (l.tipo || "venta") === tipo && l.etapa !== "perdido");
+  const columnas = etapasDeTipo(tipo, { conSeguimiento: delTipo.some((l) => l.etapa === "seguimiento") }).filter((id) => id !== "perdido");
   const proximas = datos.proximas || {};
   const filaAccion = (l) => ({ id: l.id, cliente: { nombre: (mapas.c.get(l.cliente_id) || {}).nombre || "Cliente" } });
 
@@ -551,7 +554,7 @@ function Leads({ api, catalogos, abrirLead, version, onCambio }) {
         </div>
       </Tarjeta>
       {msg && <Aviso>{msg}</Aviso>}
-      {vista === "lista" && <ListaLeads api={api} datos={datos} mapas={mapas} catalogos={catalogos} todos={todos} abrirLead={abrirLead} recargar={recargar} onCambio={onCambio} />}
+      {vista === "lista" && <ListaLeads api={api} datos={datos} mapas={mapas} catalogos={catalogos} todos={todos} abrirLead={abrirLead} recargar={recargar} onCambio={onCambio} onPerdidos={setConPerdidos} />}
       {vista === "tablero" && <div className="flex flex-col md:flex-row gap-3 md:overflow-x-auto md:pb-3 items-start">
         {columnas.map((id) => {
           const leads = delTipo.filter((l) => l.etapa === id);
@@ -570,13 +573,20 @@ function Leads({ api, catalogos, abrirLead, version, onCambio }) {
                 {leads.length === 0 && <p className="text-xs text-stone-400 px-1 py-3 text-center">Sin leads</p>}
                 {leads.map((l) => (
                   <TarjetaLead key={l.id} lead={l} cliente={mapas.c.get(l.cliente_id)} vehiculo={mapas.v.get(l.vehiculo_id)} asignado={mapas.u.get(l.asignado_a)} marca={(datos.marcas || {})[l.id]} proxima={proximas[l.id]}
-                    mostrarAsignado={todos} onAbrir={() => abrirLead(l.id)} onMover={(e) => mover(l, e)} onAccion={(t) => setAccion({ tipo: t, lead: l })} puedeMover />
+                    mostrarAsignado={todos} onAbrir={() => abrirLead(l.id)} onMover={(e) => mover(l, e)} onAccion={(t) => (t === "perdido" ? mover(l, "perdido") : setAccion({ tipo: t, lead: l }))} puedeMover />
                 ))}
               </div>
             </div>
           );
         })}
       </div>}
+      {vista === "tablero" && (
+        <div className={`border-2 border-dashed rounded-xl px-4 py-3 text-sm text-center ${sobre === "perdido" ? "border-rose-400 bg-rose-50 text-rose-800" : "border-stone-300 text-stone-500"}`}
+          onDragOver={(e) => { e.preventDefault(); setSobre("perdido"); }} onDragLeave={() => setSobre("")}
+          onDrop={(e) => { e.preventDefault(); setSobre(""); const lead = delTipo.find((l) => l.id === e.dataTransfer.getData("text/plain")); if (lead) mover(lead, "perdido"); }}>
+          Arrastra aquí un lead para marcarlo como perdido. Queda guardado (con su motivo y su historial) y sale del tablero; lo encuentras en Lista → Atención → «Perdidos (archivados)».
+        </div>
+      )}
       {vista === "tablero" && <p className="text-xs text-stone-500">Las etapas marcadas «auto» se mueven solas según lo que vas haciendo (cotizar, reservar, pedir una tasación, hacer una oferta, aprobar el cierre…). El número de color en cada tarjeta son los días que lleva en su etapa: verde, normal; ámbar desde 3 días; rojo desde 7.</p>}
 
       {perdiendo && (

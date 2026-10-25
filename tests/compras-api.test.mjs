@@ -514,3 +514,17 @@ test("Etapas automáticas del tablero: tasación pedida → oferta → aceptada 
   assert.ok(lista.proximas && typeof lista.proximas === "object");
   assert.ok(lista.leads.some((l) => l.id === lead.id && l.etapa === "documentos"));
 });
+
+test("Leads perdidos: quedan guardados para siempre y solo se traen al pedirlos", async () => {
+  const lead = await leadDe(U.c1.token, "compra");
+  assert.equal((await ve(U.c1.token, "leads.mover", { id: lead.id, etapa: "perdido", motivo: "Precio" })).status, 200);
+  fila("leads", lead.id).actualizado_en = new Date(Date.now() - 90 * 86_400_000).toISOString();
+  const sin = await ve(U.c1.token, "leads.list", {});
+  assert.ok(!sin.leads.some((l) => l.id === lead.id), "un perdido antiguo no se trae por defecto");
+  const con = await ve(U.c1.token, "leads.list", { perdidos: true });
+  const l = con.leads.find((x) => x.id === lead.id);
+  assert.ok(l, "se trae al pedir los perdidos");
+  assert.equal(l.etapa, "perdido");
+  assert.equal(l.motivo_perdida, "Precio");
+  assert.ok(db.tablas.leads.some((x) => x.id === lead.id), "sigue guardado");
+});

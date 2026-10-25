@@ -1,5 +1,5 @@
 // Vista «Lista» de leads: filtros, orden, selección múltiple, reasignación en lote (Jefe Local) y exportar a CSV.
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { INPUT, BTN, BTN_AMBAR, clp, Aviso, Tarjeta, useCarga, mensajeError } from "./crm-ui.jsx";
 import { Miniatura } from "./crm-inventario.jsx";
 import { cuando } from "./crm-hoy.jsx";
@@ -10,7 +10,7 @@ import { ETAPAS_TODAS } from "../supabase/functions/api/ventas-core.js";
 const SEMAFORO = { verde: "bg-emerald-100 text-emerald-800", ambar: "bg-amber-100 text-amber-800", rojo: "bg-rose-100 text-rose-800" };
 const ATENCION = [
   { id: "", nombre: "Todos" }, { id: "abiertos", nombre: "Solo abiertos" }, { id: "porAtender", nombre: "Por atender (sin contacto)" },
-  { id: "sinProxima", nombre: "Sin próxima acción" }, { id: "vencida", nombre: "Próxima acción vencida" }, { id: "detenido", nombre: "Detenidos (7 días o más)" },
+  { id: "sinProxima", nombre: "Sin próxima acción" }, { id: "vencida", nombre: "Próxima acción vencida" }, { id: "detenido", nombre: "Detenidos (7 días o más)" }, { id: "perdidos", nombre: "Perdidos (archivados)" },
 ];
 const TIPOS = [{ id: "", nombre: "Todos los tipos" }, { id: "venta", nombre: "Ventas" }, { id: "compra", nombre: "Compras" }, { id: "consignacion", nombre: "Consignaciones" }];
 
@@ -23,7 +23,7 @@ function descargarCsv(filas) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function ListaLeads({ api, datos, mapas, catalogos, todos, abrirLead, recargar, onCambio }) {
+export function ListaLeads({ api, datos, mapas, catalogos, todos, abrirLead, recargar, onCambio, onPerdidos }) {
   const [f, setF] = useState({ texto: "", tipo: "", etapa: "", asignado: "", fuente: "", atencion: "abiertos" });
   const [orden, setOrden] = useState("recientes");
   const [sel, setSel] = useState([]);
@@ -32,6 +32,9 @@ export function ListaLeads({ api, datos, mapas, catalogos, todos, abrirLead, rec
   const [msg, setMsg] = useState({ tipo: "", texto: "" });
   const { datos: eq } = useCarga(() => (datos.puedeAsignar ? api("equipo").catch(() => ({ equipo: [] })) : Promise.resolve({ equipo: [] })), [api, datos.puedeAsignar]);
   const destinatarios = (eq && eq.equipo) || [];
+  const verPerdidos = f.atencion === "perdidos";
+  useEffect(() => { onPerdidos(verPerdidos); }, [verPerdidos]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => onPerdidos(false), []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const filas = useMemo(() => {
     const prox = datos.proximas || {};
@@ -106,7 +109,7 @@ export function ListaLeads({ api, datos, mapas, catalogos, todos, abrirLead, rec
               {datos.puedeAsignar && <th className="py-3 px-3 w-8"><input type="checkbox" checked={todosMarcados} onChange={() => setSel(todosMarcados ? [] : abiertosVisibles.map((r) => r.id))} aria-label="Seleccionar todos los abiertos" /></th>}
               <th className="py-3 px-3">Cliente</th><th className="py-3 px-3">Vehículo</th><th className="py-3 px-3">Etapa</th>
               {todos && <th className="py-3 px-3">Ejecutivo</th>}
-              <th className="py-3 px-3">Próxima acción</th><th className="py-3 px-3">Días</th>
+              {verPerdidos ? <th className="py-3 px-3">Motivo</th> : <th className="py-3 px-3">Próxima acción</th>}<th className="py-3 px-3">{verPerdidos ? "Creado" : "Días"}</th>
             </tr>
           </thead>
           <tbody>
@@ -126,16 +129,16 @@ export function ListaLeads({ api, datos, mapas, catalogos, todos, abrirLead, rec
                 </td>
                 <td className="py-2.5 px-3 text-stone-700 whitespace-nowrap">{r.etapaNombre}</td>
                 {todos && <td className={`py-2.5 px-3 ${r.asignado ? "text-stone-700" : "text-rose-600"}`}>{r.asignado || "Sin asignar"}</td>}
-                <td className={`py-2.5 px-3 text-xs ${r.proxima ? (r.proximaVencida ? "text-orange-700 font-medium" : "text-stone-600") : r.abierto ? "text-violet-700" : "text-stone-400"}`}>
+                {verPerdidos ? <td className="py-2.5 px-3 text-xs text-stone-600">{r.motivoPerdida || "—"}</td> : <td className={`py-2.5 px-3 text-xs ${r.proxima ? (r.proximaVencida ? "text-orange-700 font-medium" : "text-stone-600") : r.abierto ? "text-violet-700" : "text-stone-400"}`}>
                   {r.proxima ? `${r.proximaVencida ? "Venció: " : ""}${r.proxima} · ${cuando(r.proximaFecha)}` : r.abierto ? "Sin próxima acción" : "—"}
-                </td>
-                <td className="py-2.5 px-3">{r.abierto ? <span className={`text-[11px] px-1.5 py-0.5 rounded-full ${SEMAFORO[r.dias >= 7 ? "rojo" : r.dias >= 3 ? "ambar" : "verde"]}`}>{r.dias === 0 ? "hoy" : `${r.dias} d`}</span> : <span className="text-stone-400">—</span>}</td>
+                </td>}
+                <td className="py-2.5 px-3">{verPerdidos ? <span className="text-xs text-stone-500">{r.creado ? new Date(r.creado).toLocaleDateString("es-CL", { timeZone: "America/Santiago" }) : "—"}</span> : r.abierto ? <span className={`text-[11px] px-1.5 py-0.5 rounded-full ${SEMAFORO[r.dias >= 7 ? "rojo" : r.dias >= 3 ? "ambar" : "verde"]}`}>{r.dias === 0 ? "hoy" : `${r.dias} d`}</span> : <span className="text-stone-400">—</span>}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-      <p className="text-xs text-stone-500">Por defecto se ven los leads abiertos; elige «Todos» en Atención para incluir también los cerrados de los últimos 30 días. El CSV respeta los filtros y la selección y se abre directo en Excel.</p>
+      <p className="text-xs text-stone-500">Por defecto se ven los leads abiertos; «Todos» suma los ganados de los últimos 30 días. Los leads perdidos no aparecen en el tablero ni aquí: quedan guardados y se consultan en Atención → «Perdidos (archivados)». El CSV respeta los filtros y la selección y se abre directo en Excel.</p>
     </>
   );
 }

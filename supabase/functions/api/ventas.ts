@@ -2274,7 +2274,9 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     const { data, error } = await scoped(sb.from("leads").select("*").order("creado_en", { ascending: false }));
     if (error) return fallo(error);
     const hace30 = Date.now() - 30 * 86_400_000;
-    let leads: any[] = (data ?? []).filter((l: any) => !((l.etapa === "perdido" || l.etapa === "ganado") && Date.parse(l.actualizado_en) < hace30));
+    // Los perdidos quedan guardados para siempre; solo se traen todos cuando se piden (vista Lista → Perdidos).
+    const conPerdidos = body.perdidos === true;
+    let leads: any[] = (data ?? []).filter((l: any) => !((l.etapa === "perdido" || l.etapa === "ganado") && Date.parse(l.actualizado_en) < hace30 && !(conPerdidos && l.etapa === "perdido")));
     if (!todos) leads = leads.filter((l) => l.asignado_a === userId);
     leads = leads.slice(0, MAX_LISTA);
     const [clientes, vehiculos, usuarios, cp, ci, rs, ta] = await Promise.all([
