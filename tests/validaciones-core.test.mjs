@@ -21,8 +21,8 @@ test("Documentos que se piden según el tipo", () => {
   const fin = checklistPara("venta", { conFinanciamiento: true, conParteDePago: true }).map((d) => d.clave);
   assert.ok(fin.includes("renta") && fin.includes("antecedentes_credito") && fin.includes("docs_parte_pago"));
   const compra = checklistPara("compra");
-  assert.ok(compra.some((d) => d.clave === "cedula_vendedor"));
-  assert.equal(compra.find((d) => d.clave === "comprobante_pago").requerido, false);
+  assert.ok(compra.some((d) => d.clave === "carnet_identidad") && compra.length === 11);
+  assert.ok(compra.every((d) => d.requerido));
   assert.deepEqual(checklistPara("otro"), []);
   checklistPara("vehiculo")[0].nombre = "x";
   assert.notEqual(checklistPara("vehiculo")[0].nombre, "x", "cada llamada entrega copias");

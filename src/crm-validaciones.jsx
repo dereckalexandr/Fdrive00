@@ -11,8 +11,9 @@
  */
 import React, { useState } from "react";
 import { mesChile } from "../supabase/functions/api/ventas-core.js";
-import { validacionNombre, docNombre, tipoValidacionNombre, claveArchivo, MAX_ARCHIVOS_DOC, MAX_BYTES_ARCHIVO } from "../supabase/functions/api/validaciones-core.js";
+import { validacionNombre, docNombre, tipoValidacionNombre, claveArchivo, reglaDocCompra, MAX_ARCHIVOS_DOC, MAX_BYTES_ARCHIVO } from "../supabase/functions/api/validaciones-core.js";
 import { compressImage, makePhotoId } from "./photos.js";
+import { InputDinero } from "./campo-dinero.jsx";
 import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, useCarga, mensajeError, apiPorDefecto } from "./crm-ui.jsx";
 
 const COLOR = { pendiente: "bg-amber-100 text-amber-800", en_revision: "bg-sky-100 text-sky-800", observada: "bg-orange-100 text-orange-800", rechazada: "bg-rose-100 text-rose-800", aprobada: "bg-emerald-100 text-emerald-800", cancelada: "bg-stone-200 text-stone-600" };
@@ -51,6 +52,11 @@ function Documento({ api, val, doc, puedeRevisar, puedeAdjuntar, onCambio, avisa
   const [ocupado, setOcupado] = useState(false);
   const cerrado = doc.estado === "aprobado" || doc.estado === "no_aplica";
   const archivos = doc.archivos || [];
+  // Documentos de una compra: solo PDF o también imagen, y los que llevan fecha de vencimiento o precio.
+  const regla = val.tipo === "compra" ? reglaDocCompra(doc.clave) : null;
+  const soloPdf = !!regla && regla.tipos.length === 1;
+  const [venceEn, setVenceEn] = useState(doc.vence_en ? String(doc.vence_en).slice(0, 10) : "");
+  const [precio, setPrecio] = useState(doc.precio != null ? String(doc.precio) : "");
 
   const correr = async (fn) => { avisar(""); setOcupado(true); try { await fn(); await onCambio(); setModo(""); setComentario(""); } catch (e) { avisar(mensajeError(e)); } setOcupado(false); };
 
@@ -61,6 +67,7 @@ function Documento({ api, val, doc, puedeRevisar, puedeAdjuntar, onCambio, avisa
       await correr(async () => {
         if (archivos.length >= MAX_ARCHIVOS_DOC) throw new Error("demasiados_archivos");
         const esPdf = f.type === "application/pdf";
+        if (soloPdf && !esPdf) throw new Error("archivo_solo_pdf");
         if (!esPdf && !f.type.startsWith("image/")) throw new Error("archivo_tipo_invalido");
         if (esPdf && f.size > MAX_BYTES_ARCHIVO) throw new Error("archivo_muy_grande");
         const dataUrl = esPdf ? await leerComoDataUrl(f) : await compressImage(f);
@@ -76,6 +83,7 @@ function Documento({ api, val, doc, puedeRevisar, puedeAdjuntar, onCambio, avisa
     await api("validacion.quitar", { id: val.id, docId: doc.id, archivoId: a.id });
     if (!a.v || a.v === val.id) { try { await window.storage.delete(claveArchivo(val.id, a.id), true); } catch (e) { /* se limpia luego */ } }
   });
+  const guardarDatos = () => correr(() => api("validacion.datosDoc", { id: val.id, docId: doc.id, venceEn, precio: regla && regla.precio ? (precio === "" ? "" : Number(precio)) : undefined }));
   const revisar = (estado) => correr(() => api("validacion.revisar", { id: val.id, docId: doc.id, estado, comentario }));
 
   return (
@@ -96,11 +104,19 @@ function Documento({ api, val, doc, puedeRevisar, puedeAdjuntar, onCambio, avisa
         {archivos.length === 0 && <span className="text-xs text-stone-400">Sin archivos</span>}
         {puedeAdjuntar && !cerrado && archivos.length < MAX_ARCHIVOS_DOC && (
           <label className={`${BTN} cursor-pointer ${ocupado ? "opacity-50 pointer-events-none" : ""}`}>
-            {ocupado ? "Subiendo…" : "＋ Subir foto o PDF"}
-            <input type="file" accept="image/*,application/pdf" multiple className="hidden" onChange={subir} />
+            {ocupado ? "Subiendo…" : soloPdf ? "＋ Subir PDF" : "＋ Subir foto o PDF"}
+            <input type="file" accept={soloPdf ? "application/pdf" : "image/*,application/pdf"} multiple className="hidden" onChange={subir} />
           </label>
         )}
       </div>
+      {regla && (regla.vence || regla.precio) && (
+        <div className="flex flex-wrap items-end gap-2 mt-2">
+          {regla.vence && <Campo etiqueta="Fecha de vencimiento *"><input type="date" value={venceEn} disabled={!puedeAdjuntar || cerrado} onChange={(e) => setVenceEn(e.target.value)} className={INPUT} /></Campo>}
+          {regla.precio && <Campo etiqueta="Precio de pago ($) *"><InputDinero value={precio} disabled={!puedeAdjuntar || cerrado} onChange={(e) => setPrecio(e.target.value)} className={`${INPUT} font-mono`} /></Campo>}
+          {puedeAdjuntar && !cerrado && <button type="button" disabled={ocupado || (regla.vence && !venceEn) || (regla.precio && precio === "")} onClick={guardarDatos} className={BTN}>Guardar datos</button>}
+          {regla.vence && doc.vence_en && new Date(`${String(doc.vence_en).slice(0, 10)}T23:59:59`) < new Date() && <span className="text-xs text-rose-700">Vencido</span>}
+        </div>
+      )}
       {puedeRevisar && !cerrado && (
         <div className="mt-2 flex flex-col gap-2">
           {!modo && (

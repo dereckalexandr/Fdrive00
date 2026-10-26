@@ -8,11 +8,13 @@
  * El servidor valida todo; aquí solo se muestra lo que corresponde.
  * ----------------------------------------------------------------
  */
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { InputDinero } from "./campo-dinero.jsx";
 import { MEDIOS_PAGO } from "../supabase/functions/api/ventas-core.js";
 import { compraNombre, consignacionNombre, COMPRA_ABIERTA, CONSIGNACION_ABIERTA, validarOferta, validarConsignacion } from "../supabase/functions/api/compras-core.js";
 import { ResultadoTasacion } from "./crm-tasaciones.jsx";
+import { ValidacionDetalle } from "./crm-validaciones.jsx";
+import { buildNotaCompraPdf } from "./pdf-report.js";
 import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, hace, Aviso, Cargando, Tarjeta, Campo, Pestanas, useCarga, mensajeError, DatosDelDueno } from "./crm-ui.jsx";
 
 const COLOR_COMPRA = { oferta: "bg-amber-100 text-amber-800", aceptada: "bg-sky-100 text-sky-800", pago_pendiente: "bg-violet-100 text-violet-800", comprada: "bg-emerald-100 text-emerald-800", rechazada: "bg-stone-200 text-stone-600", anulada: "bg-stone-200 text-stone-600", cancelada: "bg-stone-200 text-stone-600" };
@@ -23,6 +25,85 @@ const nombreVeh = (v) => (v && v.marca ? `${v.marca} ${v.modelo || ""} ${v.anio 
 const fechaCorta = (d) => (d ? new Date(`${String(d).slice(0, 10)}T12:00:00`).toLocaleDateString("es-CL", { day: "2-digit", month: "short", year: "numeric" }) : "—");
 
 /* =========================================================
+   REQUISITOS PARA CONCRETAR LA COMPRA
+   Datos críticos del vendedor y los 11 documentos. Sin ellos no se pide el pago, no se aprueba y no hay nota de compra.
+========================================================= */
+const DATOS_VENDEDOR = [
+  ["nombre", "Nombre y apellido", "text"], ["rut", "RUT", "text"], ["telefono", "Teléfono", "tel"], ["email", "Correo", "email"],
+  ["direccion", "Dirección", "text"], ["cuentaCorriente", "Cuenta corriente (banco y número)", "text"],
+];
+
+function RequisitosCompra({ api, c, puedeOperar, onCambio, onCompleto }) {
+  const { datos, recargar } = useCarga(() => api("compras.requisitos", { id: c.id }), [api, c.id, c.estado]);
+  const [f, setF] = useState(null);
+  const [msg, setMsg] = useState({ tipo: "", texto: "" });
+  const [ocupado, setOcupado] = useState(false);
+  const [verDocs, setVerDocs] = useState(false);
+  useEffect(() => {
+    if (!datos) return;
+    onCompleto(datos.completo);
+    const cl = datos.cliente || {};
+    setF({ nombre: cl.nombre || "", rut: cl.rut || "", telefono: cl.telefono || "", email: cl.email || "", direccion: cl.direccion || "", cuentaCorriente: cl.cuenta_corriente || "" });
+  }, [datos]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!datos || !datos.aplica || !f) return null;
+  const editable = puedeOperar && (c.estado === "aceptada" || c.estado === "pago_pendiente");
+  const cambio = async () => { await recargar(); await onCambio(); };
+  const guardar = async () => {
+    setMsg({ tipo: "", texto: "" }); setOcupado(true);
+    try { await api("compras.datosCliente", { id: c.id, datos: f }); setMsg({ tipo: "ok", texto: "Datos del vendedor guardados ✓" }); await cambio(); }
+    catch (e) { setMsg({ tipo: "error", texto: mensajeError(e) }); }
+    setOcupado(false);
+  };
+  const faltaDato = (clave) => datos.faltantes.some((x) => x.tipo === "dato" && x.clave === (clave === "cuentaCorriente" ? "cuenta_corriente" : clave));
+  return (
+    <div className={`border p-3 flex flex-col gap-3 ${datos.completo ? "border-emerald-300 bg-emerald-50/40" : "border-amber-300 bg-amber-50/40"}`}>
+      <p className="text-xs uppercase tracking-wide text-stone-500">Requisitos para concretar la compra</p>
+      <p className="text-sm text-stone-700">{datos.completo ? "Todo listo: datos del vendedor y documentos completos." : `Faltan ${datos.faltantes.length} cosa(s). Sin ellas no se puede pedir ni aprobar el pago, ni generar la nota de compra.`}</p>
+      {msg.texto && <Aviso tipo={msg.tipo}>{msg.texto}</Aviso>}
+
+      <p className="text-xs uppercase tracking-wide text-stone-400">Datos del vendedor *</p>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        {DATOS_VENDEDOR.map(([k, etiqueta, tipo]) => (
+          <Campo key={k} etiqueta={etiqueta}>
+            <input type={tipo} value={f[k]} disabled={!editable} maxLength={160} onChange={(e) => setF({ ...f, [k]: e.target.value })} className={`${INPUT} ${faltaDato(k) ? "border-amber-500" : ""}`} />
+          </Campo>
+        ))}
+      </div>
+      {editable && <div><button disabled={ocupado} onClick={guardar} className={BTN_PRIMARIO}>Guardar datos del vendedor</button></div>}
+
+      <p className="text-xs uppercase tracking-wide text-stone-400">Documentos *</p>
+      <ul className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1 text-sm">
+        {datos.docs.map((d) => {
+          const falta = datos.faltantes.filter((x) => x.tipo === "doc" && x.clave === d.clave);
+          return (
+            <li key={d.id} className="flex items-start gap-2">
+              <span className={falta.length ? "text-amber-600" : "text-emerald-600"} aria-hidden="true">{falta.length ? "○" : "✓"}</span>
+              <span className={falta.length ? "text-stone-800" : "text-stone-500"}>{d.nombre}{d.vence_en ? ` · vence ${String(d.vence_en).slice(0, 10).split("-").reverse().join("-")}` : ""}{d.precio != null ? ` · pagó ${clp(d.precio)}` : ""}
+                {falta.length > 0 && <span className="block text-xs text-amber-700">{falta.map((x) => (x.texto.startsWith("Documento") ? "Falta el archivo" : x.texto.startsWith("Fecha") ? "Falta la fecha de vencimiento" : "Falta el precio de pago")).join(" · ")}</span>}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+      <div><button onClick={() => setVerDocs(true)} className={BTN_AMBAR}>{editable ? "Subir y completar documentos" : "Ver documentos"}</button></div>
+      {verDocs && datos.validacionId && <ValidacionDetalle api={api} id={datos.validacionId} onCerrar={() => { setVerDocs(false); cambio(); }} onCambio={cambio} />}
+    </div>
+  );
+}
+
+/** Genera y descarga la nota de compra (solo existe si la compra está concretada y completa). */
+async function descargarNotaCompra(api, c) {
+  const { nota } = await api("compras.nota", { id: c.id });
+  const bytes = buildNotaCompraPdf(nota, { fmt: clp });
+  const blob = new Blob([bytes], { type: "application/pdf" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = `Nota-de-compra_${nota.folio}_${(nota.vehiculo && nota.vehiculo.patente) || "vehiculo"}.pdf`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 3000);
+}
+
+/* =========================================================
    COMPRA: SECCIÓN EN LA FICHA DEL LEAD
 ========================================================= */
 function Compra({ api, c, puedeOperar, puedeAprobar, cerrado, onCambio, avisar }) {
@@ -30,6 +111,7 @@ function Compra({ api, c, puedeOperar, puedeAprobar, cerrado, onCambio, avisar }
   const [motivo, setMotivo] = useState("");
   const [pago, setPago] = useState({ montoFinal: c.monto_oferta, medioPago: "Transferencia", fechaPago: hoyISO(), notas: "" });
   const [ocupado, setOcupado] = useState(false);
+  const [reqCompleto, setReqCompleto] = useState(true);
   const correr = async (op, extra, despues) => {
     avisar(""); setOcupado(true);
     try { await api(op, { id: c.id, ...extra }); setModo(""); setMotivo(""); await onCambio(); if (despues) despues(); } catch (e) { avisar(mensajeError(e)); }
@@ -51,11 +133,12 @@ function Compra({ api, c, puedeOperar, puedeAprobar, cerrado, onCambio, avisar }
       {c.motivo_rechazo_pago && c.estado === "aceptada" && <p className="text-xs text-rose-700">Pago rechazado por el supervisor: {c.motivo_rechazo_pago}. Corrígelo y vuelve a solicitarlo.</p>}
       {(c.estado === "aceptada" || c.estado === "pago_pendiente") && v && v.estado !== "aprobada" && <p className="text-xs text-amber-700">Documentos: {v.folio} está «{({ pendiente: "esperando a un Validador", en_revision: "en revisión", observada: "con observaciones", rechazada: "rechazada" })[v.estado] || v.estado}». El pago no se aprueba hasta que estén validados.</p>}
 
+      {(c.estado === "aceptada" || c.estado === "pago_pendiente") && <RequisitosCompra api={api} c={c} puedeOperar={puedeOperar && !cerrado} onCambio={onCambio} onCompleto={setReqCompleto} />}
       {puedeOperar && !cerrado && c.estado === "oferta" && modo === "" && (
         <div className="flex flex-wrap gap-2"><button disabled={ocupado} onClick={() => correr("compras.responder", { acepta: true })} className={BTN_AMBAR}>El cliente aceptó</button><button onClick={() => setModo("rechazo")} className={BTN}>El cliente rechazó</button><button onClick={() => setModo("cancelar")} className={BTN}>Cancelar</button></div>
       )}
       {puedeOperar && c.estado === "aceptada" && modo === "" && (
-        <div className="flex flex-wrap gap-2"><button onClick={() => setModo("pago")} className={BTN_AMBAR}>Solicitar la aprobación del pago</button><button onClick={() => setModo("cancelar")} className={BTN}>Cancelar</button></div>
+        <div className="flex flex-wrap gap-2"><button disabled={!reqCompleto} title={reqCompleto ? "" : "Completa los datos del vendedor y los documentos"} onClick={() => setModo("pago")} className={BTN_AMBAR}>Solicitar la aprobación del pago</button><button onClick={() => setModo("cancelar")} className={BTN}>Cancelar</button></div>
       )}
       {c.estado === "pago_pendiente" && modo === "" && (
         <div className="flex flex-wrap gap-2">
@@ -64,7 +147,12 @@ function Compra({ api, c, puedeOperar, puedeAprobar, cerrado, onCambio, avisar }
           {(puedeOperar || puedeAprobar) && <button onClick={() => setModo("cancelar")} className={BTN}>Cancelar</button>}
         </div>
       )}
-      {puedeAprobar && c.estado === "comprada" && modo === "" && <div><button onClick={() => setModo("anular")} className={BTN}>Anular la compra…</button></div>}
+      {c.estado === "comprada" && modo === "" && (
+        <div className="flex flex-wrap gap-2">
+          <button disabled={ocupado} onClick={async () => { avisar(""); setOcupado(true); try { await descargarNotaCompra(api, c); } catch (e) { avisar(mensajeError(e)); } setOcupado(false); }} className={BTN_AMBAR}>Descargar nota de compra (PDF)</button>
+          {puedeAprobar && <button onClick={() => setModo("anular")} className={BTN}>Anular la compra…</button>}
+        </div>
+      )}
 
       {modo === "pago" && (
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end border-t border-stone-100 pt-3">

@@ -260,8 +260,8 @@ test("Tasación directa completada: pide la validación de la compra", async () 
   assert.ok(v);
   assert.equal(v.tipo, "compra");
   assert.equal(v.sujeto.vendedor, "Don Pedro");
-  assert.ok(docsFila(v.id).some((d) => d.clave === "cedula_vendedor"));
-  assert.equal(docsFila(v.id).find((d) => d.clave === "comprobante_pago").requerido, false);
+  assert.ok(docsFila(v.id).some((d) => d.clave === "carnet_identidad"));
+  assert.equal(docsFila(v.id).length, 11);
   assert.equal((await ve(U.t1.token, "validacion.get", { id: v.id })).puedeAdjuntar, true, "el Tasador puede subir los documentos");
   assert.equal((await ve(U.mkt.token, "validacion.get", { id: v.id })).status, 403);
 });

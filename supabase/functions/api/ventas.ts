@@ -45,6 +45,7 @@ import {
 import {
   folioValidacion, validarRevision, validarArchivo, MAX_ARCHIVOS_DOC, checklistPara, estadoDeValidacion, progreso, docsReutilizables,
   colaValidaciones, metricasValidador, validarTransicionValidacion, ESTADOS_ABIERTOS,
+  filaDoc, reglaDocCompra as reglaDoc, archivoPermitidoParaDoc, validarDatosDoc, validarDatosCliente, faltantesCompra, esChecklistCompraActual, DOCS_COMPRA,
 } from "./validaciones-core.js";
 import {
   folioInspeccion, VEREDICTOS, validarSolicitudInspeccion, validarReprogramacion, validarResultadoInspeccion, claveEsDe,
@@ -281,14 +282,14 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       if (ins.error) { if (ctx.isMissingTable(ins.error)) return null; throw ins.error; }
       const v = ins.data;
       let reutil: Record<string, any> = {};
-      if (p.tipo !== "vehiculo" && p.vehiculo_id) {
+      if (p.tipo !== "vehiculo" && p.tipo !== "compra" && p.vehiculo_id) {
         const o = await sb.from("validaciones").select("*").eq("vehiculo_id", p.vehiculo_id).eq("tipo", "vehiculo").eq("estado", "aprobada");
         const origen = (o.data ?? [])[0];
         if (origen) reutil = docsReutilizables(await enLotes("validacion_docs", "validacion_id", [origen.id]), origen.id);
       }
       // Un vehículo recién comprado o consignado hereda como aprobados los documentos del vehículo ya revisados en la operación.
-      if (p.reutilizarDe) reutil = docsReutilizables(await enLotes("validacion_docs", "validacion_id", [p.reutilizarDe]), p.reutilizarDe);
-      const docs = checklistPara(p.tipo, p.opciones).map((d, i) => ({ validacion_id: v.id, ...d, orden: i, ...(reutil[d.clave] ?? {}) }));
+      if (p.reutilizarDe && p.tipo !== "compra") reutil = docsReutilizables(await enLotes("validacion_docs", "validacion_id", [p.reutilizarDe]), p.reutilizarDe);
+      const docs = checklistPara(p.tipo, p.opciones).map((d, i) => ({ validacion_id: v.id, ...filaDoc(d), orden: i, ...(reutil[d.clave] ?? {}) }));
       const di = await sb.from("validacion_docs").insert(docs);
       if (di.error) throw di.error;
       const estado = estadoDeValidacion(docs, false);
@@ -298,8 +299,27 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
   }
   const sujetoDeVehiculo = (v: any, extra: Record<string, unknown> = {}) => ({ patente: v.patente, marca: v.marca, modelo: v.modelo, anio: v.anio, ...extra });
 
+  /**
+   * Qué falta para concretar una compra: datos críticos del vendedor y los 11 documentos (con su vencimiento y precio). Si la compra no tiene
+   * validación todavía, se crea. Las compras que ya venían con la lista anterior de documentos siguen con su regla de siempre (aplica: false).
+   */
+  async function requisitosDeCompra(c: any) {
+    const vq = await sb.from("validaciones").select("*").eq("compra_id", c.id);
+    if (vq.error) { if (ctx.isMissingTable(vq.error)) return { aplica: false, val: null, docs: [], cliente: null, faltantes: [] as any[] }; throw vq.error; }
+    let val: any = (vq.data ?? []).filter((x: any) => x.estado !== "cancelada").sort((a: any, b: any) => String(b.creado_en).localeCompare(String(a.creado_en)))[0] ?? null;
+    if (!val) val = await crearValidacion({ tipo: "compra", local_id: c.local_id, compra_id: c.id, lead_id: c.lead_id, tasacion_id: c.tasacion_id, sujeto: sujetoDeVehiculo(c.vehiculo || {}, { folio: folioCompra(c.numero) }) });
+    if (!val) return { aplica: false, val: null, docs: [], cliente: null, faltantes: [] as any[] };
+    const docs = (await enLotes("validacion_docs", "validacion_id", [val.id])).sort((a: any, b: any) => (a.orden ?? 0) - (b.orden ?? 0));
+    if (!esChecklistCompraActual(docs)) return { aplica: false, val, docs, cliente: null, faltantes: [] as any[] };
+    const cl = c.cliente_id ? (await sb.from("clientes").select("*").eq("id", c.cliente_id).maybeSingle()).data : null;
+    return { aplica: true, val, docs, cliente: cl, faltantes: faltantesCompra({ cliente: cl, docs }) };
+  }
+
   /** Aprueba una compra: exige los documentos validados (si hay Validadores) y entrega el vehículo al inventario. */
   async function aprobarCompra(c: any): Promise<{ ok: boolean; error?: string; compra?: any }> {
+    // Sin todos los datos del vendedor y sus documentos, la compra no se concreta.
+    const req = await requisitosDeCompra(c);
+    if (req.aplica && req.faltantes.length > 0) return { ok: false, error: "compra_incompleta" };
     let valCompra: any = null;
     if (await hayValidadores(c.local_id)) {
       const vq = await sb.from("validaciones").select("*").eq("compra_id", c.id);
@@ -1510,6 +1530,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       if (op === "validacion.adjuntar") {
         const a = validarArchivo(body.archivo);
         if (!a.ok) return err(a.error!);
+        if (v.tipo === "compra") { const t = archivoPermitidoParaDoc(doc.clave, a.value.tipo); if (!t.ok) return err(t.error!); }
         if (archivos.length >= MAX_ARCHIVOS_DOC) return err("demasiados_archivos");
         archivos = [...archivos, a.value];
       } else {
@@ -1526,6 +1547,24 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       if (reabre) await anotarVal(v, `${userName} corrigió «${doc.nombre}» (${folioValidacion(v.numero)}): vuelve a revisión`);
       await audit(ctx.actor, op === "validacion.adjuntar" ? "validacion.adjuntar" : "validacion.quitar", "validacion", v.id, { numero: v.numero, doc: doc.clave });
       return json(await detalle(val));
+    }
+
+    /** Fecha de vencimiento (permiso, revisión técnica, SOAP) y precio del permiso de circulación de una compra. */
+    if (op === "validacion.datosDoc") {
+      const v = await cargarVal(String(body.id ?? ""));
+      if (!v || !(await veVal(v))) return err("no_existe", 404);
+      if (v.tipo !== "compra") return err("doc_sin_datos");
+      if (!(await puedeAdjuntar(v))) return err("forbidden", 403);
+      if (v.estado === "aprobada" || v.estado === "cancelada") return err("validacion_estado_invalido");
+      const doc = (await docsDe([v.id])).find((d: any) => d.id === body.docId);
+      if (!doc) return err("no_existe", 404);
+      if (doc.estado === "aprobado" || doc.estado === "no_aplica") return err("doc_cerrado");
+      const dd = validarDatosDoc(doc.clave, body);
+      if (!dd.ok) return err(dd.error!);
+      const { error } = await sb.from("validacion_docs").update({ ...dd.value, actualizado_en: new Date().toISOString() }).eq("id", doc.id);
+      if (error) return fallar(error);
+      await audit(ctx.actor, "validacion.datos_doc", "validacion", v.id, { numero: v.numero, doc: doc.clave, ...dd.value });
+      return json(await detalle(v));
     }
 
     if (op === "validacion.resumen") {
@@ -1972,6 +2011,55 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
         pendiente: pendiente ? { id: pendiente.id, folio: folioTasacion(pendiente.numero), estado: pendiente.estado } : null,
       });
     }
+    /** Qué falta para concretar la compra (datos del vendedor y documentos) y el estado de cada documento. */
+    if (op === "compras.requisitos") {
+      const c = await cargarCompra(String(body.id ?? ""));
+      if (!c || !veCompra(c)) return err("no_existe", 404);
+      const r = await requisitosDeCompra(c);
+      const cl = r.cliente;
+      return json({
+        aplica: r.aplica, completo: r.aplica ? r.faltantes.length === 0 : true, faltantes: r.faltantes, validacionId: r.val ? r.val.id : null,
+        cliente: cl ? { nombre: cl.nombre, rut: cl.rut, telefono: cl.telefono, email: cl.email, direccion: cl.direccion ?? "", cuenta_corriente: cl.cuenta_corriente ?? "" } : null,
+        docs: r.docs.filter((d: any) => reglaDoc(d.clave)).map((d: any) => ({ id: d.id, clave: d.clave, nombre: d.nombre, estado: d.estado, nArchivos: (d.archivos ?? []).length, vence_en: d.vence_en ?? null, precio: d.precio ?? null })),
+      });
+    }
+    /** El ejecutivo completa los datos críticos del vendedor. */
+    if (op === "compras.datosCliente") {
+      const c = await cargarCompra(String(body.id ?? ""));
+      if (!c || !veCompra(c)) return err("no_existe", 404);
+      if (!opera && !esSupervisor) return err("forbidden", 403);
+      if (["comprada", "anulada", "rechazada"].includes(c.estado)) return err("compra_estado_invalido");
+      const dc = validarDatosCliente(body.datos);
+      if (!dc.ok) return err(dc.error!);
+      if (!c.cliente_id) return err("no_existe", 404);
+      const dup = await sb.from("clientes").select("id").eq("local_id", c.local_id).eq("rut", dc.value.rut).neq("id", c.cliente_id);
+      if ((dup.data ?? []).length > 0) return err("rut_duplicado", 409);
+      const up = await sb.from("clientes").update({ ...dc.value, actualizado_en: new Date().toISOString() }).eq("id", c.cliente_id).select().single();
+      if (up.error) return fallar(up.error);
+      await evento(c.lead_id, "cliente", `${userName} completó los datos del vendedor para la compra ${folioCompra(c.numero)}`);
+      await audit(ctx.actor, "compra.datos_cliente", "compra", c.id, { numero: c.numero, cliente_id: c.cliente_id });
+      return json({ ok: true });
+    }
+    /** Datos para la nota de compra. Solo existe cuando la compra está concretada y completa. */
+    if (op === "compras.nota") {
+      const c = await cargarCompra(String(body.id ?? ""));
+      if (!c || !veCompra(c)) return err("no_existe", 404);
+      if (c.estado !== "comprada") return err("compra_estado_invalido");
+      const r = await requisitosDeCompra(c);
+      if (r.aplica && r.faltantes.length > 0) return err("compra_incompleta", 409);
+      const [loc] = c.local_id ? await porIds("locales", [c.local_id]) : [null];
+      const reg = (clave: string) => r.docs.find((d: any) => d.clave === clave) || {};
+      return json({
+        nota: {
+          folio: folioCompra(c.numero), fecha: c.aprobado_en || c.actualizado_en, local: loc ? loc.nombre : "", ejecutivo: c.ejecutivo, aprobado_por: c.aprobado_por,
+          monto_final: c.monto_final, medio_pago: c.medio_pago, fecha_pago: c.fecha_pago, vehiculo: c.vehiculo || {},
+          vendedor: r.cliente ? { nombre: r.cliente.nombre, rut: r.cliente.rut, telefono: r.cliente.telefono, email: r.cliente.email, direccion: r.cliente.direccion, cuenta_corriente: r.cliente.cuenta_corriente } : null,
+          permiso: { vence_en: reg("permiso_circulacion").vence_en ?? null, precio: reg("permiso_circulacion").precio ?? null },
+          revision_tecnica: { vence_en: reg("revision_tecnica").vence_en ?? null }, soap: { vence_en: reg("soap").vence_en ?? null },
+          documentos: r.aplica ? DOCS_COMPRA.map((d) => d.nombre) : [],
+        },
+      });
+    }
     /** Pide al Tasador que tase el vehículo que ofrece el cliente. */
     if (op === "compras.pedirTasacion") {
       const lead = await cargarLead(String(body.leadId ?? ""));
@@ -2048,6 +2136,8 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       if (!tr.ok) return err(tr.error!);
       const v = validarPagoCompra(body.datos, c);
       if (!v.ok) return err(v.error!);
+      const req = await requisitosDeCompra(c);
+      if (req.aplica && req.faltantes.length > 0) return err("compra_incompleta", 409);
       const { data, error } = await sb.from("compras").update({ ...v.value, estado: "pago_pendiente", solicitado_por: userName, motivo_rechazo_pago: null, actualizado_en: new Date().toISOString() }).eq("id", c.id).select().single();
       if (error) return fallar(error);
       await evento(c.lead_id, "compra", `Pago de ${dinero(v.value.monto_final)} (${v.value.medio_pago}) solicitado por ${userName} para ${folioCompra(c.numero)}`);

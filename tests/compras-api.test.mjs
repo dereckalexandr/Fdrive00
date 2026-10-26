@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { iniciarFuncion, api, nuevaIp, loginAdmin, crm, db, correos } from "./helpers/api-env.mjs";
 import { mesChile } from "../supabase/functions/api/ventas-core.js";
+import { reglaDocCompra } from "../supabase/functions/api/validaciones-core.js";
 
 const ve = (token, op, extra = {}) => api({ action: "ventas", token, op, ...extra });
 const CLAVE = "Prueba12345";
@@ -40,6 +41,28 @@ async function tasar(lead, { compra = 6500000, venta = 8500000 } = {}) {
 }
 const ofertar = (token, leadId, tasacionId, monto, notas) => ve(token, "compras.ofertar", { leadId, tasacionId, datos: { monto, notas } });
 const PAGO = (extra = {}) => ({ montoFinal: 5800000, medioPago: "Transferencia", fechaPago: hoy(), ...extra });
+const dvRut = (n) => { let suma = 0; let m = 2; for (const d of String(n).split("").reverse()) { suma += Number(d) * m; m = m === 7 ? 2 : m + 1; } const r = 11 - (suma % 11); return r === 11 ? "0" : r === 10 ? "K" : String(r); };
+let rutN = 20000000; let archN = 0;
+const rutNuevo = () => { const n = ++rutN; return `${n}-${dvRut(n)}`; };
+const DATOS_VENDEDOR = (extra = {}) => ({ nombre: "Vendedor Prueba", rut: rutNuevo(), telefono: "912345678", email: "vendedor@x.cl", direccion: "Calle Falsa 123, Santiago", cuentaCorriente: "Banco Estado 12345678", ...extra });
+/** El ejecutivo completa los datos del vendedor y sube los 11 documentos (con vencimiento y precio del permiso). */
+async function cumplirRequisitos(compraId, token = U.c1.token) {
+  const rq = await ve(token, "compras.requisitos", { id: compraId });
+  assert.equal(rq.status, 200, JSON.stringify(rq));
+  const dc = await ve(token, "compras.datosCliente", { id: compraId, datos: DATOS_VENDEDOR() });
+  assert.equal(dc.status, 200, JSON.stringify(dc));
+  for (const d of rq.docs) {
+    if (d.nArchivos === 0) {
+      const ad = await ve(token, "validacion.adjuntar", { id: rq.validacionId, docId: d.id, archivo: { id: `rq${++archN}abcd`, nombre: "doc.pdf", tipo: "application/pdf", tam: 1000 } });
+      assert.equal(ad.status, 200, d.clave + " " + JSON.stringify(ad));
+    }
+    const regla = reglaDocCompra(d.clave);
+    if (regla.vence || regla.precio) {
+      const dd = await ve(token, "validacion.datosDoc", { id: rq.validacionId, docId: d.id, venceEn: "2027-06-30", precio: 95000 });
+      assert.equal(dd.status, 200, d.clave + " " + JSON.stringify(dd));
+    }
+  }
+}
 /** Compra completa hasta «pago por aprobar». */
 async function comprarHastaPago(monto = 6000000) {
   const lead = await leadDe(U.c1.token, "compra");
@@ -47,6 +70,7 @@ async function comprarHastaPago(monto = 6000000) {
   const o = await ofertar(U.c1.token, lead.id, tas.id, monto);
   assert.equal(o.status, 200, JSON.stringify(o));
   assert.equal((await ve(U.c1.token, "compras.responder", { id: o.compra.id, acepta: true })).status, 200);
+  await cumplirRequisitos(o.compra.id);
   const p = await ve(U.c1.token, "compras.solicitarPago", { id: o.compra.id, datos: PAGO() });
   assert.equal(p.status, 200, JSON.stringify(p));
   return { lead, tas, compra: p.compra };
@@ -163,7 +187,7 @@ test("El cliente rechaza: se puede hacer otra oferta; luego acepta y se piden lo
   const val = db.tablas.validaciones.find((v) => v.compra_id === o2.compra.id);
   assert.ok(val, "se creó la validación de documentos");
   assert.equal(val.tipo, "compra");
-  assert.ok(db.tablas.validacion_docs.some((d) => d.validacion_id === val.id && d.clave === "cedula_vendedor"));
+  assert.ok(db.tablas.validacion_docs.some((d) => d.validacion_id === val.id && d.clave === "carnet_identidad"));
   assert.equal(a.compra.validacion.estado, "pendiente");
   assert.equal((await ve(U.c1.token, "compras.responder", { id: o2.compra.id, acepta: true })).error, "compra_estado_invalido");
   U.compra1 = a.compra;
@@ -174,6 +198,8 @@ test("Pago: lo pagado no supera la oferta, y el supervisor lo aprueba (el vehíc
   assert.equal((await sol(PAGO({ montoFinal: 6400001 }))).error, "monto_excede_oferta");
   assert.equal((await sol(PAGO({ medioPago: "Trueque" }))).error, "medio_invalido");
   assert.equal((await sol(PAGO({ fechaPago: "ayer" }))).error, "fecha_invalida");
+  assert.equal((await sol(PAGO({ montoFinal: 6200000 }))).error, "compra_incompleta", "sin los datos del vendedor y los documentos no se pide el pago");
+  await cumplirRequisitos(U.compra1.id);
   const p = await sol(PAGO({ montoFinal: 6200000, notas: "Transferencia al banco del dueño" }));
   assert.equal(p.status, 200, JSON.stringify(p));
   assert.equal(p.compra.estado, "pago_pendiente", "la ejecutiva no se aprueba sola");
@@ -234,6 +260,7 @@ test("Patente repetida: no entra un vehículo que ya está activo en el inventar
   const tas = await tasar(lead);
   const o = await ofertar(U.c1.token, lead.id, tas.id, 6000000);
   await ve(U.c1.token, "compras.responder", { id: o.compra.id, acepta: true });
+  await cumplirRequisitos(o.compra.id);
   await ve(U.c1.token, "compras.solicitarPago", { id: o.compra.id, datos: PAGO() });
   const ap = await ve(U.jefe.token, "compras.aprobar", { id: o.compra.id });
   assert.equal(ap.error, "patente_duplicada");
@@ -420,7 +447,7 @@ test("Con Validadores: la compra espera sus documentos; la consignación espera 
   assert.equal((await ve(U.val.token, "validacion.tomar", { id: val.id })).status, 200);
   let n2 = 0;
   for (const d of db.tablas.validacion_docs.filter((x) => x.validacion_id === val.id && x.requerido)) {
-    if ((d.archivos ?? []).length === 0) { const ad = await ve(U.val.token, "validacion.adjuntar", { id: val.id, docId: d.id, archivo: { id: `arch${200000 + ++n2}`, nombre: "d.jpg", tipo: "image/jpeg", tam: 1000 } }); assert.equal(ad.status, 200, d.clave + " " + JSON.stringify(ad)); }
+    if ((d.archivos ?? []).length === 0) { const ad = await ve(U.val.token, "validacion.adjuntar", { id: val.id, docId: d.id, archivo: { id: `arch${200000 + ++n2}`, nombre: "d.jpg", tipo: (reglaDocCompra(d.clave) || { tipos: ["image/jpeg"] }).tipos[0], tam: 1000 } }); assert.equal(ad.status, 200, d.clave + " " + JSON.stringify(ad)); }
     const rv = await ve(U.val.token, "validacion.revisar", { id: val.id, docId: d.id, estado: "aprobado" });
     assert.equal(rv.status, 200, d.clave + " " + JSON.stringify(rv));
   }
@@ -506,6 +533,7 @@ test("Etapas automáticas del tablero: tasación pedida → oferta → aceptada 
   assert.equal(fila("leads", lead.id).etapa, "cotizado");
   assert.equal((await ve(U.c1.token, "compras.responder", { id: o.compra.id, acepta: true })).status, 200);
   assert.equal(fila("leads", lead.id).etapa, "reservado");
+  await cumplirRequisitos(o.compra.id);
   assert.equal((await ve(U.c1.token, "compras.solicitarPago", { id: o.compra.id, datos: PAGO() })).status, 200);
   assert.equal(fila("leads", lead.id).etapa, "documentos");
   // Un lead que ya avanzó no retrocede por pedir otra tasación.
@@ -585,4 +613,83 @@ test("Tasador: si el ejecutivo no está habilitado para el nuevo tipo, el lead p
   const l = fila("leads", lead.id);
   assert.equal(l.tipo, "consignacion");
   assert.equal(l.asignado_a, U.c1.id, "Carla es la única con Consignaciones");
+});
+
+test("Compra: sin los datos del vendedor y los 11 documentos no se pide el pago, no se aprueba ni hay nota de compra", async () => {
+  const lead = await leadDe(U.c1.token, "compra");
+  const tas = await tasar(lead);
+  const o = await ofertar(U.c1.token, lead.id, tas.id, 6000000);
+  assert.equal((await ve(U.c1.token, "compras.responder", { id: o.compra.id, acepta: true })).status, 200);
+  const rq = await ve(U.c1.token, "compras.requisitos", { id: o.compra.id });
+  assert.equal(rq.status, 200, JSON.stringify(rq));
+  assert.equal(rq.aplica, true);
+  assert.equal(rq.completo, false);
+  assert.equal(rq.docs.length, 11);
+  assert.ok(rq.faltantes.some((f) => f.clave === "direccion") && rq.faltantes.some((f) => f.clave === "cuenta_corriente"));
+  assert.equal((await ve(U.c1.token, "compras.solicitarPago", { id: o.compra.id, datos: PAGO() })).error, "compra_incompleta");
+
+  // Datos críticos del vendedor.
+  const dc = (extra) => ve(U.c1.token, "compras.datosCliente", { id: o.compra.id, datos: DATOS_VENDEDOR(extra) });
+  assert.equal((await dc({ rut: "12.345.678-9" })).error, "rut_invalido");
+  assert.equal((await dc({ nombre: "Solo" })).error, "nombre_apellido_requerido");
+  assert.equal((await dc({ cuentaCorriente: "" })).error, "cuenta_corriente_requerida");
+  assert.equal((await dc({ direccion: "" })).error, "direccion_requerida");
+  assert.equal((await ve(U.c2.token, "compras.datosCliente", { id: o.compra.id, datos: DATOS_VENDEDOR() })).status, 404, "otro ejecutivo no toca la compra");
+  assert.equal((await dc({})).status, 200);
+  const cli = db.tablas.clientes.find((c) => c.id === db.tablas.compras.find((x) => x.id === o.compra.id).cliente_id);
+  assert.equal(cli.direccion, "Calle Falsa 123, Santiago");
+  assert.equal(cli.cuenta_corriente, "Banco Estado 12345678");
+
+  // Tipos de archivo por documento: el CAV solo acepta PDF; el padrón, imagen o PDF.
+  const doc = (clave) => rq.docs.find((d) => d.clave === clave);
+  const adj = (clave, tipo) => ve(U.c1.token, "validacion.adjuntar", { id: rq.validacionId, docId: doc(clave).id, archivo: { id: `tp${++archN}abcd`, nombre: "x", tipo, tam: 1000 } });
+  assert.equal((await adj("cav", "image/jpeg")).error, "archivo_solo_pdf");
+  assert.equal((await adj("cav", "application/pdf")).status, 200);
+  assert.equal((await adj("padron", "image/jpeg")).status, 200);
+
+  // Vencimiento y precio del permiso.
+  const dd = (clave, extra) => ve(U.c1.token, "validacion.datosDoc", { id: rq.validacionId, docId: doc(clave).id, ...extra });
+  assert.equal((await dd("soap", { venceEn: "mañana" })).error, "vencimiento_invalido");
+  assert.equal((await dd("permiso_circulacion", { venceEn: "2027-01-31" })).error, "precio_doc_invalido");
+  assert.equal((await dd("cav", { venceEn: "2027-01-31" })).error, "doc_sin_datos");
+  assert.equal((await dd("soap", { venceEn: "2027-01-31" })).status, 200);
+
+  // Con todo cargado: se puede pedir el pago, y aprobar; quitar un documento antes de aprobar vuelve a bloquear.
+  await cumplirRequisitos(o.compra.id);
+  const rq2 = await ve(U.c1.token, "compras.requisitos", { id: o.compra.id });
+  assert.equal(rq2.completo, true, JSON.stringify(rq2.faltantes));
+  assert.equal((await ve(U.jefe.token, "compras.nota", { id: o.compra.id })).error, "compra_estado_invalido", "aún no está concretada");
+  assert.equal((await ve(U.c1.token, "compras.solicitarPago", { id: o.compra.id, datos: PAGO() })).status, 200);
+  const dsoap = db.tablas.validacion_docs.find((d) => d.validacion_id === rq.validacionId && d.clave === "soap");
+  const archivoSoap = dsoap.archivos[0];
+  assert.equal((await ve(U.c1.token, "validacion.quitar", { id: rq.validacionId, docId: dsoap.id, archivoId: archivoSoap.id })).status, 200);
+  assert.equal((await ve(U.jefe.token, "compras.aprobar", { id: o.compra.id })).error, "compra_incompleta");
+  assert.equal((await ve(U.c1.token, "validacion.adjuntar", { id: rq.validacionId, docId: dsoap.id, archivo: { id: `tp${++archN}abcd`, nombre: "x", tipo: "application/pdf", tam: 1000 } })).status, 200);
+  // Con Validador en el local, además revisa los documentos.
+  assert.equal((await ve(U.val.token, "validacion.tomar", { id: rq.validacionId })).status, 200);
+  for (const d of db.tablas.validacion_docs.filter((x) => x.validacion_id === rq.validacionId)) assert.equal((await ve(U.val.token, "validacion.revisar", { id: rq.validacionId, docId: d.id, estado: "aprobado" })).status, 200);
+  const ap = await ve(U.jefe.token, "compras.aprobar", { id: o.compra.id });
+  assert.equal(ap.status, 200, JSON.stringify(ap));
+
+  // Nota de compra: con todos los datos.
+  const nota = await ve(U.jefe.token, "compras.nota", { id: o.compra.id });
+  assert.equal(nota.status, 200, JSON.stringify(nota));
+  assert.equal(nota.nota.vendedor.cuenta_corriente, "Banco Estado 12345678");
+  assert.equal(nota.nota.permiso.precio, 95000);
+  assert.equal(nota.nota.soap.vence_en, "2027-06-30");
+  assert.equal(nota.nota.documentos.length, 11);
+});
+
+test("Compra: las compras con la lista anterior de documentos siguen con su regla de siempre", async () => {
+  const lead = await leadDe(U.c1.token, "compra");
+  const tas = await tasar(lead);
+  const o = await ofertar(U.c1.token, lead.id, tas.id, 6000000);
+  assert.equal((await ve(U.c1.token, "compras.responder", { id: o.compra.id, acepta: true })).status, 200);
+  const val = db.tablas.validaciones.find((v) => v.compra_id === o.compra.id);
+  // Se deja la validación como si se hubiera creado antes de este cambio (sin el CAV).
+  db.tablas.validacion_docs = db.tablas.validacion_docs.filter((d) => !(d.validacion_id === val.id && d.clave === "cav"));
+  const rq = await ve(U.c1.token, "compras.requisitos", { id: o.compra.id });
+  assert.equal(rq.aplica, false);
+  assert.equal(rq.completo, true);
+  assert.equal((await ve(U.c1.token, "compras.solicitarPago", { id: o.compra.id, datos: PAGO() })).status, 200);
 });

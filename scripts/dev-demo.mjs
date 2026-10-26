@@ -94,6 +94,18 @@ for (const i of [0, 1, 2]) {
   await ve(U.tasador.token, "tasaciones.guardar", { id: t.id, borrador: { inspeccion: { key: `inspeccion::${U.insp.id}::i1`, fecha: "2026-10-18", inspector: "Ivo Inspector", patente: "BKTD10", marca: "Toyota", modelo: "Yaris", anio: "2021" } } });
 }
 
+// Una compra con la oferta aceptada, para ver los requisitos (datos del vendedor y documentos) antes de pedir el pago.
+{
+  const l = (await ve(U.e1.token, "leads.create", { cliente: { nombre: "Don Hernán Vidal", telefono: "955512345" }, lead: { tipo: "compra", fuente: "Llamada", vehiculoOfrecido: { patente: "HHRR55", marca: "Suzuki", modelo: "Baleno", anio: 2019, km: 61000, transmision: "Mecánica", combustible: "Bencina", duenos: 2, prenda: "no", mantenciones: "si", precioEsperado: 7500000 } } })).lead;
+  if (l) {
+    const p = await ve(U.e1.token, "compras.pedirTasacion", { leadId: l.id });
+    await ve(U.tasador.token, "tasaciones.tomar", { id: p.tasacion.id });
+    const t = await ve(U.tasador.token, "tasaciones.completar", { id: p.tasacion.id, borrador: { aplicaPara: "compra", valorCompra: 6800000, valorVenta: 8900000 } });
+    const o = await ve(U.e1.token, "compras.ofertar", { leadId: l.id, tasacionId: t.tasacion.id, datos: { monto: 6500000 } });
+    await ve(U.e1.token, "compras.responder", { id: o.compra.id, acepta: true });
+  }
+}
+
 // Tareas y antigüedades distintas para ver la vista «Hoy» con todos sus grupos.
 {
   const enH = (h) => new Date(Date.now() + h * 3_600_000).toISOString();

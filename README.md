@@ -860,3 +860,14 @@ Al completar una tasación, el Tasador ahora:
 - Las solicitudes de «vender o consignar» del sitio web ahora quedan ligadas a su lead (y a su ejecutivo) para poder devolver el resultado.
 
 Requiere ejecutar `supabase-crm-tasador-precios.sql` (3 columnas nuevas en `tasaciones`). Pruebas: `tests/tasaciones-core.test.mjs` y `tests/compras-api.test.mjs`.
+
+## Compra de vehículos: datos del vendedor y documentos obligatorios
+
+Para **concretar** una compra (pedir la aprobación del pago, aprobarla o generar la nota de compra) el ejecutivo que compra debe completar, en la ficha del lead, el panel **Requisitos para concretar la compra**:
+
+- **Datos críticos del vendedor:** RUT, nombre y apellido, teléfono, correo, dirección y cuenta corriente (se guardan en el cliente).
+- **11 documentos**, cada uno con al menos un archivo: CAV, Multas, Dicom e Informe legal (**solo PDF**); Pensión de alimentos, Carnet de identidad, Permiso de circulación, Revisión técnica, SOAP, Padrón y Contrato de compra-venta (**imagen o PDF**). Permiso de circulación, Revisión técnica y SOAP llevan además **fecha de vencimiento**, y el Permiso de circulación el **precio de pago**.
+
+El servidor lo exige (`compra_incompleta`) al pedir el pago y al aprobar; el botón del ejecutivo queda deshabilitado mientras falte algo. Con Validadores en el local, además deben aprobar los documentos, como antes. Una vez comprada, aparece **Descargar nota de compra (PDF)** (`compras.nota`), que solo existe con todo completo.
+
+Las compras que ya tenían la lista anterior de documentos (creadas antes de este cambio) siguen con su regla de siempre. Requiere ejecutar `supabase-crm-compra-docs.sql` (vencimiento y precio en los documentos; dirección y cuenta corriente en los clientes). Código: `validaciones-core.js` (`DOCS_COMPRA`, `faltantesCompra`), `ventas.ts` (`compras.requisitos`, `compras.datosCliente`, `validacion.datosDoc`, `compras.nota`), `crm-compras.jsx`, `pdf-report.js`. Pruebas: `tests/compra-docs-core.test.mjs` y `tests/compras-api.test.mjs`.

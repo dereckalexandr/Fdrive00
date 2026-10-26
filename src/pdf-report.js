@@ -463,6 +463,37 @@ export function buildCotizacionPdf(c, { fmt }) {
   return pdf.build();
 }
 
+/**
+ * Nota de compra de un vehículo (se genera al concretar la compra, con todos los datos y documentos completos).
+ * @param n  { folio, fecha, local, ejecutivo, aprobado_por, monto_final, medio_pago, fecha_pago, vehiculo, vendedor, permiso, revision_tecnica, soap, documentos }
+ */
+export function buildNotaCompraPdf(n, { fmt }) {
+  const v = n.vehiculo || {};
+  const pdf = new PdfDoc(`Nota de compra ${n.folio} · ${[v.marca, v.modelo].filter(Boolean).join(" ")} · ${n.local || "Drive Futuro"}`);
+  pdf.title(`Nota de compra ${n.folio}`, fechaLarga(String(n.fecha || "").slice(0, 10)));
+  const ven = n.vendedor || {};
+  pdf.sectionBar("Vendedor");
+  pdf.fields([["NOMBRE", ven.nombre], ["RUT", ven.rut], ["TELÉFONO", ven.telefono], ["CORREO", ven.email], ["DIRECCIÓN", ven.direccion], ["CUENTA CORRIENTE", ven.cuenta_corriente]]);
+  pdf.sectionBar("Vehículo");
+  pdf.fields([
+    ["PATENTE", v.patente], ["MARCA", v.marca], ["MODELO", [v.modelo, v.version].filter(Boolean).join(" ")], ["AÑO", v.anio],
+    ["KILOMETRAJE", v.km != null ? `${Number(v.km).toLocaleString("es-CL")} km` : ""], ["COLOR", v.color],
+  ]);
+  pdf.sectionBar("Pago");
+  pdf.totalLine("Monto pagado al vendedor", fmt(n.monto_final), { big: true });
+  pdf.fields([["MEDIO DE PAGO", n.medio_pago], ["FECHA DE PAGO", n.fecha_pago ? fechaLarga(String(n.fecha_pago).slice(0, 10)) : ""]]);
+  const f = (d) => (d ? fechaLarga(String(d).slice(0, 10)) : "");
+  pdf.sectionBar("Documentos con vencimiento");
+  pdf.fields([
+    ["PERMISO DE CIRCULACIÓN VENCE", f(n.permiso && n.permiso.vence_en)], ["PRECIO PAGADO DEL PERMISO", n.permiso && n.permiso.precio != null ? fmt(n.permiso.precio) : ""],
+    ["REVISIÓN TÉCNICA VENCE", f(n.revision_tecnica && n.revision_tecnica.vence_en)], ["SOAP VENCE", f(n.soap && n.soap.vence_en)],
+  ]);
+  if ((n.documentos || []).length) pdf.paragraph("DOCUMENTOS RECIBIDOS", n.documentos.join(" · "));
+  pdf.sectionBar("Compra realizada por");
+  pdf.fields([["EJECUTIVO", n.ejecutivo], ["APROBADA POR", n.aprobado_por], ["LOCAL", n.local]]);
+  return pdf.build();
+}
+
 /** Nombre de archivo seguro: Inspeccion_TTHY51_2026-10-06.pdf */
 export function pdfFileName(prefix, record) {
   const id = String(record.inscripcion || record.patente || "").replace(/[^A-Za-z0-9]+/g, "") || "sin-patente";

@@ -1,6 +1,7 @@
 // Núcleo de las validaciones del CRM: revisión de documentos de cierres de venta, vehículos y compras.
 // JavaScript puro (sin APIs de Deno ni del navegador): lo usan el servidor, la pantalla y las pruebas.
-import { horasDesde, mesChile } from "./ventas-core.js";
+import { horasDesde, mesChile, soloDigitos } from "./ventas-core.js";
+import { validarRut, normalizarRut } from "./crm-core.js";
 
 /* ---------- Catálogos ---------- */
 export const TIPOS_VALIDACION = [
@@ -43,20 +44,98 @@ export const DOCS_VEHICULO = [
   D("multas_prendas", "Certificado de multas, prendas y limitaciones", "vehiculo"),
 ];
 
+/* ---------- Compra de vehículos: documentos y datos obligatorios ---------- */
+const PDF = ["application/pdf"];
+const IMG_PDF = ["image/jpeg", "application/pdf"];
+const DC = (clave, nombre, grupo, tipos, extra = {}) => ({ clave, nombre, grupo, requerido: true, tipos, ...extra });
+/** Documentos que deben estar cargados para concretar una compra. «vence»: lleva fecha de vencimiento; «precio»: lleva el precio pagado. */
+export const DOCS_COMPRA = [
+  DC("cav", "CAV (certificado de anotaciones vigentes)", "vehiculo", PDF),
+  DC("multas", "Multas", "vehiculo", PDF),
+  DC("dicom", "Dicom", "cliente", PDF),
+  DC("pension_alimentos", "Pensión de alimentos", "cliente", IMG_PDF),
+  DC("carnet_identidad", "Carnet de identidad", "cliente", IMG_PDF),
+  DC("informe_legal", "Informe legal", "vehiculo", PDF),
+  DC("permiso_circulacion", "Permiso de circulación", "vehiculo", IMG_PDF, { vence: true, precio: true }),
+  DC("revision_tecnica", "Revisión técnica", "vehiculo", IMG_PDF, { vence: true }),
+  DC("soap", "SOAP", "vehiculo", IMG_PDF, { vence: true }),
+  DC("padron", "Padrón", "vehiculo", IMG_PDF),
+  DC("contrato_compraventa", "Contrato de compra-venta", "cliente", IMG_PDF),
+];
+/** Reglas de un documento de compra por su clave (o null si no es uno de ellos). */
+export const reglaDocCompra = (clave) => DOCS_COMPRA.find((d) => d.clave === clave) || null;
+/** Solo las columnas que se guardan de cada documento. */
+export const filaDoc = ({ clave, nombre, grupo, requerido }) => ({ clave, nombre, grupo, requerido });
+/** Una validación de compra es del formato actual si trae el CAV; las anteriores siguen con su lista de siempre. */
+export const esChecklistCompraActual = (docs) => (docs || []).some((d) => d.clave === "cav");
+
+/** ¿El archivo es de un tipo permitido para ese documento de compra? */
+export function archivoPermitidoParaDoc(clave, tipoArchivo) {
+  const r = reglaDocCompra(clave);
+  if (!r) return { ok: true };
+  return r.tipos.includes(tipoArchivo) ? { ok: true } : { ok: false, error: r.tipos.length === 1 ? "archivo_solo_pdf" : "archivo_tipo_invalido" };
+}
+
+const FECHA = /^\d{4}-\d{2}-\d{2}$/;
+const fechaValida = (f) => FECHA.test(f) && !Number.isNaN(Date.parse(`${f}T12:00:00Z`)) && new Date(`${f}T12:00:00Z`).toISOString().slice(0, 10) === f;
+
+/** Fecha de vencimiento y precio de un documento de compra. */
+export function validarDatosDoc(clave, input) {
+  const r = reglaDocCompra(clave);
+  if (!r || (!r.vence && !r.precio)) return { ok: false, error: "doc_sin_datos" };
+  const i = input || {};
+  const out = {};
+  if (r.vence) {
+    const f = String(i.venceEn ?? "").trim();
+    if (!fechaValida(f)) return { ok: false, error: "vencimiento_invalido" };
+    out.vence_en = f;
+  }
+  if (r.precio) {
+    const n = Number(i.precio);
+    if (i.precio === "" || i.precio === null || i.precio === undefined || !Number.isInteger(n) || n < 0 || n > 2_000_000_000) return { ok: false, error: "precio_doc_invalido" };
+    out.precio = n;
+  }
+  return { ok: true, value: out };
+}
+
+/** Datos críticos del vendedor que debe completar el ejecutivo. Cada uno con su regla (campo de la base, etiqueta, error y comprobación). */
+const DATOS_CLIENTE = [
+  { campo: "rut", etiqueta: "RUT del vendedor", error: "rut_invalido", ok: (v) => validarRut(v) },
+  { campo: "nombre", etiqueta: "Nombre y apellido del vendedor", error: "nombre_apellido_requerido", ok: (v) => texto(v, 80).split(" ").filter((p) => p.length >= 2).length >= 2 },
+  { campo: "telefono", etiqueta: "Teléfono del vendedor", error: "telefono_invalido", ok: (v) => soloDigitos(texto(v, 30)).length >= 8 },
+  { campo: "email", etiqueta: "Correo del vendedor", error: "email_invalido", ok: (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(texto(v, 80)) },
+  { campo: "direccion", etiqueta: "Dirección del vendedor", error: "direccion_requerida", ok: (v) => texto(v, 160).length >= 6 },
+  { campo: "cuenta_corriente", etiqueta: "Cuenta corriente del vendedor", error: "cuenta_corriente_requerida", ok: (v) => soloDigitos(texto(v, 60)).length >= 4 },
+];
+
+export function validarDatosCliente(input) {
+  const i = input || {};
+  const v = { rut: i.rut, nombre: i.nombre, telefono: i.telefono, email: i.email, direccion: i.direccion, cuenta_corriente: i.cuentaCorriente };
+  for (const d of DATOS_CLIENTE) if (!d.ok(v[d.campo])) return { ok: false, error: d.error };
+  return { ok: true, value: { nombre: texto(v.nombre, 80), rut: normalizarRut(v.rut), telefono: texto(v.telefono, 30), email: texto(v.email, 80).toLowerCase(), direccion: texto(v.direccion, 160), cuenta_corriente: texto(v.cuenta_corriente, 60) } };
+}
+
+/** Qué falta para concretar la compra: datos del cliente y documentos (cada uno con su archivo y, si corresponde, vencimiento y precio). */
+export function faltantesCompra({ cliente, docs }) {
+  const f = [];
+  const c = cliente || {};
+  for (const d of DATOS_CLIENTE) if (!d.ok(c[d.campo])) f.push({ tipo: "dato", clave: d.campo, texto: d.etiqueta });
+  for (const r of DOCS_COMPRA) {
+    const d = (docs || []).find((x) => x.clave === r.clave);
+    if (!d || !(d.archivos || []).length) { f.push({ tipo: "doc", clave: r.clave, texto: `Documento: ${r.nombre}` }); continue; }
+    if (r.vence && !d.vence_en) f.push({ tipo: "doc", clave: r.clave, texto: `Fecha de vencimiento de: ${r.nombre}` });
+    if (r.precio && (d.precio === null || d.precio === undefined)) f.push({ tipo: "doc", clave: r.clave, texto: `Precio de pago de: ${r.nombre}` });
+  }
+  return f;
+}
+
 /**
  * Qué documentos hay que revisar según el tipo de validación.
  * opciones: { conFinanciamiento, conParteDePago } (solo para ventas).
  */
 export function checklistPara(tipo, opciones = {}) {
   if (tipo === "vehiculo") return DOCS_VEHICULO.map((d) => ({ ...d }));
-  if (tipo === "compra") {
-    return [
-      ...DOCS_VEHICULO.map((d) => ({ ...d })),
-      D("cedula_vendedor", "Cédula de identidad del vendedor (ambos lados)", "cliente"),
-      D("contrato_compra", "Contrato de compraventa o mandato firmado", "cliente"),
-      D("comprobante_pago", "Comprobante de pago al vendedor", "cliente", false),
-    ];
-  }
+  if (tipo === "compra") return DOCS_COMPRA.map((d) => ({ ...d }));
   if (tipo === "consignacion") {
     return [
       ...DOCS_VEHICULO.map((d) => ({ ...d })),
@@ -139,7 +218,8 @@ export function docsReutilizables(docsOrigen, validacionOrigenId) {
   const out = {};
   for (const d of docsOrigen || []) {
     if (d.grupo === "vehiculo" && d.estado === "aprobado") {
-      out[d.clave] = { estado: "aprobado", comentario: d.comentario || null, revisado_por: d.revisado_por || null, revisado_en: d.revisado_en || null, archivos: (d.archivos || []).map((a) => ({ ...a, v: a.v || validacionOrigenId })) };
+      // En una compra, «Multas» hace de «certificado de multas, prendas y limitaciones» del vehículo.
+      out[d.clave === "multas" ? "multas_prendas" : d.clave] = { estado: "aprobado", comentario: d.comentario || null, revisado_por: d.revisado_por || null, revisado_en: d.revisado_en || null, archivos: (d.archivos || []).map((a) => ({ ...a, v: a.v || validacionOrigenId })) };
     }
   }
   return out;
