@@ -752,3 +752,22 @@ test("Consignación: sin los datos del dueño (con su cuenta bancaria) y los 9 d
   assert.equal(vals.length, 1, "no se crea una segunda validación");
   assert.equal(vals[0].consignacion_id, ok.consignacion.id);
 });
+
+test("Consignación: el comprobante existe con el contrato registrado y trae los datos del dueño, los precios y los vencimientos", async () => {
+  const lead = await leadDe(U.c1.token, "consignacion");
+  const ok = await consignar(U.c1.token, lead.id, CONTRATO({ precioPiso: 8100000, precioPublicacion: 9100000, plazoDias: 45 }));
+  assert.equal(ok.status, 200, JSON.stringify(ok));
+  const r = await ve(U.c1.token, "consignaciones.comprobante", { id: ok.consignacion.id });
+  assert.equal(r.status, 200, JSON.stringify(r));
+  const n = r.comprobante;
+  assert.equal(n.folio, ok.consignacion.folio);
+  assert.deepEqual([n.precio_piso, n.precio_publicacion, n.plazo_dias], [8100000, 9100000, 45]);
+  assert.deepEqual([n.dueno.banco, n.dueno.tipo_cuenta, n.dueno.numero_cuenta], ["BancoEstado", "Cuenta vista", "12345678"]);
+  assert.equal(n.permiso.precio, 95000);
+  assert.equal(n.soap.vence_en, "2027-06-30");
+  assert.equal(n.documentos.length, 9);
+  assert.equal((await ve(U.c2.token, "consignaciones.comprobante", { id: ok.consignacion.id })).status, 403, "quien no tiene Consignaciones no lo ve");
+  // Devuelta o cancelada: ya no hay comprobante.
+  assert.equal((await ve(U.c1.token, "consignaciones.cancelar", { id: ok.consignacion.id, motivo: "El dueño se arrepintió" })).status, 200);
+  assert.equal((await ve(U.c1.token, "consignaciones.comprobante", { id: ok.consignacion.id })).error, "consignacion_estado_invalido");
+});

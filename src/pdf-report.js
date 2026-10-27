@@ -494,6 +494,39 @@ export function buildNotaCompraPdf(n, { fmt }) {
   return pdf.build();
 }
 
+/**
+ * Comprobante de consignación de un vehículo (se genera con el contrato registrado y los datos y documentos completos).
+ * @param n  { folio, fecha, local, ejecutivo, vehiculo, precio_piso, precio_publicacion, plazo_dias, vence_en, notas, dueno, permiso, revision_tecnica, soap, documentos }
+ */
+export function buildComprobanteConsignacionPdf(n, { fmt }) {
+  const v = n.vehiculo || {};
+  const pdf = new PdfDoc(`Comprobante de consignación ${n.folio} · ${[v.marca, v.modelo].filter(Boolean).join(" ")} · ${n.local || "Drive Futuro"}`);
+  pdf.title(`Comprobante de consignación ${n.folio}`, fechaLarga(String(n.fecha || "").slice(0, 10)));
+  const d = n.dueno || {};
+  pdf.sectionBar("Dueño del vehículo");
+  pdf.fields([["NOMBRE", d.nombre], ["RUT", d.rut], ["TELÉFONO", d.telefono], ["CORREO", d.email], ["DIRECCIÓN", d.direccion], ["BANCO", d.banco], ["TIPO DE CUENTA", d.tipo_cuenta], ["NÚMERO DE CUENTA", d.numero_cuenta]]);
+  pdf.sectionBar("Vehículo");
+  pdf.fields([
+    ["PATENTE", v.patente], ["MARCA", v.marca], ["MODELO", [v.modelo, v.version].filter(Boolean).join(" ")], ["AÑO", v.anio],
+    ["KILOMETRAJE", v.km != null ? `${Number(v.km).toLocaleString("es-CL")} km` : ""], ["COLOR", v.color],
+  ]);
+  pdf.sectionBar("Condiciones de la consignación");
+  pdf.totalLine("Precio piso (lo mínimo que recibe el dueño)", fmt(n.precio_piso), { big: true });
+  pdf.totalLine("Precio de publicación", fmt(n.precio_publicacion));
+  const f = (x) => (x ? fechaLarga(String(x).slice(0, 10)) : "");
+  pdf.fields([["PLAZO", n.plazo_dias ? `${n.plazo_dias} días` : ""], ["VENCE", f(n.vence_en)]]);
+  if (n.notas) pdf.paragraph("OBSERVACIONES", n.notas);
+  pdf.sectionBar("Documentos con vencimiento");
+  pdf.fields([
+    ["PERMISO DE CIRCULACIÓN VENCE", f(n.permiso && n.permiso.vence_en)], ["PRECIO PAGADO DEL PERMISO", n.permiso && n.permiso.precio != null ? fmt(n.permiso.precio) : ""],
+    ["REVISIÓN TÉCNICA VENCE", f(n.revision_tecnica && n.revision_tecnica.vence_en)], ["SOAP VENCE", f(n.soap && n.soap.vence_en)],
+  ]);
+  if ((n.documentos || []).length) pdf.paragraph("DOCUMENTOS RECIBIDOS", n.documentos.join(" · "));
+  pdf.sectionBar("Consignación registrada por");
+  pdf.fields([["EJECUTIVO", n.ejecutivo], ["LOCAL", n.local]]);
+  return pdf.build();
+}
+
 /** Nombre de archivo seguro: Inspeccion_TTHY51_2026-10-06.pdf */
 export function pdfFileName(prefix, record) {
   const id = String(record.inscripcion || record.patente || "").replace(/[^A-Za-z0-9]+/g, "") || "sin-patente";

@@ -2323,6 +2323,34 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       await audit(ctx.actor, "consignacion.datos_cliente", "lead", lead.id, { cliente_id: lead.cliente_id });
       return json({ ok: true });
     }
+    /**
+     * Datos del comprobante de consignación. Existe con el contrato registrado (no devuelto ni cancelado) y con los datos del dueño y los
+     * documentos completos; las consignaciones anteriores a esta exigencia (lista antigua de documentos) lo generan sin la lista de documentos.
+     */
+    if (op === "consignaciones.comprobante") {
+      const c = await cargarConsig(String(body.id ?? ""));
+      if (!c || !veConsig(c)) return err("no_existe", 404);
+      if (!["en_validacion", "vigente", "vendida"].includes(c.estado)) return err("consignacion_estado_invalido");
+      const vq = await sb.from("validaciones").select("*").eq("consignacion_id", c.id);
+      const val: any = (vq.data ?? []).filter((x: any) => x.estado !== "cancelada").sort((a: any, b: any) => String(b.creado_en).localeCompare(String(a.creado_en)))[0] ?? null;
+      const docs = val ? (await enLotes("validacion_docs", "validacion_id", [val.id])) : [];
+      const actual = esChecklistCompraActual(docs);
+      const cl = c.cliente_id ? (await sb.from("clientes").select("*").eq("id", c.cliente_id).maybeSingle()).data : null;
+      if (actual && faltantesConsignacion({ cliente: cl, docs }).length > 0) return err("consignacion_incompleta", 409);
+      const [loc] = c.local_id ? await porIds("locales", [c.local_id]) : [null];
+      const [eje] = c.ejecutivo_id ? await porIds("usuarios", [c.ejecutivo_id]) : [null];
+      const reg = (clave: string) => docs.find((d: any) => d.clave === clave) || {};
+      return json({
+        comprobante: {
+          folio: folioConsignacion(c.numero), fecha: c.activada_en || c.creado_en, local: loc ? loc.nombre : "", ejecutivo: eje ? eje.nombre : "",
+          vehiculo: c.vehiculo || {}, precio_piso: c.precio_piso, precio_publicacion: c.precio_publicacion, plazo_dias: c.plazo_dias, vence_en: c.vence_en ?? null, notas: c.notas ?? null,
+          dueno: cl ? { nombre: cl.nombre, rut: cl.rut, telefono: cl.telefono, email: cl.email, direccion: cl.direccion, banco: cl.banco, tipo_cuenta: cl.tipo_cuenta, numero_cuenta: cl.numero_cuenta } : null,
+          permiso: { vence_en: reg("permiso_circulacion").vence_en ?? null, precio: reg("permiso_circulacion").precio ?? null },
+          revision_tecnica: { vence_en: reg("revision_tecnica").vence_en ?? null }, soap: { vence_en: reg("soap").vence_en ?? null },
+          documentos: actual ? DOCS_CONSIGNACION.map((d) => d.nombre) : [],
+        },
+      });
+    }
     if (op === "consignaciones.crear") {
       const lead = await cargarLead(String(body.leadId ?? ""));
       if (!lead || !puedeVer(lead)) return err("no_existe", 404);

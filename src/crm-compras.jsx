@@ -14,7 +14,7 @@ import { MEDIOS_PAGO } from "../supabase/functions/api/ventas-core.js";
 import { compraNombre, consignacionNombre, COMPRA_ABIERTA, CONSIGNACION_ABIERTA, validarOferta, validarConsignacion } from "../supabase/functions/api/compras-core.js";
 import { ResultadoTasacion } from "./crm-tasaciones.jsx";
 import { ValidacionDetalle } from "./crm-validaciones.jsx";
-import { buildNotaCompraPdf } from "./pdf-report.js";
+import { buildNotaCompraPdf, buildComprobanteConsignacionPdf } from "./pdf-report.js";
 import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, hace, Aviso, Cargando, Tarjeta, Campo, Pestanas, useCarga, mensajeError, DatosDelDueno, CuentaBancaria } from "./crm-ui.jsx";
 
 const COLOR_COMPRA = { oferta: "bg-amber-100 text-amber-800", aceptada: "bg-sky-100 text-sky-800", pago_pendiente: "bg-violet-100 text-violet-800", comprada: "bg-emerald-100 text-emerald-800", rechazada: "bg-stone-200 text-stone-600", anulada: "bg-stone-200 text-stone-600", cancelada: "bg-stone-200 text-stone-600" };
@@ -105,6 +105,18 @@ async function descargarNotaCompra(api, c) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url; a.download = `Nota-de-compra_${nota.folio}_${(nota.vehiculo && nota.vehiculo.patente) || "vehiculo"}.pdf`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 3000);
+}
+
+/** Genera y descarga el comprobante de consignación (solo existe con el contrato registrado y todo completo). */
+async function descargarComprobanteConsignacion(api, c) {
+  const { comprobante } = await api("consignaciones.comprobante", { id: c.id });
+  const bytes = buildComprobanteConsignacionPdf(comprobante, { fmt: clp });
+  const blob = new Blob([bytes], { type: "application/pdf" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = `Comprobante-de-consignacion_${comprobante.folio}_${(comprobante.vehiculo && comprobante.vehiculo.patente) || "vehiculo"}.pdf`;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 3000);
 }
@@ -272,6 +284,9 @@ function Consignacion({ api, c, puedeOperar, onCambio, avisar }) {
       {c.estado === "en_validacion" && <p className="text-xs text-amber-700">{v ? `Documentos (${v.folio}): ${({ pendiente: "esperando a un Validador", en_revision: "en revisión", observada: "con observaciones", rechazada: "rechazada" })[v.estado] || v.estado}. ` : ""}El vehículo entrará al inventario cuando se aprueben.</p>}
       {c.estado === "vigente" && <p className="text-xs text-stone-600">El vehículo está en el inventario y no se puede vender por debajo de {clp(c.precio_piso)}.</p>}
       {c.motivo && ["devuelta", "cancelada"].includes(c.estado) && <p className="text-xs text-stone-600">{c.motivo}</p>}
+      {["en_validacion", "vigente", "vendida"].includes(c.estado) && modo === "" && (
+        <div><button disabled={ocupado} onClick={async () => { avisar(""); setOcupado(true); try { await descargarComprobanteConsignacion(api, c); } catch (e) { avisar(mensajeError(e)); } setOcupado(false); }} className={BTN_AMBAR}>Descargar comprobante de consignación (PDF)</button></div>
+      )}
       {puedeOperar && modo === "" && (
         <div className="flex flex-wrap gap-2">
           {c.estado === "vigente" && <><button onClick={() => setModo("extender")} className={BTN}>Extender el plazo</button><button onClick={() => setModo("devolver")} className={BTN}>Devolver al dueño</button></>}
