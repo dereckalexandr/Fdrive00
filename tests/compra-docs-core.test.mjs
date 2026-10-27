@@ -1,10 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  DOCS_COMPRA, checklistPara, reglaDocCompra, archivoPermitidoParaDoc, validarDatosDoc, validarDatosCliente, faltantesCompra, esChecklistCompraActual, filaDoc,
+  BANCOS_CHILE, TIPOS_CUENTA, validarCuentaBancaria, DOCS_COMPRA, checklistPara, reglaDocCompra, archivoPermitidoParaDoc, validarDatosDoc, validarDatosCliente, faltantesCompra, esChecklistCompraActual, filaDoc,
 } from "../supabase/functions/api/validaciones-core.js";
 
-const CLIENTE = { nombre: "Juan Pérez", rut: "12.345.678-5", telefono: "9 1234 5678", email: "juan@correo.cl", direccion: "Av. Siempre Viva 742", cuenta_corriente: "Banco Estado 123456789" };
+const CLIENTE = { nombre: "Juan Pérez", rut: "12.345.678-5", telefono: "9 1234 5678", email: "juan@correo.cl", direccion: "Av. Siempre Viva 742", banco: "BancoEstado", tipo_cuenta: "Cuenta RUT", numero_cuenta: "123456789" };
 const completos = () => DOCS_COMPRA.map((d) => ({ clave: d.clave, archivos: [{ id: "abc123" }], ...(d.vence ? { vence_en: "2027-03-31" } : {}), ...(d.precio ? { precio: 98000 } : {}) }));
 
 test("Compra: los 11 documentos obligatorios, con su tipo de archivo, vencimiento y precio", () => {
@@ -34,22 +34,28 @@ test("Fecha de vencimiento y precio del permiso", () => {
 });
 
 test("Datos críticos del vendedor: RUT, nombre y apellido, teléfono, correo, dirección y cuenta corriente", () => {
-  const ok = validarDatosCliente({ ...CLIENTE, cuentaCorriente: CLIENTE.cuenta_corriente });
+  const base = { ...CLIENTE, tipoCuenta: CLIENTE.tipo_cuenta, numeroCuenta: CLIENTE.numero_cuenta };
+  const ok = validarDatosCliente(base);
   assert.equal(ok.ok, true);
   assert.equal(ok.value.rut.replace(/\./g, ""), "12345678-5");
-  const e = (o) => validarDatosCliente({ ...CLIENTE, cuentaCorriente: CLIENTE.cuenta_corriente, ...o }).error;
+  const e = (o) => validarDatosCliente({ ...base, ...o }).error;
   assert.equal(e({ rut: "12.345.678-9" }), "rut_invalido");
   assert.equal(e({ nombre: "Juan" }), "nombre_apellido_requerido");
   assert.equal(e({ telefono: "123" }), "telefono_invalido");
   assert.equal(e({ email: "sin-arroba" }), "email_invalido");
   assert.equal(e({ direccion: "Calle" }), "direccion_requerida");
-  assert.equal(e({ cuentaCorriente: "" }), "cuenta_corriente_requerida");
+  assert.equal(e({ banco: "" }), "banco_invalido");
+  assert.equal(e({ banco: "Banco Inventado" }), "banco_invalido");
+  assert.equal(e({ tipoCuenta: "Libreta" }), "tipo_cuenta_invalido");
+  assert.equal(e({ numeroCuenta: "12" }), "numero_cuenta_invalido");
+  assert.equal(e({ numeroCuenta: "12ab5678" }), "numero_cuenta_invalido");
+  assert.equal(validarDatosCliente({ ...base, numeroCuenta: "12.345-678 9" }).value.numero_cuenta, "123456789", "se guarda solo con dígitos");
 });
 
 test("Faltantes: la compra solo se concreta con todos los datos y documentos", () => {
   assert.equal(faltantesCompra({ cliente: CLIENTE, docs: completos() }).length, 0);
   const vacio = faltantesCompra({ cliente: {}, docs: [] });
-  assert.equal(vacio.length, 6 + 11);
+  assert.equal(vacio.length, 8 + 11);
   // Un documento sin archivo, o sin su vencimiento o precio, sigue faltando.
   const docs = completos();
   docs.find((d) => d.clave === "cav").archivos = [];
@@ -57,4 +63,13 @@ test("Faltantes: la compra solo se concreta con todos los datos y documentos", (
   delete docs.find((d) => d.clave === "permiso_circulacion").precio;
   const f = faltantesCompra({ cliente: { ...CLIENTE, direccion: "" }, docs }).map((x) => x.texto);
   assert.deepEqual(f, ["Dirección del vendedor", "Documento: CAV (certificado de anotaciones vigentes)", "Precio de pago de: Permiso de circulación", "Fecha de vencimiento de: SOAP"]);
+});
+
+test("Cuenta bancaria: banco y tipo de cuenta de listas, y el número", () => {
+  assert.ok(BANCOS_CHILE.includes("Banco de Chile") && BANCOS_CHILE.includes("BancoEstado") && BANCOS_CHILE.includes("Banco Santander Chile"));
+  assert.deepEqual(TIPOS_CUENTA, ["Cuenta corriente", "Cuenta vista", "Cuenta RUT", "Cuenta de ahorro"]);
+  assert.deepEqual(validarCuentaBancaria({ banco: "Scotiabank Chile", tipoCuenta: "Cuenta corriente", numeroCuenta: "00-123.456" }).value, { banco: "Scotiabank Chile", tipo_cuenta: "Cuenta corriente", numero_cuenta: "00123456" });
+  assert.equal(validarCuentaBancaria({ tipoCuenta: "Cuenta vista", numeroCuenta: "123456" }).error, "banco_invalido");
+  assert.equal(validarCuentaBancaria({ banco: "Banco de Chile", numeroCuenta: "123456" }).error, "tipo_cuenta_invalido");
+  assert.equal(validarCuentaBancaria({ banco: "Banco de Chile", tipoCuenta: "Cuenta vista" }).error, "numero_cuenta_invalido");
 });

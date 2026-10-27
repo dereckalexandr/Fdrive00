@@ -44,7 +44,8 @@ const PAGO = (extra = {}) => ({ montoFinal: 5800000, medioPago: "Transferencia",
 const dvRut = (n) => { let suma = 0; let m = 2; for (const d of String(n).split("").reverse()) { suma += Number(d) * m; m = m === 7 ? 2 : m + 1; } const r = 11 - (suma % 11); return r === 11 ? "0" : r === 10 ? "K" : String(r); };
 let rutN = 20000000; let archN = 0;
 const rutNuevo = () => { const n = ++rutN; return `${n}-${dvRut(n)}`; };
-const DATOS_VENDEDOR = (extra = {}) => ({ nombre: "Vendedor Prueba", rut: rutNuevo(), telefono: "912345678", email: "vendedor@x.cl", direccion: "Calle Falsa 123, Santiago", cuentaCorriente: "Banco Estado 12345678", ...extra });
+const DATOS_VENDEDOR = (extra = {}) => ({ nombre: "Vendedor Prueba", rut: rutNuevo(), telefono: "912345678", email: "vendedor@x.cl", direccion: "Calle Falsa 123, Santiago", banco: "BancoEstado", tipoCuenta: "Cuenta vista", numeroCuenta: "12345678", ...extra });
+const CUENTA = (extra = {}) => ({ banco: "Banco de Chile", tipoCuenta: "Cuenta corriente", numeroCuenta: "00123456789", ...extra });
 /** El ejecutivo completa los datos del vendedor y sube los 11 documentos (con vencimiento y precio del permiso). */
 async function cumplirRequisitos(compraId, token = U.c1.token) {
   const rq = await ve(token, "compras.requisitos", { id: compraId });
@@ -321,7 +322,7 @@ test("Lead que llega por el sitio web: se asigna a quien compra y se ofrece su t
 });
 
 /* ======================= CONSIGNACIONES ======================= */
-const CONTRATO = (extra = {}) => ({ precioPiso: 8000000, precioPublicacion: 8990000, plazoDias: 60, notas: "Llaves en el local", ...extra });
+const CONTRATO = (extra = {}) => ({ precioPiso: 8000000, precioPublicacion: 8990000, plazoDias: 60, notas: "Llaves en el local", cuenta: { banco: "Banco de Chile", tipoCuenta: "Cuenta corriente", numeroCuenta: "00123456789" }, ...extra });
 const consignar = (token, leadId, datos = CONTRATO()) => ve(token, "consignaciones.crear", { leadId, datos });
 
 test("Contrato de consignación: valida los precios y el plazo; sin Validadores el vehículo entra de inmediato", async () => {
@@ -602,7 +603,7 @@ test("Tasador: si decide consignación en un lead de compra, el lead cambia de t
   assert.equal(l.asignado_a, U.c1.id, "Carla tiene Consignaciones: se queda con ella");
   assert.equal(l.etapa, "contrato", "pasa a la etapa del contrato");
   assert.ok(db.tablas.lead_eventos.some((e) => e.lead_id === lead.id && e.tipo === "tipo" && /Compra a Consignación/.test(e.detalle)));
-  const c = await ve(U.c1.token, "consignaciones.crear", { leadId: lead.id, datos: { precioPiso: 8000000, precioPublicacion: 9000000, plazoDias: 90 } });
+  const c = await ve(U.c1.token, "consignaciones.crear", { leadId: lead.id, datos: { precioPiso: 8000000, precioPublicacion: 9000000, plazoDias: 90, cuenta: { banco: "Banco de Chile", tipoCuenta: "Cuenta corriente", numeroCuenta: "00123456789" } } });
   assert.equal(c.status, 200, JSON.stringify(c));
 });
 
@@ -625,20 +626,22 @@ test("Compra: sin los datos del vendedor y los 11 documentos no se pide el pago,
   assert.equal(rq.aplica, true);
   assert.equal(rq.completo, false);
   assert.equal(rq.docs.length, 11);
-  assert.ok(rq.faltantes.some((f) => f.clave === "direccion") && rq.faltantes.some((f) => f.clave === "cuenta_corriente"));
+  assert.ok(rq.faltantes.some((f) => f.clave === "direccion") && rq.faltantes.some((f) => f.clave === "banco") && rq.faltantes.some((f) => f.clave === "tipo_cuenta") && rq.faltantes.some((f) => f.clave === "numero_cuenta"));
   assert.equal((await ve(U.c1.token, "compras.solicitarPago", { id: o.compra.id, datos: PAGO() })).error, "compra_incompleta");
 
   // Datos críticos del vendedor.
   const dc = (extra) => ve(U.c1.token, "compras.datosCliente", { id: o.compra.id, datos: DATOS_VENDEDOR(extra) });
   assert.equal((await dc({ rut: "12.345.678-9" })).error, "rut_invalido");
   assert.equal((await dc({ nombre: "Solo" })).error, "nombre_apellido_requerido");
-  assert.equal((await dc({ cuentaCorriente: "" })).error, "cuenta_corriente_requerida");
+  assert.equal((await dc({ banco: "" })).error, "banco_invalido");
+  assert.equal((await dc({ tipoCuenta: "" })).error, "tipo_cuenta_invalido");
+  assert.equal((await dc({ numeroCuenta: "abc" })).error, "numero_cuenta_invalido");
   assert.equal((await dc({ direccion: "" })).error, "direccion_requerida");
   assert.equal((await ve(U.c2.token, "compras.datosCliente", { id: o.compra.id, datos: DATOS_VENDEDOR() })).status, 404, "otro ejecutivo no toca la compra");
   assert.equal((await dc({})).status, 200);
   const cli = db.tablas.clientes.find((c) => c.id === db.tablas.compras.find((x) => x.id === o.compra.id).cliente_id);
   assert.equal(cli.direccion, "Calle Falsa 123, Santiago");
-  assert.equal(cli.cuenta_corriente, "Banco Estado 12345678");
+  assert.deepEqual([cli.banco, cli.tipo_cuenta, cli.numero_cuenta], ["BancoEstado", "Cuenta vista", "12345678"]);
 
   // Tipos de archivo por documento: el CAV solo acepta PDF; el padrón, imagen o PDF.
   const doc = (clave) => rq.docs.find((d) => d.clave === clave);
@@ -674,7 +677,7 @@ test("Compra: sin los datos del vendedor y los 11 documentos no se pide el pago,
   // Nota de compra: con todos los datos.
   const nota = await ve(U.jefe.token, "compras.nota", { id: o.compra.id });
   assert.equal(nota.status, 200, JSON.stringify(nota));
-  assert.equal(nota.nota.vendedor.cuenta_corriente, "Banco Estado 12345678");
+  assert.deepEqual([nota.nota.vendedor.banco, nota.nota.vendedor.tipo_cuenta, nota.nota.vendedor.numero_cuenta], ["BancoEstado", "Cuenta vista", "12345678"]);
   assert.equal(nota.nota.permiso.precio, 95000);
   assert.equal(nota.nota.soap.vence_en, "2027-06-30");
   assert.equal(nota.nota.documentos.length, 11);
@@ -692,4 +695,17 @@ test("Compra: las compras con la lista anterior de documentos siguen con su regl
   assert.equal(rq.aplica, false);
   assert.equal(rq.completo, true);
   assert.equal((await ve(U.c1.token, "compras.solicitarPago", { id: o.compra.id, datos: PAGO() })).status, 200);
+});
+
+test("Consignación: el contrato exige la cuenta bancaria del dueño (banco, tipo y número) y la guarda en el cliente", async () => {
+  const lead = await leadDe(U.c1.token, "consignacion");
+  const sin = await consignar(U.c1.token, lead.id, CONTRATO({ cuenta: undefined }));
+  assert.equal(sin.error, "banco_invalido", "sin cuenta no se registra el contrato");
+  assert.equal((await consignar(U.c1.token, lead.id, CONTRATO({ cuenta: CUENTA({ banco: "Banco Falso" }) }))).error, "banco_invalido");
+  assert.equal((await consignar(U.c1.token, lead.id, CONTRATO({ cuenta: CUENTA({ tipoCuenta: "" }) }))).error, "tipo_cuenta_invalido");
+  assert.equal((await consignar(U.c1.token, lead.id, CONTRATO({ cuenta: CUENTA({ numeroCuenta: "12" }) }))).error, "numero_cuenta_invalido");
+  const ok = await consignar(U.c1.token, lead.id, CONTRATO({ cuenta: CUENTA({ numeroCuenta: "00-123.456" }) }));
+  assert.equal(ok.status, 200, JSON.stringify(ok));
+  const cli = db.tablas.clientes.find((c) => c.id === fila("leads", lead.id).cliente_id);
+  assert.deepEqual([cli.banco, cli.tipo_cuenta, cli.numero_cuenta], ["Banco de Chile", "Cuenta corriente", "00123456"]);
 });

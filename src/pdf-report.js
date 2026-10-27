@@ -473,7 +473,7 @@ export function buildNotaCompraPdf(n, { fmt }) {
   pdf.title(`Nota de compra ${n.folio}`, fechaLarga(String(n.fecha || "").slice(0, 10)));
   const ven = n.vendedor || {};
   pdf.sectionBar("Vendedor");
-  pdf.fields([["NOMBRE", ven.nombre], ["RUT", ven.rut], ["TELÉFONO", ven.telefono], ["CORREO", ven.email], ["DIRECCIÓN", ven.direccion], ["CUENTA CORRIENTE", ven.cuenta_corriente]]);
+  pdf.fields([["NOMBRE", ven.nombre], ["RUT", ven.rut], ["TELÉFONO", ven.telefono], ["CORREO", ven.email], ["DIRECCIÓN", ven.direccion], ["BANCO", ven.banco], ["TIPO DE CUENTA", ven.tipo_cuenta], ["NÚMERO DE CUENTA", ven.numero_cuenta]]);
   pdf.sectionBar("Vehículo");
   pdf.fields([
     ["PATENTE", v.patente], ["MARCA", v.marca], ["MODELO", [v.modelo, v.version].filter(Boolean).join(" ")], ["AÑO", v.anio],

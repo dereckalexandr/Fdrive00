@@ -98,6 +98,28 @@ export function validarDatosDoc(clave, input) {
   return { ok: true, value: out };
 }
 
+/** Bancos e instituciones financieras de Chile donde se puede recibir un pago. */
+export const BANCOS_CHILE = [
+  "Banco de Chile", "BancoEstado", "Banco Santander Chile", "Banco de Crédito e Inversiones (BCI)", "Scotiabank Chile", "Banco Itaú Chile", "Banco Security",
+  "Banco Falabella", "Banco Ripley", "Banco Consorcio", "Banco BICE", "Banco Internacional", "BTG Pactual Chile", "HSBC Bank Chile", "Coopeuch", "Tenpo", "Mercado Pago", "Otro banco",
+];
+export const TIPOS_CUENTA = ["Cuenta corriente", "Cuenta vista", "Cuenta RUT", "Cuenta de ahorro"];
+/** Número de cuenta sin espacios, puntos ni guiones (solo dígitos, entre 4 y 20). */
+export const limpiarNumeroCuenta = (v) => String(v ?? "").replace(/[\s.-]/g, "");
+export const numeroCuentaValido = (v) => /^\d{4,20}$/.test(limpiarNumeroCuenta(v));
+
+/**
+ * Cuenta bancaria donde se paga: banco, tipo de cuenta y número (para el vendedor de una compra o el dueño de una consignación).
+ * @returns { ok, value: { banco, tipo_cuenta, numero_cuenta } } o { ok: false, error }
+ */
+export function validarCuentaBancaria(input) {
+  const i = input || {};
+  if (!BANCOS_CHILE.includes(i.banco)) return { ok: false, error: "banco_invalido" };
+  if (!TIPOS_CUENTA.includes(i.tipoCuenta)) return { ok: false, error: "tipo_cuenta_invalido" };
+  if (!numeroCuentaValido(i.numeroCuenta)) return { ok: false, error: "numero_cuenta_invalido" };
+  return { ok: true, value: { banco: i.banco, tipo_cuenta: i.tipoCuenta, numero_cuenta: limpiarNumeroCuenta(i.numeroCuenta) } };
+}
+
 /** Datos críticos del vendedor que debe completar el ejecutivo. Cada uno con su regla (campo de la base, etiqueta, error y comprobación). */
 const DATOS_CLIENTE = [
   { campo: "rut", etiqueta: "RUT del vendedor", error: "rut_invalido", ok: (v) => validarRut(v) },
@@ -105,14 +127,16 @@ const DATOS_CLIENTE = [
   { campo: "telefono", etiqueta: "Teléfono del vendedor", error: "telefono_invalido", ok: (v) => soloDigitos(texto(v, 30)).length >= 8 },
   { campo: "email", etiqueta: "Correo del vendedor", error: "email_invalido", ok: (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(texto(v, 80)) },
   { campo: "direccion", etiqueta: "Dirección del vendedor", error: "direccion_requerida", ok: (v) => texto(v, 160).length >= 6 },
-  { campo: "cuenta_corriente", etiqueta: "Cuenta corriente del vendedor", error: "cuenta_corriente_requerida", ok: (v) => soloDigitos(texto(v, 60)).length >= 4 },
+  { campo: "banco", etiqueta: "Banco del vendedor", error: "banco_invalido", ok: (v) => BANCOS_CHILE.includes(v) },
+  { campo: "tipo_cuenta", etiqueta: "Tipo de cuenta del vendedor", error: "tipo_cuenta_invalido", ok: (v) => TIPOS_CUENTA.includes(v) },
+  { campo: "numero_cuenta", etiqueta: "Número de cuenta del vendedor", error: "numero_cuenta_invalido", ok: (v) => numeroCuentaValido(v) },
 ];
 
 export function validarDatosCliente(input) {
   const i = input || {};
-  const v = { rut: i.rut, nombre: i.nombre, telefono: i.telefono, email: i.email, direccion: i.direccion, cuenta_corriente: i.cuentaCorriente };
+  const v = { rut: i.rut, nombre: i.nombre, telefono: i.telefono, email: i.email, direccion: i.direccion, banco: i.banco, tipo_cuenta: i.tipoCuenta, numero_cuenta: i.numeroCuenta };
   for (const d of DATOS_CLIENTE) if (!d.ok(v[d.campo])) return { ok: false, error: d.error };
-  return { ok: true, value: { nombre: texto(v.nombre, 80), rut: normalizarRut(v.rut), telefono: texto(v.telefono, 30), email: texto(v.email, 80).toLowerCase(), direccion: texto(v.direccion, 160), cuenta_corriente: texto(v.cuenta_corriente, 60) } };
+  return { ok: true, value: { nombre: texto(v.nombre, 80), rut: normalizarRut(v.rut), telefono: texto(v.telefono, 30), email: texto(v.email, 80).toLowerCase(), direccion: texto(v.direccion, 160), banco: v.banco, tipo_cuenta: v.tipo_cuenta, numero_cuenta: limpiarNumeroCuenta(v.numero_cuenta) } };
 }
 
 /** Qué falta para concretar la compra: datos del cliente y documentos (cada uno con su archivo y, si corresponde, vencimiento y precio). */

@@ -15,7 +15,8 @@ import { compraNombre, consignacionNombre, COMPRA_ABIERTA, CONSIGNACION_ABIERTA,
 import { ResultadoTasacion } from "./crm-tasaciones.jsx";
 import { ValidacionDetalle } from "./crm-validaciones.jsx";
 import { buildNotaCompraPdf } from "./pdf-report.js";
-import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, hace, Aviso, Cargando, Tarjeta, Campo, Pestanas, useCarga, mensajeError, DatosDelDueno } from "./crm-ui.jsx";
+import { validarCuentaBancaria } from "../supabase/functions/api/validaciones-core.js";
+import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, hace, Aviso, Cargando, Tarjeta, Campo, Pestanas, useCarga, mensajeError, DatosDelDueno, CuentaBancaria } from "./crm-ui.jsx";
 
 const COLOR_COMPRA = { oferta: "bg-amber-100 text-amber-800", aceptada: "bg-sky-100 text-sky-800", pago_pendiente: "bg-violet-100 text-violet-800", comprada: "bg-emerald-100 text-emerald-800", rechazada: "bg-stone-200 text-stone-600", anulada: "bg-stone-200 text-stone-600", cancelada: "bg-stone-200 text-stone-600" };
 const COLOR_CONS = { en_validacion: "bg-amber-100 text-amber-800", vigente: "bg-emerald-100 text-emerald-800", vendida: "bg-sky-100 text-sky-800", devuelta: "bg-stone-200 text-stone-600", cancelada: "bg-stone-200 text-stone-600" };
@@ -30,7 +31,7 @@ const fechaCorta = (d) => (d ? new Date(`${String(d).slice(0, 10)}T12:00:00`).to
 ========================================================= */
 const DATOS_VENDEDOR = [
   ["nombre", "Nombre y apellido", "text"], ["rut", "RUT", "text"], ["telefono", "Teléfono", "tel"], ["email", "Correo", "email"],
-  ["direccion", "Dirección", "text"], ["cuentaCorriente", "Cuenta corriente (banco y número)", "text"],
+  ["direccion", "Dirección", "text"],
 ];
 
 function RequisitosCompra({ api, c, puedeOperar, onCambio, onCompleto }) {
@@ -43,7 +44,7 @@ function RequisitosCompra({ api, c, puedeOperar, onCambio, onCompleto }) {
     if (!datos) return;
     onCompleto(datos.completo);
     const cl = datos.cliente || {};
-    setF({ nombre: cl.nombre || "", rut: cl.rut || "", telefono: cl.telefono || "", email: cl.email || "", direccion: cl.direccion || "", cuentaCorriente: cl.cuenta_corriente || "" });
+    setF({ nombre: cl.nombre || "", rut: cl.rut || "", telefono: cl.telefono || "", email: cl.email || "", direccion: cl.direccion || "", banco: cl.banco || "", tipoCuenta: cl.tipo_cuenta || "", numeroCuenta: cl.numero_cuenta || "" });
   }, [datos]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!datos || !datos.aplica || !f) return null;
   const editable = puedeOperar && (c.estado === "aceptada" || c.estado === "pago_pendiente");
@@ -54,7 +55,8 @@ function RequisitosCompra({ api, c, puedeOperar, onCambio, onCompleto }) {
     catch (e) { setMsg({ tipo: "error", texto: mensajeError(e) }); }
     setOcupado(false);
   };
-  const faltaDato = (clave) => datos.faltantes.some((x) => x.tipo === "dato" && x.clave === (clave === "cuentaCorriente" ? "cuenta_corriente" : clave));
+  const faltaDato = (clave) => datos.faltantes.some((x) => x.tipo === "dato" && x.clave === clave);
+  const faltan = { banco: faltaDato("banco"), tipo_cuenta: faltaDato("tipo_cuenta"), numero_cuenta: faltaDato("numero_cuenta") };
   return (
     <div className={`border p-3 flex flex-col gap-3 ${datos.completo ? "border-emerald-300 bg-emerald-50/40" : "border-amber-300 bg-amber-50/40"}`}>
       <p className="text-xs uppercase tracking-wide text-stone-500">Requisitos para concretar la compra</p>
@@ -69,6 +71,7 @@ function RequisitosCompra({ api, c, puedeOperar, onCambio, onCompleto }) {
           </Campo>
         ))}
       </div>
+      <CuentaBancaria v={f} set={setF} disabled={!editable} faltan={faltan} />
       {editable && <div><button disabled={ocupado} onClick={guardar} className={BTN_PRIMARIO}>Guardar datos del vendedor</button></div>}
 
       <p className="text-xs uppercase tracking-wide text-stone-400">Documentos *</p>
@@ -291,6 +294,8 @@ function Consignacion({ api, c, puedeOperar, onCambio, avisar }) {
 export function SeccionConsignacion({ api, lead, datos, onCambio, avisar }) {
   const { datos: lista, recargar } = useCarga(() => api("consignaciones.list", { vista: "lead", leadId: lead.id }), [api, lead.id, datos.eventos.length]);
   const tasada = (datos.tasaciones || []).find((t) => t.estado === "completada" && t.tipo !== "parte_pago");
+  const cl0 = datos.cliente || {};
+  const [cuenta, setCuenta] = useState({ banco: cl0.banco || "", tipoCuenta: cl0.tipo_cuenta || "", numeroCuenta: cl0.numero_cuenta || "" });
   const [f, setF] = useState({ precioPiso: "", precioPublicacion: tasada && Number(tasada.valor_consignacion) > 0 ? String(tasada.valor_consignacion) : lead.vehiculo_ofrecido && lead.vehiculo_ofrecido.precioEsperado ? String(lead.vehiculo_ofrecido.precioEsperado) : "", plazoDias: 90, notas: "" });
   const [error, setError] = useState("");
   const [ocupado, setOcupado] = useState(false);
@@ -303,8 +308,10 @@ export function SeccionConsignacion({ api, lead, datos, onCambio, avisar }) {
     setError("");
     const val = validarConsignacion(f);
     if (!val.ok) { setError(mensajeError({ message: val.error })); return; }
+    const cu = validarCuentaBancaria(cuenta);
+    if (!cu.ok) { setError(mensajeError({ message: cu.error })); return; }
     setOcupado(true);
-    try { await api("consignaciones.crear", { leadId: lead.id, datos: f }); await cambio(); } catch (e) { setError(mensajeError(e)); }
+    try { await api("consignaciones.crear", { leadId: lead.id, datos: { ...f, cuenta } }); await cambio(); } catch (e) { setError(mensajeError(e)); }
     setOcupado(false);
   };
   return (

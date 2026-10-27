@@ -4,6 +4,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { TRANSMISIONES, COMBUSTIBLES } from "../supabase/functions/api/ventas-core.js";
 import { InputDinero } from "./campo-dinero.jsx";
+import { BANCOS_CHILE, TIPOS_CUENTA } from "../supabase/functions/api/validaciones-core.js";
 import { camposDesdePatente, aplicarCampos, NOMBRE_CAMPO } from "./datos-patente.js";
 
 export const INPUT = "border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-amber-500 w-full";
@@ -138,7 +139,9 @@ const MENSAJES = {
   compra_incompleta: "Faltan datos del vendedor o documentos para concretar la compra. Revisa la lista de requisitos de la compra.",
   nombre_apellido_requerido: "Escribe el nombre y el apellido del vendedor.",
   direccion_requerida: "Escribe la dirección del vendedor.",
-  cuenta_corriente_requerida: "Escribe la cuenta corriente del vendedor (banco y número).",
+  banco_invalido: "Elige el banco de la lista.",
+  tipo_cuenta_invalido: "Elige el tipo de cuenta de la lista.",
+  numero_cuenta_invalido: "Escribe el número de cuenta: solo dígitos (entre 4 y 20).",
   rut_duplicado: "Ya hay otro cliente en este local con ese RUT.",
   archivo_muy_grande: "El archivo es demasiado grande (máximo 4 MB). Reduce el PDF o sube una foto.",
   demasiados_archivos: "Cada documento admite hasta 3 archivos.",
@@ -356,6 +359,30 @@ export function CamposVehiculo({ v, set, bloqueado = false }) {
       </Campo>
       <Campo etiqueta="Combustible">
         <select value={v.combustible || ""} disabled={bloqueado} onChange={(e) => set({ ...v, combustible: e.target.value })} className={INPUT}><option value="">—</option>{COMBUSTIBLES.map((t) => <option key={t}>{t}</option>)}</select>
+      </Campo>
+    </div>
+  );
+}
+
+/** Cuenta bancaria: banco y tipo de cuenta en listas, y el número en una caja. `v` = { banco, tipoCuenta, numeroCuenta }. */
+export function CuentaBancaria({ v, set, disabled = false, faltan = {} }) {
+  const marca = (k) => (faltan[k] ? "border-amber-500" : "");
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <Campo etiqueta="Banco *">
+        <select value={v.banco || ""} disabled={disabled} onChange={(e) => set({ ...v, banco: e.target.value })} className={`${INPUT} ${marca("banco")}`}>
+          <option value="">Elige el banco…</option>
+          {BANCOS_CHILE.map((b) => <option key={b} value={b}>{b}</option>)}
+        </select>
+      </Campo>
+      <Campo etiqueta="Tipo de cuenta *">
+        <select value={v.tipoCuenta || ""} disabled={disabled} onChange={(e) => set({ ...v, tipoCuenta: e.target.value })} className={`${INPUT} ${marca("tipo_cuenta")}`}>
+          <option value="">Elige el tipo…</option>
+          {TIPOS_CUENTA.map((t) => <option key={t} value={t}>{t}</option>)}
+        </select>
+      </Campo>
+      <Campo etiqueta="Número de cuenta *" ayuda="Solo números, sin puntos ni guiones.">
+        <input inputMode="numeric" value={v.numeroCuenta || ""} disabled={disabled} maxLength={24} placeholder="Ej. 123456789" onChange={(e) => set({ ...v, numeroCuenta: e.target.value.replace(/[^\d\s.-]/g, "") })} className={`${INPUT} font-mono ${marca("numero_cuenta")}`} />
       </Campo>
     </div>
   );

@@ -45,7 +45,7 @@ import {
 import {
   folioValidacion, validarRevision, validarArchivo, MAX_ARCHIVOS_DOC, checklistPara, estadoDeValidacion, progreso, docsReutilizables,
   colaValidaciones, metricasValidador, validarTransicionValidacion, ESTADOS_ABIERTOS,
-  filaDoc, reglaDocCompra as reglaDoc, archivoPermitidoParaDoc, validarDatosDoc, validarDatosCliente, faltantesCompra, esChecklistCompraActual, DOCS_COMPRA,
+  filaDoc, reglaDocCompra as reglaDoc, archivoPermitidoParaDoc, validarDatosDoc, validarDatosCliente, faltantesCompra, esChecklistCompraActual, validarCuentaBancaria, DOCS_COMPRA,
 } from "./validaciones-core.js";
 import {
   folioInspeccion, VEREDICTOS, validarSolicitudInspeccion, validarReprogramacion, validarResultadoInspeccion, claveEsDe,
@@ -2019,7 +2019,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       const cl = r.cliente;
       return json({
         aplica: r.aplica, completo: r.aplica ? r.faltantes.length === 0 : true, faltantes: r.faltantes, validacionId: r.val ? r.val.id : null,
-        cliente: cl ? { nombre: cl.nombre, rut: cl.rut, telefono: cl.telefono, email: cl.email, direccion: cl.direccion ?? "", cuenta_corriente: cl.cuenta_corriente ?? "" } : null,
+        cliente: cl ? { nombre: cl.nombre, rut: cl.rut, telefono: cl.telefono, email: cl.email, direccion: cl.direccion ?? "", banco: cl.banco ?? "", tipo_cuenta: cl.tipo_cuenta ?? "", numero_cuenta: cl.numero_cuenta ?? "" } : null,
         docs: r.docs.filter((d: any) => reglaDoc(d.clave)).map((d: any) => ({ id: d.id, clave: d.clave, nombre: d.nombre, estado: d.estado, nArchivos: (d.archivos ?? []).length, vence_en: d.vence_en ?? null, precio: d.precio ?? null })),
       });
     }
@@ -2053,7 +2053,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
         nota: {
           folio: folioCompra(c.numero), fecha: c.aprobado_en || c.actualizado_en, local: loc ? loc.nombre : "", ejecutivo: c.ejecutivo, aprobado_por: c.aprobado_por,
           monto_final: c.monto_final, medio_pago: c.medio_pago, fecha_pago: c.fecha_pago, vehiculo: c.vehiculo || {},
-          vendedor: r.cliente ? { nombre: r.cliente.nombre, rut: r.cliente.rut, telefono: r.cliente.telefono, email: r.cliente.email, direccion: r.cliente.direccion, cuenta_corriente: r.cliente.cuenta_corriente } : null,
+          vendedor: r.cliente ? { nombre: r.cliente.nombre, rut: r.cliente.rut, telefono: r.cliente.telefono, email: r.cliente.email, direccion: r.cliente.direccion, banco: r.cliente.banco, tipo_cuenta: r.cliente.tipo_cuenta, numero_cuenta: r.cliente.numero_cuenta } : null,
           permiso: { vence_en: reg("permiso_circulacion").vence_en ?? null, precio: reg("permiso_circulacion").precio ?? null },
           revision_tecnica: { vence_en: reg("revision_tecnica").vence_en ?? null }, soap: { vence_en: reg("soap").vence_en ?? null },
           documentos: r.aplica ? DOCS_COMPRA.map((d) => d.nombre) : [],
@@ -2284,6 +2284,10 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       if (!vh.ok) return err("vehiculo_ofrecido_incompleto");
       const v = validarConsignacion(body.datos);
       if (!v.ok) return err(v.error!);
+      // El dueño debe dejar su cuenta bancaria (donde se le paga cuando se venda): la que viene en el contrato o la que ya tenga registrada.
+      const clq = lead.cliente_id ? await sb.from("clientes").select("*").eq("id", lead.cliente_id).maybeSingle() : { data: null };
+      const cuenta = validarCuentaBancaria((body.datos && body.datos.cuenta) ? body.datos.cuenta : { banco: clq.data && clq.data.banco, tipoCuenta: clq.data && clq.data.tipo_cuenta, numeroCuenta: clq.data && clq.data.numero_cuenta });
+      if (!cuenta.ok) return err(cuenta.error!);
       const abierta = await sb.from("consignaciones").select("id, estado").eq("lead_id", lead.id);
       if (abierta.error) return fallar(abierta.error);
       if ((abierta.data ?? []).some((c: any) => CONSIGNACION_ABIERTA.includes(c.estado))) return err("consignacion_en_curso", 409);
@@ -2295,6 +2299,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       }).select().single();
       if (ins.error) return ins.error.code === "23505" ? err("consignacion_en_curso", 409) : fallar(ins.error);
       const c = ins.data;
+      if (lead.cliente_id) await sb.from("clientes").update({ ...cuenta.value, actualizado_en: new Date().toISOString() }).eq("id", lead.cliente_id);
       await sb.from("leads").update({ etapa: "cotizado", actualizado_en: new Date().toISOString() }).eq("id", lead.id);
       await evento(lead.id, "consignacion", `Contrato de consignación ${folioConsignacion(c.numero)} registrado por ${userName}: piso ${dinero(v.value.precio_piso)}, publicación ${dinero(v.value.precio_publicacion)}, ${v.value.plazo_dias} días`);
       await audit(ctx.actor, "consignacion.crear", "consignacion", c.id, { numero: c.numero, piso: v.value.precio_piso, publicacion: v.value.precio_publicacion, lead_id: lead.id });
