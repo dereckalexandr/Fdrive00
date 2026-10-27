@@ -47,6 +47,30 @@ export function validarSolicitudInspeccion(input, ahora = new Date()) {
   return { ok: true, value: { vehiculo: v.value, direccion, fechaHora: f.value, contactoLugar: texto(i.contactoLugar, 120) || null, notas: texto(i.notas, 300) || null } };
 }
 
+/**
+ * Dónde se hace la inspección: en un local (casa matriz o sucursal, con la dirección registrada en Configuración) o en terreno (otra dirección).
+ * `lugar` = { tipo: "local", localId } | { tipo: "terreno", calle, comuna, referencia? }; `locales` = [{ id, nombre, direccion, activo }].
+ * @returns { ok, value: { direccion, lugar: "local" | "terreno" } } o { ok: false, error }
+ */
+export function resolverLugar(lugar, locales = []) {
+  const l = lugar || {};
+  if (l.tipo === "terreno") {
+    const calle = texto(l.calle, 120);
+    const comuna = texto(l.comuna, 60);
+    if (calle.length < 3) return { ok: false, error: "calle_requerida" };
+    if (comuna.length < 2) return { ok: false, error: "comuna_requerida" };
+    const ref = texto(l.referencia, 80);
+    return { ok: true, value: { direccion: `${calle}, ${comuna}${ref ? ` (${ref})` : ""}`, lugar: "terreno" } };
+  }
+  if (l.tipo === "local") {
+    const local = (locales || []).find((x) => x.id === l.localId && x.activo !== false);
+    if (!local) return { ok: false, error: "lugar_invalido" };
+    if (texto(local.direccion, 200).length < 5) return { ok: false, error: "local_sin_direccion" };
+    return { ok: true, value: { direccion: `${local.nombre} · ${texto(local.direccion, 200)}`, lugar: "local" } };
+  }
+  return { ok: false, error: "lugar_requerido" };
+}
+
 /** Cambio de fecha, hora o lugar de una inspección ya pedida. */
 export function validarReprogramacion(input, ahora = new Date()) {
   const i = input || {};

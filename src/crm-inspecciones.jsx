@@ -11,7 +11,7 @@
  */
 import React, { useState, useEffect } from "react";
 import { mesChile } from "../supabase/functions/api/ventas-core.js";
-import { validarSolicitudInspeccion, inspeccionNombre, origenNombre, VEREDICTOS, diaChile } from "../supabase/functions/api/inspecciones-core.js";
+import { validarSolicitudInspeccion, resolverLugar, inspeccionNombre, origenNombre, VEREDICTOS, diaChile } from "../supabase/functions/api/inspecciones-core.js";
 import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, useCarga, mensajeError, CamposVehiculo, aVehiculoForm, apiPorDefecto } from "./crm-ui.jsx";
 
 const COLOR = { pendiente: "bg-amber-100 text-amber-800", en_proceso: "bg-sky-100 text-sky-800", completada: "bg-emerald-100 text-emerald-800", cancelada: "bg-stone-200 text-stone-600" };
@@ -48,11 +48,49 @@ export const fotoKeyInspeccion = fotoKey;
 export function guardarCacheFoto(fotoId, dataUrl) { cacheFotos.set(fotoId, dataUrl); }
 
 /* =========================================================
+   DÓNDE SE HACE LA INSPECCIÓN
+   Una lista con los locales (casa matriz y sucursales, con la dirección registrada en Configuración) y la opción «en terreno» con su dirección.
+========================================================= */
+const LUGAR_VACIO = { opcion: "", calle: "", comuna: "", referencia: "" };
+/** Locales activos con su dirección (se piden una vez). */
+function useLugares(api) {
+  const { datos } = useCarga(() => api("inspecciones.lugares"), [api]);
+  return datos ? datos.lugares : null;
+}
+/** De la selección de la pantalla al «lugar» que entiende el servidor. */
+const lugarDe = (l) => (l.opcion === "terreno" ? { tipo: "terreno", calle: l.calle, comuna: l.comuna, referencia: l.referencia } : l.opcion ? { tipo: "local", localId: l.opcion } : null);
+
+function LugarInspeccion({ lugares, valor, onChange, actual = "" }) {
+  const set = (k, v) => onChange({ ...valor, [k]: v });
+  const sinDireccion = (lugares || []).filter((l) => !l.direccion || l.direccion.trim().length < 5);
+  return (
+    <div className="flex flex-col gap-3">
+      <Campo etiqueta="Dónde se hará la inspección *" ayuda={actual ? `Lugar actual: ${actual}` : undefined}>
+        <select value={valor.opcion} onChange={(e) => set("opcion", e.target.value)} className={INPUT}>
+          <option value="">Elige el lugar…</option>
+          {(lugares || []).map((l) => <option key={l.id} value={l.id} disabled={!l.direccion || l.direccion.trim().length < 5}>{l.nombre}{l.direccion ? ` — ${l.direccion}` : " (sin dirección registrada)"}</option>)}
+          <option value="terreno">Inspección en terreno (otra dirección)</option>
+        </select>
+      </Campo>
+      {sinDireccion.length > 0 && <p className="text-xs text-amber-700">{sinDireccion.map((l) => l.nombre).join(", ")}: falta registrar la dirección en Configuración → Locales para poder elegirlo.</p>}
+      {valor.opcion === "terreno" && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <Campo etiqueta="Calle y número *"><input value={valor.calle} maxLength={120} onChange={(e) => set("calle", e.target.value)} className={INPUT} placeholder="Av. Providencia 1234" /></Campo>
+          <Campo etiqueta="Comuna *"><input value={valor.comuna} maxLength={60} onChange={(e) => set("comuna", e.target.value)} className={INPUT} placeholder="Providencia" /></Campo>
+          <Campo etiqueta="Referencia (opcional)"><input value={valor.referencia} maxLength={80} onChange={(e) => set("referencia", e.target.value)} className={INPUT} placeholder="Depto, oficina, portón…" /></Campo>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* =========================================================
    PEDIR UNA INSPECCIÓN
 ========================================================= */
 export function FormPedirInspeccion({ api, origen, vehiculo, onCerrar, onPedida }) {
   const [v, setV] = useState(aVehiculoForm(vehiculo));
-  const [direccion, setDireccion] = useState("");
+  const lugares = useLugares(api);
+  const [lugar, setLugar] = useState(LUGAR_VACIO);
   const [fechaHora, setFechaHora] = useState(mananaALas10());
   const [contactoLugar, setContactoLugar] = useState("");
   const [notas, setNotas] = useState("");
@@ -60,7 +98,9 @@ export function FormPedirInspeccion({ api, origen, vehiculo, onCerrar, onPedida 
   const [enviando, setEnviando] = useState(false);
   const enviar = async () => {
     setError("");
-    const datos = { vehiculo: v, direccion, fechaHora: deInputLocal(fechaHora), contactoLugar, notas };
+    const lg = resolverLugar(lugarDe(lugar), lugares || []);
+    if (!lg.ok) { setError(mensajeError({ message: lg.error })); return; }
+    const datos = { vehiculo: v, lugar: lugarDe(lugar), direccion: lg.value.direccion, fechaHora: deInputLocal(fechaHora), contactoLugar, notas };
     const val = validarSolicitudInspeccion(datos);
     if (!val.ok) { setError(mensajeError({ message: val.error })); return; }
     setEnviando(true);
@@ -79,7 +119,7 @@ export function FormPedirInspeccion({ api, origen, vehiculo, onCerrar, onPedida 
         <Campo etiqueta="Fecha y hora" ayuda="Cuándo se puede revisar el vehículo."><input type="datetime-local" value={fechaHora} onChange={(e) => setFechaHora(e.target.value)} className={INPUT} /></Campo>
         <Campo etiqueta="Con quién coordinar en el lugar (opcional)" ayuda="Nombre y teléfono de quien recibe al Inspector."><input value={contactoLugar} maxLength={120} onChange={(e) => setContactoLugar(e.target.value)} className={INPUT} /></Campo>
       </div>
-      <Campo etiqueta="Dirección donde está el vehículo"><input value={direccion} maxLength={200} onChange={(e) => setDireccion(e.target.value)} className={INPUT} placeholder="Calle, número, comuna" /></Campo>
+      <LugarInspeccion lugares={lugares} valor={lugar} onChange={setLugar} />
       <Campo etiqueta="Nota para el Inspector (opcional)"><textarea rows={2} maxLength={300} value={notas} onChange={(e) => setNotas(e.target.value)} className={INPUT} /></Campo>
       {error && <Aviso>{error}</Aviso>}
       <div className="flex gap-2">
@@ -132,7 +172,8 @@ export function InspeccionDetalle({ api, id, onCerrar, onCambio, onRealizar, onV
   const [motivo, setMotivo] = useState("");
   const [equipo, setEquipo] = useState([]);
   const [destino, setDestino] = useState("");
-  const [rp, setRp] = useState({ direccion: "", fechaHora: "", contactoLugar: "" });
+  const lugares = useLugares(api);
+  const [rp, setRp] = useState({ direccion: "", fechaHora: "", contactoLugar: "", lugar: LUGAR_VACIO });
 
   useEffect(() => { if (modo === "asignar" && datos && datos.puedeGestionar) api("inspecciones.equipo").then((r) => setEquipo(r.inspectores)).catch(() => {}); }, [api, datos, modo]);
   useEffect(() => {
@@ -193,8 +234,8 @@ export function InspeccionDetalle({ api, id, onCerrar, onCambio, onRealizar, onV
             <Campo etiqueta="Fecha y hora"><input type="datetime-local" value={rp.fechaHora} onChange={(e) => setRp({ ...rp, fechaHora: e.target.value })} className={INPUT} /></Campo>
             <Campo etiqueta="Coordinar con (opcional)"><input value={rp.contactoLugar} maxLength={120} onChange={(e) => setRp({ ...rp, contactoLugar: e.target.value })} className={INPUT} /></Campo>
           </div>
-          <Campo etiqueta="Dirección"><input value={rp.direccion} maxLength={200} onChange={(e) => setRp({ ...rp, direccion: e.target.value })} className={INPUT} /></Campo>
-          <div><button disabled={ocupado} onClick={() => accion("inspecciones.reprogramar", { datos: { ...rp, fechaHora: deInputLocal(rp.fechaHora) } }, "Reprogramada.")} className={BTN_PRIMARIO}>Guardar cambios</button></div>
+          <LugarInspeccion lugares={lugares} valor={rp.lugar} onChange={(l) => setRp({ ...rp, lugar: l })} actual={x.direccion} />
+          <div><button disabled={ocupado || !rp.lugar.opcion} onClick={() => accion("inspecciones.reprogramar", { datos: { ...rp, lugar: lugarDe(rp.lugar), fechaHora: deInputLocal(rp.fechaHora) } }, "Reprogramada.")} className={BTN_PRIMARIO}>Guardar cambios</button></div>
         </div>
       )}
       {modo === "cancelar" && (

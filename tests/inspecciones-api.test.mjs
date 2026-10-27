@@ -411,3 +411,42 @@ test("Valorización del Inspector: el Jefe Local corrige los precios de las de s
   // La cuenta maestra también puede.
   assert.equal((await ve(admin, "inspecciones.valorizacion_ajustar", { key, items: { techo: 180000 } })).status, 200);
 });
+
+test("Pedir o reprogramar una inspección eligiendo el lugar: local con su dirección registrada, o en terreno", async () => {
+  const l = await lead(U.e1.token);
+  // Los locales con su dirección, para la lista desplegable.
+  const lug = await ve(U.e1.token, "inspecciones.lugares");
+  assert.equal(lug.status, 200, JSON.stringify(lug));
+  assert.deepEqual(lug.lugares.map((x) => x.nombre).sort(), ["Casa matriz", "Sucursal Sur"]);
+  const matriz = lug.lugares.find((x) => x.nombre === "Casa matriz");
+  const sur = lug.lugares.find((x) => x.nombre === "Sucursal Sur");
+  assert.equal(matriz.direccion, "", "aún sin dirección registrada");
+
+  // Sin dirección registrada en Configuración no se puede elegir el local.
+  const sinDir = await pedir(U.e1.token, l.id, datos({ direccion: "", lugar: { tipo: "local", localId: matriz.id } }));
+  assert.equal(sinDir.error, "local_sin_direccion");
+  assert.equal((await pedir(U.e1.token, l.id, datos({ direccion: "", lugar: { tipo: "local", localId: randomUUID() } }))).error, "lugar_invalido");
+  assert.equal((await pedir(U.e1.token, l.id, datos({ direccion: "", lugar: { tipo: "terreno", calle: "x", comuna: "Providencia" } }))).error, "calle_requerida");
+
+  // La dirección se registra en Configuración (locales.update).
+  assert.equal((await crm(admin, "locales.update", { id: matriz.id, nombre: "Casa matriz", direccion: "Av. Vitacura 1234, Vitacura", activo: true })).status, 200);
+  const ok = await pedir(U.e1.token, l.id, datos({ direccion: "texto que se ignora", lugar: { tipo: "local", localId: matriz.id } }));
+  assert.equal(ok.status, 200, JSON.stringify(ok));
+  assert.equal(fila(ok.inspeccion.id).direccion, "Casa matriz · Av. Vitacura 1234, Vitacura");
+
+  // En terreno: calle, comuna y referencia.
+  const l2 = await lead(U.e1.token);
+  const terreno = await pedir(U.e1.token, l2.id, datos({ vehiculo: vehN(), direccion: "", fechaHora: enH(50), lugar: { tipo: "terreno", calle: "Av. Providencia 2222", comuna: "Providencia", referencia: "Oficina 5" } }));
+  assert.equal(terreno.status, 200, JSON.stringify(terreno));
+  assert.equal(fila(terreno.inspeccion.id).direccion, "Av. Providencia 2222, Providencia (Oficina 5)");
+
+  // Reprogramar a otro lugar.
+  const rp = await ve(U.e1.token, "inspecciones.reprogramar", { id: terreno.inspeccion.id, datos: { lugar: { tipo: "terreno", calle: "Los Leones 100", comuna: "Ñuñoa" }, fechaHora: enH(60), contactoLugar: "" } });
+  assert.equal(rp.status, 200, JSON.stringify(rp));
+  assert.equal(fila(terreno.inspeccion.id).direccion, "Los Leones 100, Ñuñoa");
+  assert.equal((await ve(U.e1.token, "inspecciones.reprogramar", { id: terreno.inspeccion.id, datos: { lugar: { tipo: "local", localId: sur.id }, fechaHora: enH(60) } })).error, "local_sin_direccion");
+
+  // Un local desactivado ya no se ofrece.
+  assert.equal((await crm(admin, "locales.update", { id: sur.id, nombre: "Sucursal Sur", direccion: "Calle Sur 10, Santiago", activo: false })).status, 200);
+  assert.deepEqual((await ve(U.e1.token, "inspecciones.lugares")).lugares.map((x) => x.nombre), ["Casa matriz"]);
+});

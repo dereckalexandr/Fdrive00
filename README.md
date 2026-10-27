@@ -888,3 +888,7 @@ El servidor lo exige (`consignacion_incompleta`) y el botón «Registrar la cons
 ## Comprobante de consignación
 
 Con el contrato registrado (en validación, vigente o vendida; no devuelta ni cancelada) aparece en la consignación el botón **Descargar comprobante de consignación (PDF)** (`consignaciones.comprobante`): datos del dueño (con su cuenta bancaria), vehículo, precio piso y de publicación, plazo y vencimiento, vencimientos del permiso, la revisión técnica y el SOAP, precio pagado del permiso y los documentos recibidos. Solo existe si los datos y documentos están completos; las consignaciones anteriores a esa exigencia lo generan sin la lista de documentos. Sin SQL.
+
+## Inspección: dónde se hace (casa matriz, sucursal o en terreno)
+
+Al pedir o reprogramar una inspección, la dirección ya no se escribe a mano: hay una lista desplegable **«Dónde se hará la inspección»** con cada local activo (casa matriz y sucursales) junto a su dirección, y la opción **Inspección en terreno (otra dirección)**, que pide calle y número, comuna y una referencia opcional. Las direcciones de los locales se registran en **Configuración → Locales** (botón «Agregar dirección» / «Cambiar dirección»); un local sin dirección aparece deshabilitado con el aviso de dónde registrarla. El servidor arma la dirección final (`Casa matriz · Av. …` o `Calle, Comuna (referencia)`) con `resolverLugar` (`inspecciones-core.js`) y ofrece los locales en `inspecciones.lugares`. Sin SQL.

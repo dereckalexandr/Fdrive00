@@ -49,7 +49,7 @@ import {
 } from "./validaciones-core.js";
 import {
   folioInspeccion, VEREDICTOS, validarSolicitudInspeccion, validarReprogramacion, validarResultadoInspeccion, claveEsDe,
-  validarTransicionInspeccion, idDeClave, ordenarAgenda, hayChoque, metricasInspector, colaInspecciones,
+  validarTransicionInspeccion, resolverLugar, idDeClave, ordenarAgenda, hayChoque, metricasInspector, colaInspecciones,
 } from "./inspecciones-core.js";
 
 export type Ctx = {
@@ -1659,9 +1659,28 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       return json({ inspectores: (await inspectoresDe(local)).map((u: any) => ({ id: u.id, nombre: u.nombre })) });
     }
 
+    /** Locales activos con su dirección (casa matriz y sucursales), para elegir dónde se hace la inspección. */
+    async function lugaresDeInspeccion() {
+      const { data, error } = await sb.from("locales").select("id, nombre, direccion, activo");
+      if (error) throw error;
+      return (data ?? []).filter((l: any) => l.activo !== false);
+    }
+    /** Si la solicitud trae «lugar» (local o terreno), arma la dirección a partir de él; si no, queda la dirección escrita. */
+    async function conLugar(datos: any) {
+      if (!datos || !datos.lugar) return { ok: true, datos };
+      const r = resolverLugar(datos.lugar, await lugaresDeInspeccion());
+      if (!r.ok) return { ok: false, error: r.error };
+      return { ok: true, datos: { ...datos, direccion: r.value.direccion } };
+    }
+    if (op === "inspecciones.lugares") {
+      return json({ lugares: (await lugaresDeInspeccion()).map((l: any) => ({ id: l.id, nombre: l.nombre, direccion: l.direccion ?? "" })).sort((a: any, b: any) => String(a.nombre).localeCompare(String(b.nombre), "es")) });
+    }
+
     if (op === "inspecciones.pedir") {
       if (!puedePedir) return err("forbidden", 403);
-      const v = validarSolicitudInspeccion(body.datos);
+      const lg = await conLugar(body.datos);
+      if (!lg.ok) return err(lg.error!);
+      const v = validarSolicitudInspeccion(lg.datos);
       if (!v.ok) return err(v.error!);
       const origen = String(body.origen ?? "");
       let fila: Record<string, unknown> = { vehiculo: v.value.vehiculo, patente: v.value.vehiculo.patente, direccion: v.value.direccion, agendada_para: v.value.fechaHora, contacto_lugar: v.value.contactoLugar, notas_solicitud: v.value.notas, solicitante_id: ctx.esAdmin ? null : userId, creado_por: userId };
@@ -1841,7 +1860,9 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       if (!tr.ok) return err(tr.error!);
       const suya = !ctx.esAdmin && (x.solicitante_id === userId || x.inspector_id === userId);
       if (!(esSupervisor || suya)) return err("forbidden", 403);
-      const v = validarReprogramacion(body.datos);
+      const lgr = await conLugar(body.datos);
+      if (!lgr.ok) return err(lgr.error!);
+      const v = validarReprogramacion(lgr.datos);
       if (!v.ok) return err(v.error!);
       const { data, error } = await sb.from("inspecciones").update({ agendada_para: v.value.fechaHora, direccion: v.value.direccion, contacto_lugar: v.value.contactoLugar, actualizado_en: new Date().toISOString() }).eq("id", x.id).select().single();
       if (error) return fallar(error);

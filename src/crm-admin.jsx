@@ -648,13 +648,20 @@ function LocalesPanel() {
     try { await crm("locales.create", { nombre, direccion }); setNombre(""); setDireccion(""); await recargar(); }
     catch (e) { setMsg(mensajeCrm(e)); }
   };
+  const editarDireccion = async (l) => {
+    const nueva = window.prompt(`Dirección de «${l.nombre}» (calle, número y comuna):`, l.direccion || "");
+    if (nueva === null) return;
+    setMsg("");
+    try { await crm("locales.update", { id: l.id, nombre: l.nombre, direccion: nueva, activo: l.activo }); await recargar(); }
+    catch (e) { setMsg(mensajeCrm(e)); }
+  };
   const cambiarActivo = async (l) => {
     setMsg("");
     try { await crm("locales.update", { id: l.id, nombre: l.nombre, direccion: l.direccion, activo: !l.activo }); await recargar(); }
     catch (e) { setMsg(mensajeCrm(e)); }
   };
   return (
-    <Tarjeta titulo="Locales" ayuda="Hoy se usa un local; el sistema ya admite varios. Cada persona pertenece a un local.">
+    <Tarjeta titulo="Locales" ayuda="Casa matriz y sucursales. Cada persona pertenece a un local. La dirección que registres aquí es la que se ofrece al pedir una inspección «en casa matriz» o «en sucursal».">
       {cargando && !datos && <Cargando />}
       {error && <Aviso>{error}</Aviso>}
       {datos && (
@@ -662,6 +669,7 @@ function LocalesPanel() {
           {datos.locales.map((l) => (
             <li key={l.id} className={`flex items-center gap-3 border border-stone-200 px-3 py-2 text-sm ${l.activo ? "" : "opacity-60"}`}>
               <span className="flex-1"><span className="text-stone-900">{l.nombre}</span>{l.direccion && <span className="text-stone-500"> · {l.direccion}</span>}{!l.activo && <span className="ml-2 text-[10px] uppercase text-rose-600">inactivo</span>}</span>
+              <button onClick={() => editarDireccion(l)} className={BTN}>{l.direccion ? "Cambiar dirección" : "Agregar dirección"}</button>
               <button onClick={() => cambiarActivo(l)} className={BTN}>{l.activo ? "Desactivar" : "Activar"}</button>
             </li>
           ))}
@@ -669,7 +677,7 @@ function LocalesPanel() {
       )}
       <div className="flex flex-col md:flex-row gap-2">
         <input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Nombre del local" className={`${INPUT} md:flex-1`} />
-        <input value={direccion} onChange={(e) => setDireccion(e.target.value)} placeholder="Dirección (opcional)" className={`${INPUT} md:flex-1`} />
+        <input value={direccion} onChange={(e) => setDireccion(e.target.value)} placeholder="Dirección (se usa en las inspecciones)" className={`${INPUT} md:flex-1`} />
         <button onClick={crear} disabled={nombre.trim().length < 2} className={BTN_PRIMARIO}>Agregar local</button>
       </div>
       {msg && <p className="text-sm text-rose-600 mt-2">{msg}</p>}

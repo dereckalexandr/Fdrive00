@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   inspeccionNombre, origenNombre, folioInspeccion, validarFechaHora, validarSolicitudInspeccion, validarReprogramacion,
   resumirInspeccion, veredictoDe, validarResultadoInspeccion, idDeClave, claveEsDe, validarTransicionInspeccion,
-  ordenarAgenda, hayChoque, metricasInspector, colaInspecciones, diaChile,
+  resolverLugar, ordenarAgenda, hayChoque, metricasInspector, colaInspecciones, diaChile,
 } from "../supabase/functions/api/inspecciones-core.js";
 
 const AHORA = new Date("2026-06-10T15:00:00Z");
@@ -137,4 +137,23 @@ test("Métricas del Inspector y cola", () => {
   assert.equal(c.pendientes, 3);
   assert.equal(c.masAntiguaHoras, 9);
   assert.equal(c.atrasadas.length, 2, "una lleva más de 8 h y otra es para dentro de 10 h (menos de 24)");
+});
+
+test("Lugar de la inspección: casa matriz o sucursal (con la dirección registrada) o en terreno", () => {
+  const locales = [
+    { id: "L1", nombre: "Casa matriz", direccion: "Av. Vitacura 1234, Vitacura", activo: true },
+    { id: "L2", nombre: "Sucursal Sur", direccion: "", activo: true },
+    { id: "L3", nombre: "Sucursal Cerrada", direccion: "Calle 1, Santiago", activo: false },
+  ];
+  const l = resolverLugar({ tipo: "local", localId: "L1" }, locales);
+  assert.deepEqual([l.ok, l.value.direccion, l.value.lugar], [true, "Casa matriz · Av. Vitacura 1234, Vitacura", "local"]);
+  assert.equal(resolverLugar({ tipo: "local", localId: "L2" }, locales).error, "local_sin_direccion", "la dirección se registra en Configuración");
+  assert.equal(resolverLugar({ tipo: "local", localId: "L3" }, locales).error, "lugar_invalido", "un local desactivado no se ofrece");
+  assert.equal(resolverLugar({ tipo: "local", localId: "X" }, locales).error, "lugar_invalido");
+  const t = resolverLugar({ tipo: "terreno", calle: "Av. Providencia 1234", comuna: "Providencia", referencia: "Portón azul" }, locales);
+  assert.deepEqual([t.ok, t.value.direccion, t.value.lugar], [true, "Av. Providencia 1234, Providencia (Portón azul)", "terreno"]);
+  assert.equal(resolverLugar({ tipo: "terreno", calle: "Av", comuna: "Providencia" }, locales).error, "calle_requerida");
+  assert.equal(resolverLugar({ tipo: "terreno", calle: "Av. Providencia 1234", comuna: "" }, locales).error, "comuna_requerida");
+  assert.equal(resolverLugar(null, locales).error, "lugar_requerido");
+  assert.equal(resolverLugar({ tipo: "otro" }, locales).error, "lugar_requerido");
 });
