@@ -106,6 +106,9 @@ for (const i of [0, 1, 2]) {
   }
 }
 
+// Un lead de consignación, para ver los requisitos (datos del dueño y documentos) antes de registrar el contrato.
+await ve(U.e1.token, "leads.create", { cliente: { nombre: "Doña Marta Silva", telefono: "955567890" }, lead: { tipo: "consignacion", fuente: "Visita al local", vehiculoOfrecido: { patente: "JJKK77", marca: "Nissan", modelo: "Kicks", anio: 2021, km: 33000, transmision: "Automática", combustible: "Bencina", duenos: 1, prenda: "no", mantenciones: "si", precioEsperado: 11500000 } } });
+
 // Tareas y antigüedades distintas para ver la vista «Hoy» con todos sus grupos.
 {
   const enH = (h) => new Date(Date.now() + h * 3_600_000).toISOString();

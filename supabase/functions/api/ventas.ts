@@ -45,7 +45,7 @@ import {
 import {
   folioValidacion, validarRevision, validarArchivo, MAX_ARCHIVOS_DOC, checklistPara, estadoDeValidacion, progreso, docsReutilizables,
   colaValidaciones, metricasValidador, validarTransicionValidacion, ESTADOS_ABIERTOS,
-  filaDoc, reglaDocCompra as reglaDoc, archivoPermitidoParaDoc, validarDatosDoc, validarDatosCliente, faltantesCompra, esChecklistCompraActual, validarCuentaBancaria, DOCS_COMPRA,
+  filaDoc, reglaDocCompra as reglaDoc, archivoPermitidoParaDoc, validarDatosDoc, validarDatosCliente, faltantesCompra, faltantesConsignacion, esChecklistCompraActual, validarCuentaBancaria, DOCS_COMPRA, DOCS_CONSIGNACION, TIPOS_CON_REGLAS,
 } from "./validaciones-core.js";
 import {
   folioInspeccion, VEREDICTOS, validarSolicitudInspeccion, validarReprogramacion, validarResultadoInspeccion, claveEsDe,
@@ -282,13 +282,13 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       if (ins.error) { if (ctx.isMissingTable(ins.error)) return null; throw ins.error; }
       const v = ins.data;
       let reutil: Record<string, any> = {};
-      if (p.tipo !== "vehiculo" && p.tipo !== "compra" && p.vehiculo_id) {
+      if (p.tipo !== "vehiculo" && p.tipo !== "compra" && p.tipo !== "consignacion" && p.vehiculo_id) {
         const o = await sb.from("validaciones").select("*").eq("vehiculo_id", p.vehiculo_id).eq("tipo", "vehiculo").eq("estado", "aprobada");
         const origen = (o.data ?? [])[0];
         if (origen) reutil = docsReutilizables(await enLotes("validacion_docs", "validacion_id", [origen.id]), origen.id);
       }
       // Un vehículo recién comprado o consignado hereda como aprobados los documentos del vehículo ya revisados en la operación.
-      if (p.reutilizarDe && p.tipo !== "compra") reutil = docsReutilizables(await enLotes("validacion_docs", "validacion_id", [p.reutilizarDe]), p.reutilizarDe);
+      if (p.reutilizarDe && p.tipo !== "compra" && p.tipo !== "consignacion") reutil = docsReutilizables(await enLotes("validacion_docs", "validacion_id", [p.reutilizarDe]), p.reutilizarDe);
       const docs = checklistPara(p.tipo, p.opciones).map((d, i) => ({ validacion_id: v.id, ...filaDoc(d), orden: i, ...(reutil[d.clave] ?? {}) }));
       const di = await sb.from("validacion_docs").insert(docs);
       if (di.error) throw di.error;
@@ -313,6 +313,25 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     if (!esChecklistCompraActual(docs)) return { aplica: false, val, docs, cliente: null, faltantes: [] as any[] };
     const cl = c.cliente_id ? (await sb.from("clientes").select("*").eq("id", c.cliente_id).maybeSingle()).data : null;
     return { aplica: true, val, docs, cliente: cl, faltantes: faltantesCompra({ cliente: cl, docs }) };
+  }
+
+  /**
+   * Qué falta para registrar una consignación: datos del dueño y los 9 documentos. La validación se crea al pedir los requisitos (antes de
+   * existir el contrato) ligada al lead, y el contrato la toma al registrarse.
+   */
+  async function requisitosDeConsignacion(lead: any) {
+    const vq = await sb.from("validaciones").select("*").eq("lead_id", lead.id).eq("tipo", "consignacion");
+    if (vq.error) { if (ctx.isMissingTable(vq.error)) return { aplica: false, val: null, docs: [], cliente: null, faltantes: [] as any[] }; throw vq.error; }
+    const propias = (vq.data ?? []).filter((x: any) => x.estado !== "cancelada" && !x.consignacion_id);
+    let val: any = propias.sort((a: any, b: any) => String(b.creado_en).localeCompare(String(a.creado_en)))[0] ?? null;
+    if (!val) {
+      const ofr = lead.vehiculo_ofrecido || {};
+      val = await crearValidacion({ tipo: "consignacion", local_id: lead.local_id, lead_id: lead.id, sujeto: sujetoDeVehiculo(ofr, {}) });
+    }
+    if (!val) return { aplica: false, val: null, docs: [], cliente: null, faltantes: [] as any[] };
+    const docs = (await enLotes("validacion_docs", "validacion_id", [val.id])).sort((a: any, b: any) => (a.orden ?? 0) - (b.orden ?? 0));
+    const cl = lead.cliente_id ? (await sb.from("clientes").select("*").eq("id", lead.cliente_id).maybeSingle()).data : null;
+    return { aplica: true, val, docs, cliente: cl, faltantes: faltantesConsignacion({ cliente: cl, docs }) };
   }
 
   /** Aprueba una compra: exige los documentos validados (si hay Validadores) y entrega el vehículo al inventario. */
@@ -1530,7 +1549,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       if (op === "validacion.adjuntar") {
         const a = validarArchivo(body.archivo);
         if (!a.ok) return err(a.error!);
-        if (v.tipo === "compra") { const t = archivoPermitidoParaDoc(doc.clave, a.value.tipo); if (!t.ok) return err(t.error!); }
+        if (TIPOS_CON_REGLAS.includes(v.tipo)) { const t = archivoPermitidoParaDoc(doc.clave, a.value.tipo); if (!t.ok) return err(t.error!); }
         if (archivos.length >= MAX_ARCHIVOS_DOC) return err("demasiados_archivos");
         archivos = [...archivos, a.value];
       } else {
@@ -1553,7 +1572,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     if (op === "validacion.datosDoc") {
       const v = await cargarVal(String(body.id ?? ""));
       if (!v || !(await veVal(v))) return err("no_existe", 404);
-      if (v.tipo !== "compra") return err("doc_sin_datos");
+      if (!TIPOS_CON_REGLAS.includes(v.tipo)) return err("doc_sin_datos");
       if (!(await puedeAdjuntar(v))) return err("forbidden", 403);
       if (v.estado === "aprobada" || v.estado === "cancelada") return err("validacion_estado_invalido");
       const doc = (await docsDe([v.id])).find((d: any) => d.id === body.docId);
@@ -2274,6 +2293,36 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       return json(await consigDetalle(c));
     }
 
+    /** Qué falta para registrar el contrato: datos del dueño y los 9 documentos (y el estado de cada uno). */
+    if (op === "consignaciones.requisitos") {
+      const lead = await cargarLead(String(body.leadId ?? ""));
+      if (!lead || !puedeVer(lead)) return err("no_existe", 404);
+      if (lead.tipo !== "consignacion") return err("forbidden", 403);
+      const r = await requisitosDeConsignacion(lead);
+      const cl = r.cliente;
+      return json({
+        aplica: r.aplica, completo: r.aplica ? r.faltantes.length === 0 : true, faltantes: r.faltantes, validacionId: r.val ? r.val.id : null,
+        cliente: cl ? { nombre: cl.nombre, rut: cl.rut, telefono: cl.telefono, email: cl.email, direccion: cl.direccion ?? "", banco: cl.banco ?? "", tipo_cuenta: cl.tipo_cuenta ?? "", numero_cuenta: cl.numero_cuenta ?? "" } : null,
+        docs: r.docs.filter((d: any) => reglaDoc(d.clave)).map((d: any) => ({ id: d.id, clave: d.clave, nombre: d.nombre, estado: d.estado, nArchivos: (d.archivos ?? []).length, vence_en: d.vence_en ?? null, precio: d.precio ?? null })),
+      });
+    }
+    /** El ejecutivo completa los datos críticos del dueño. */
+    if (op === "consignaciones.datosCliente") {
+      const lead = await cargarLead(String(body.leadId ?? ""));
+      if (!lead || !puedeVer(lead)) return err("no_existe", 404);
+      if (!puedeTocar(lead) || lead.tipo !== "consignacion") return err("forbidden", 403);
+      if (ETAPAS_CERRADAS.includes(lead.etapa)) return err("lead_cerrado");
+      const dc = validarDatosCliente(body.datos);
+      if (!dc.ok) return err(dc.error!);
+      if (!lead.cliente_id) return err("no_existe", 404);
+      const dup = await sb.from("clientes").select("id").eq("local_id", lead.local_id).eq("rut", dc.value.rut).neq("id", lead.cliente_id);
+      if ((dup.data ?? []).length > 0) return err("rut_duplicado", 409);
+      const up = await sb.from("clientes").update({ ...dc.value, actualizado_en: new Date().toISOString() }).eq("id", lead.cliente_id).select().single();
+      if (up.error) return fallar(up.error);
+      await evento(lead.id, "cliente", `${userName} completó los datos del dueño para la consignación`);
+      await audit(ctx.actor, "consignacion.datos_cliente", "lead", lead.id, { cliente_id: lead.cliente_id });
+      return json({ ok: true });
+    }
     if (op === "consignaciones.crear") {
       const lead = await cargarLead(String(body.leadId ?? ""));
       if (!lead || !puedeVer(lead)) return err("no_existe", 404);
@@ -2284,26 +2333,29 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       if (!vh.ok) return err("vehiculo_ofrecido_incompleto");
       const v = validarConsignacion(body.datos);
       if (!v.ok) return err(v.error!);
-      // El dueño debe dejar su cuenta bancaria (donde se le paga cuando se venda): la que viene en el contrato o la que ya tenga registrada.
-      const clq = lead.cliente_id ? await sb.from("clientes").select("*").eq("id", lead.cliente_id).maybeSingle() : { data: null };
-      const cuenta = validarCuentaBancaria((body.datos && body.datos.cuenta) ? body.datos.cuenta : { banco: clq.data && clq.data.banco, tipoCuenta: clq.data && clq.data.tipo_cuenta, numeroCuenta: clq.data && clq.data.numero_cuenta });
-      if (!cuenta.ok) return err(cuenta.error!);
       const abierta = await sb.from("consignaciones").select("id, estado").eq("lead_id", lead.id);
       if (abierta.error) return fallar(abierta.error);
       if ((abierta.data ?? []).some((c: any) => CONSIGNACION_ABIERTA.includes(c.estado))) return err("consignacion_en_curso", 409);
       const dup = await sb.from("vehiculos").select("id").eq("patente", vh.value.patente).eq("activo", true);
       if ((dup.data ?? []).length > 0) return err("patente_duplicada", 409);
+      // Sin los datos del dueño (incluida su cuenta bancaria) y los 9 documentos, no se registra el contrato.
+      const req = await requisitosDeConsignacion(lead);
+      if (req.aplica && req.faltantes.length > 0) return err("consignacion_incompleta", 409);
       const ins = await sb.from("consignaciones").insert({
         ...v.value, local_id: lead.local_id, lead_id: lead.id, cliente_id: lead.cliente_id, ejecutivo_id: lead.asignado_a, vehiculo: vh.value, patente: vh.value.patente,
         estado: "en_validacion", creado_por: userName,
       }).select().single();
       if (ins.error) return ins.error.code === "23505" ? err("consignacion_en_curso", 409) : fallar(ins.error);
       const c = ins.data;
-      if (lead.cliente_id) await sb.from("clientes").update({ ...cuenta.value, actualizado_en: new Date().toISOString() }).eq("id", lead.cliente_id);
       await sb.from("leads").update({ etapa: "cotizado", actualizado_en: new Date().toISOString() }).eq("id", lead.id);
       await evento(lead.id, "consignacion", `Contrato de consignación ${folioConsignacion(c.numero)} registrado por ${userName}: piso ${dinero(v.value.precio_piso)}, publicación ${dinero(v.value.precio_publicacion)}, ${v.value.plazo_dias} días`);
       await audit(ctx.actor, "consignacion.crear", "consignacion", c.id, { numero: c.numero, piso: v.value.precio_piso, publicacion: v.value.precio_publicacion, lead_id: lead.id });
-      const val = await crearValidacion({ tipo: "consignacion", local_id: c.local_id, consignacion_id: c.id, lead_id: lead.id, sujeto: sujetoDeVehiculo(vh.value, { folio: folioConsignacion(c.numero) }) });
+      // La validación de documentos ya existe (se creó al pedir los requisitos): el contrato la toma.
+      let val: any = req.val && !req.val.consignacion_id ? req.val : null;
+      if (val) {
+        const lig = await sb.from("validaciones").update({ consignacion_id: c.id, sujeto: sujetoDeVehiculo(vh.value, { folio: folioConsignacion(c.numero) }) }).eq("id", val.id).select().single();
+        val = lig.error ? val : lig.data;
+      } else val = await crearValidacion({ tipo: "consignacion", local_id: c.local_id, consignacion_id: c.id, lead_id: lead.id, sujeto: sujetoDeVehiculo(vh.value, { folio: folioConsignacion(c.numero) }) });
       // Sin Validadores en el local, el vehículo entra al inventario de inmediato; si no, cuando se aprueben los documentos.
       if (!val || !(await hayValidadores(c.local_id))) {
         const act = await activarConsignacion(c);

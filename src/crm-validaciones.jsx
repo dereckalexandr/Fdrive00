@@ -53,7 +53,7 @@ function Documento({ api, val, doc, puedeRevisar, puedeAdjuntar, onCambio, avisa
   const cerrado = doc.estado === "aprobado" || doc.estado === "no_aplica";
   const archivos = doc.archivos || [];
   // Documentos de una compra: solo PDF o también imagen, y los que llevan fecha de vencimiento o precio.
-  const regla = val.tipo === "compra" ? reglaDocCompra(doc.clave) : null;
+  const regla = val.tipo === "compra" || val.tipo === "consignacion" ? reglaDocCompra(doc.clave) : null;
   const soloPdf = !!regla && regla.tipos.length === 1;
   const [venceEn, setVenceEn] = useState(doc.vence_en ? String(doc.vence_en).slice(0, 10) : "");
   const [precio, setPrecio] = useState(doc.precio != null ? String(doc.precio) : "");
@@ -165,7 +165,7 @@ export function ValidacionDetalle({ api, id, onCerrar, onCambio }) {
     setOcupado(false);
   };
   const abrirAsignar = () => { setAsignando(true); api("validacion.equipo").then((r) => setEquipo(r.validadores)).catch(() => {}); };
-  const grupos = [["vehiculo", "Documentos del vehículo"], ["cliente", v.tipo === "compra" ? "Documentos del vendedor" : "Documentos del cliente y del pago"]];
+  const grupos = [["vehiculo", "Documentos del vehículo"], ["cliente", v.tipo === "compra" ? "Documentos del vendedor" : v.tipo === "consignacion" ? "Documentos del dueño" : "Documentos del cliente y del pago"]];
 
   return (
     <Modal titulo={`Validación ${v.folio}`} onCerrar={onCerrar} ancho="max-w-3xl">

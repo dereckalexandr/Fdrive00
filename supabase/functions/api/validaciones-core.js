@@ -62,11 +62,20 @@ export const DOCS_COMPRA = [
   DC("padron", "Padrón", "vehiculo", IMG_PDF),
   DC("contrato_compraventa", "Contrato de compra-venta", "cliente", IMG_PDF),
 ];
-/** Reglas de un documento de compra por su clave (o null si no es uno de ellos). */
-export const reglaDocCompra = (clave) => DOCS_COMPRA.find((d) => d.clave === clave) || null;
+/**
+ * Documentos que deben estar cargados para concretar una consignación: los mismos de la compra, salvo Dicom y Pensión de alimentos
+ * (no son obligatorios), y con «Contrato de consignación» en lugar del contrato de compra-venta.
+ */
+export const DOCS_CONSIGNACION = DOCS_COMPRA.filter((d) => !["dicom", "pension_alimentos"].includes(d.clave)).map((d) => (
+  d.clave === "contrato_compraventa" ? { ...d, clave: "contrato_consignacion", nombre: "Contrato de consignación" } : d
+));
+/** Reglas de un documento obligatorio de compra o de consignación por su clave (o null si no es uno de ellos). */
+export const reglaDocCompra = (clave) => DOCS_COMPRA.find((d) => d.clave === clave) || DOCS_CONSIGNACION.find((d) => d.clave === clave) || null;
+/** Tipos de validación cuyos documentos llevan estas reglas (tipo de archivo, vencimiento y precio). */
+export const TIPOS_CON_REGLAS = ["compra", "consignacion"];
 /** Solo las columnas que se guardan de cada documento. */
 export const filaDoc = ({ clave, nombre, grupo, requerido }) => ({ clave, nombre, grupo, requerido });
-/** Una validación de compra es del formato actual si trae el CAV; las anteriores siguen con su lista de siempre. */
+/** Una validación de compra o consignación es del formato actual si trae el CAV; las anteriores siguen con su lista de siempre. */
 export const esChecklistCompraActual = (docs) => (docs || []).some((d) => d.clave === "cav");
 
 /** ¿El archivo es de un tipo permitido para ese documento de compra? */
@@ -139,12 +148,15 @@ export function validarDatosCliente(input) {
   return { ok: true, value: { nombre: texto(v.nombre, 80), rut: normalizarRut(v.rut), telefono: texto(v.telefono, 30), email: texto(v.email, 80).toLowerCase(), direccion: texto(v.direccion, 160), banco: v.banco, tipo_cuenta: v.tipo_cuenta, numero_cuenta: limpiarNumeroCuenta(v.numero_cuenta) } };
 }
 
-/** Qué falta para concretar la compra: datos del cliente y documentos (cada uno con su archivo y, si corresponde, vencimiento y precio). */
-export function faltantesCompra({ cliente, docs }) {
+/**
+ * Qué falta para concretar la compra o la consignación: datos de la persona y documentos (cada uno con su archivo y, si corresponde,
+ * vencimiento y precio). `lista` = DOCS_COMPRA (por defecto) o DOCS_CONSIGNACION; `persona` = «vendedor» o «dueño».
+ */
+export function faltantesCompra({ cliente, docs, lista = DOCS_COMPRA, persona = "vendedor" }) {
   const f = [];
   const c = cliente || {};
-  for (const d of DATOS_CLIENTE) if (!d.ok(c[d.campo])) f.push({ tipo: "dato", clave: d.campo, texto: d.etiqueta });
-  for (const r of DOCS_COMPRA) {
+  for (const d of DATOS_CLIENTE) if (!d.ok(c[d.campo])) f.push({ tipo: "dato", clave: d.campo, texto: d.etiqueta.replace("del vendedor", `del ${persona}`) });
+  for (const r of lista) {
     const d = (docs || []).find((x) => x.clave === r.clave);
     if (!d || !(d.archivos || []).length) { f.push({ tipo: "doc", clave: r.clave, texto: `Documento: ${r.nombre}` }); continue; }
     if (r.vence && !d.vence_en) f.push({ tipo: "doc", clave: r.clave, texto: `Fecha de vencimiento de: ${r.nombre}` });
@@ -160,13 +172,7 @@ export function faltantesCompra({ cliente, docs }) {
 export function checklistPara(tipo, opciones = {}) {
   if (tipo === "vehiculo") return DOCS_VEHICULO.map((d) => ({ ...d }));
   if (tipo === "compra") return DOCS_COMPRA.map((d) => ({ ...d }));
-  if (tipo === "consignacion") {
-    return [
-      ...DOCS_VEHICULO.map((d) => ({ ...d })),
-      D("cedula_dueno", "Cédula de identidad del dueño (ambos lados)", "cliente"),
-      D("contrato_consignacion", "Contrato de consignación firmado", "cliente"),
-    ];
-  }
+  if (tipo === "consignacion") return DOCS_CONSIGNACION.map((d) => ({ ...d }));
   if (tipo === "venta") {
     const docs = [
       ...DOCS_VEHICULO.map((d) => ({ ...d })),
@@ -219,6 +225,9 @@ export function estadoDeValidacion(docs, tieneValidador) {
   if (lista.some((d) => d.estado === "observado")) return "observada";
   return tieneValidador ? "en_revision" : "pendiente";
 }
+
+/** Lo mismo para una consignación (datos del dueño y 9 documentos). */
+export const faltantesConsignacion = ({ cliente, docs }) => faltantesCompra({ cliente, docs, lista: DOCS_CONSIGNACION, persona: "dueño" });
 
 export const ESTADOS_ABIERTOS = ["pendiente", "en_revision", "observada", "rechazada"];
 

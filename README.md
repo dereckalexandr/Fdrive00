@@ -875,3 +875,12 @@ Las compras que ya tenían la lista anterior de documentos (creadas antes de est
 ## Cuenta bancaria: banco, tipo de cuenta y número
 
 En lugar de un solo texto «cuenta corriente», los datos obligatorios de la **compra** (vendedor) y de la **consignación** (dueño) piden la cuenta bancaria en tres campos: **Banco** (lista de bancos de Chile), **Tipo de cuenta** (corriente, vista, RUT o de ahorro) y **Número de cuenta** (solo dígitos, entre 4 y 20; se guarda sin puntos ni guiones). En la compra forma parte de lo que hay que completar para pedir y aprobar el pago, y sale en la nota de compra. En la consignación se exige al registrar el contrato (queda en el cliente; si ya la tenía, se precarga). Requiere ejecutar `supabase-crm-cuenta-bancaria.sql`. Código: `BANCOS_CHILE`, `TIPOS_CUENTA` y `validarCuentaBancaria` en `validaciones-core.js`; componente `CuentaBancaria` en `crm-ui.jsx`.
+
+## Consignación: datos del dueño y documentos obligatorios
+
+Para **registrar el contrato de consignación** (y, por tanto, publicar el vehículo en el inventario) el ejecutivo debe completar, en la ficha del lead de consignación, el panel **Requisitos para registrar la consignación**:
+
+- **Datos del dueño:** RUT, nombre y apellido, teléfono, correo, dirección y cuenta bancaria (banco, tipo de cuenta y número), igual que el vendedor de una compra.
+- **9 documentos**, los mismos de la compra salvo **Dicom** y **Pensión de alimentos** (no se piden): CAV, Multas e Informe legal (solo PDF); Carnet de identidad, Permiso de circulación, Revisión técnica, SOAP, Padrón y **Contrato de consignación** (imagen o PDF). Permiso de circulación, Revisión técnica y SOAP llevan fecha de vencimiento, y el Permiso, el precio de pago.
+
+El servidor lo exige (`consignacion_incompleta`) y el botón «Registrar la consignación» queda deshabilitado mientras falte algo. La validación de documentos se crea al abrir el panel (antes del contrato) y el contrato la toma al registrarse; con Validadores en el local, además deben aprobarla antes de que el vehículo entre al inventario, como antes. Las consignaciones ya registradas siguen con su lista anterior. Sin SQL nuevo. Código: `DOCS_CONSIGNACION` y `faltantesConsignacion` en `validaciones-core.js`; `consignaciones.requisitos` y `consignaciones.datosCliente` en `ventas.ts`; el panel es el mismo de la compra en `crm-compras.jsx`.

@@ -73,3 +73,18 @@ test("Cuenta bancaria: banco y tipo de cuenta de listas, y el número", () => {
   assert.equal(validarCuentaBancaria({ banco: "Banco de Chile", numeroCuenta: "123456" }).error, "tipo_cuenta_invalido");
   assert.equal(validarCuentaBancaria({ banco: "Banco de Chile", tipoCuenta: "Cuenta vista" }).error, "numero_cuenta_invalido");
 });
+
+test("Consignación: los mismos documentos que la compra, sin Dicom ni Pensión de alimentos y con Contrato de consignación", async () => {
+  const { DOCS_CONSIGNACION, faltantesConsignacion } = await import("../supabase/functions/api/validaciones-core.js");
+  assert.deepEqual(DOCS_CONSIGNACION.map((d) => d.clave), ["cav", "multas", "carnet_identidad", "informe_legal", "permiso_circulacion", "revision_tecnica", "soap", "padron", "contrato_consignacion"]);
+  assert.equal(DOCS_CONSIGNACION.find((d) => d.clave === "contrato_consignacion").nombre, "Contrato de consignación");
+  assert.deepEqual(checklistPara("consignacion").map((d) => d.clave), DOCS_CONSIGNACION.map((d) => d.clave));
+  assert.ok(checklistPara("consignacion").every((d) => d.requerido));
+  assert.ok(reglaDocCompra("contrato_consignacion").tipos.includes("image/jpeg"), "el contrato acepta imagen o PDF");
+  const docs = DOCS_CONSIGNACION.map((d) => ({ clave: d.clave, archivos: [{ id: "abc123" }], ...(d.vence ? { vence_en: "2027-03-31" } : {}), ...(d.precio ? { precio: 98000 } : {}) }));
+  assert.equal(faltantesConsignacion({ cliente: CLIENTE, docs }).length, 0);
+  const vacio = faltantesConsignacion({ cliente: {}, docs: [] });
+  assert.equal(vacio.length, 8 + 9);
+  assert.ok(vacio.some((f) => f.texto === "RUT del dueño") && vacio.some((f) => f.texto === "Banco del dueño"));
+  assert.ok(!vacio.some((f) => /Dicom|Pensión/.test(f.texto)));
+});

@@ -136,6 +136,7 @@ const MENSAJES = {
   vencimiento_invalido: "Escribe una fecha de vencimiento válida.",
   precio_doc_invalido: "Escribe el precio que se pagó (puede ser 0).",
   doc_sin_datos: "Ese documento no lleva fecha de vencimiento ni precio.",
+  consignacion_incompleta: "Faltan datos del dueño o documentos para registrar la consignación. Revisa la lista de requisitos.",
   compra_incompleta: "Faltan datos del vendedor o documentos para concretar la compra. Revisa la lista de requisitos de la compra.",
   nombre_apellido_requerido: "Escribe el nombre y el apellido del vendedor.",
   direccion_requerida: "Escribe la dirección del vendedor.",

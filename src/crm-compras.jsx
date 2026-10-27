@@ -15,7 +15,6 @@ import { compraNombre, consignacionNombre, COMPRA_ABIERTA, CONSIGNACION_ABIERTA,
 import { ResultadoTasacion } from "./crm-tasaciones.jsx";
 import { ValidacionDetalle } from "./crm-validaciones.jsx";
 import { buildNotaCompraPdf } from "./pdf-report.js";
-import { validarCuentaBancaria } from "../supabase/functions/api/validaciones-core.js";
 import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, hace, Aviso, Cargando, Tarjeta, Campo, Pestanas, useCarga, mensajeError, DatosDelDueno, CuentaBancaria } from "./crm-ui.jsx";
 
 const COLOR_COMPRA = { oferta: "bg-amber-100 text-amber-800", aceptada: "bg-sky-100 text-sky-800", pago_pendiente: "bg-violet-100 text-violet-800", comprada: "bg-emerald-100 text-emerald-800", rechazada: "bg-stone-200 text-stone-600", anulada: "bg-stone-200 text-stone-600", cancelada: "bg-stone-200 text-stone-600" };
@@ -34,8 +33,12 @@ const DATOS_VENDEDOR = [
   ["direccion", "Dirección", "text"],
 ];
 
-function RequisitosCompra({ api, c, puedeOperar, onCambio, onCompleto }) {
-  const { datos, recargar } = useCarga(() => api("compras.requisitos", { id: c.id }), [api, c.id, c.estado]);
+/**
+ * Panel de requisitos de una compra (vendedor) o de una consignación (dueño). `ops` = nombres de las operaciones y `args` = cómo se identifica
+ * la operación en el servidor ({ id } para la compra, { leadId } para la consignación).
+ */
+function RequisitosCompra({ api, c, puedeOperar, onCambio, onCompleto, persona = "vendedor", ops = { requisitos: "compras.requisitos", datos: "compras.datosCliente" }, args = { id: c.id }, clave = c.estado, destino = "concretar la compra" }) {
+  const { datos, recargar } = useCarga(() => api(ops.requisitos, args), [api, args.id, args.leadId, clave]);
   const [f, setF] = useState(null);
   const [msg, setMsg] = useState({ tipo: "", texto: "" });
   const [ocupado, setOcupado] = useState(false);
@@ -47,11 +50,11 @@ function RequisitosCompra({ api, c, puedeOperar, onCambio, onCompleto }) {
     setF({ nombre: cl.nombre || "", rut: cl.rut || "", telefono: cl.telefono || "", email: cl.email || "", direccion: cl.direccion || "", banco: cl.banco || "", tipoCuenta: cl.tipo_cuenta || "", numeroCuenta: cl.numero_cuenta || "" });
   }, [datos]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!datos || !datos.aplica || !f) return null;
-  const editable = puedeOperar && (c.estado === "aceptada" || c.estado === "pago_pendiente");
+  const editable = puedeOperar && (ops.datos === "consignaciones.datosCliente" || c.estado === "aceptada" || c.estado === "pago_pendiente");
   const cambio = async () => { await recargar(); await onCambio(); };
   const guardar = async () => {
     setMsg({ tipo: "", texto: "" }); setOcupado(true);
-    try { await api("compras.datosCliente", { id: c.id, datos: f }); setMsg({ tipo: "ok", texto: "Datos del vendedor guardados ✓" }); await cambio(); }
+    try { await api(ops.datos, { ...args, datos: f }); setMsg({ tipo: "ok", texto: `Datos del ${persona} guardados ✓` }); await cambio(); }
     catch (e) { setMsg({ tipo: "error", texto: mensajeError(e) }); }
     setOcupado(false);
   };
@@ -59,11 +62,11 @@ function RequisitosCompra({ api, c, puedeOperar, onCambio, onCompleto }) {
   const faltan = { banco: faltaDato("banco"), tipo_cuenta: faltaDato("tipo_cuenta"), numero_cuenta: faltaDato("numero_cuenta") };
   return (
     <div className={`border p-3 flex flex-col gap-3 ${datos.completo ? "border-emerald-300 bg-emerald-50/40" : "border-amber-300 bg-amber-50/40"}`}>
-      <p className="text-xs uppercase tracking-wide text-stone-500">Requisitos para concretar la compra</p>
-      <p className="text-sm text-stone-700">{datos.completo ? "Todo listo: datos del vendedor y documentos completos." : `Faltan ${datos.faltantes.length} cosa(s). Sin ellas no se puede pedir ni aprobar el pago, ni generar la nota de compra.`}</p>
+      <p className="text-xs uppercase tracking-wide text-stone-500">Requisitos para {destino}</p>
+      <p className="text-sm text-stone-700">{datos.completo ? `Todo listo: datos del ${persona} y documentos completos.` : `Faltan ${datos.faltantes.length} cosa(s). Sin ellas no se puede ${persona === "dueño" ? "registrar el contrato ni publicar el vehículo" : "pedir ni aprobar el pago, ni generar la nota de compra"}.`}</p>
       {msg.texto && <Aviso tipo={msg.tipo}>{msg.texto}</Aviso>}
 
-      <p className="text-xs uppercase tracking-wide text-stone-400">Datos del vendedor *</p>
+      <p className="text-xs uppercase tracking-wide text-stone-400">Datos del {persona} *</p>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         {DATOS_VENDEDOR.map(([k, etiqueta, tipo]) => (
           <Campo key={k} etiqueta={etiqueta}>
@@ -72,7 +75,7 @@ function RequisitosCompra({ api, c, puedeOperar, onCambio, onCompleto }) {
         ))}
       </div>
       <CuentaBancaria v={f} set={setF} disabled={!editable} faltan={faltan} />
-      {editable && <div><button disabled={ocupado} onClick={guardar} className={BTN_PRIMARIO}>Guardar datos del vendedor</button></div>}
+      {editable && <div><button disabled={ocupado} onClick={guardar} className={BTN_PRIMARIO}>Guardar datos del {persona}</button></div>}
 
       <p className="text-xs uppercase tracking-wide text-stone-400">Documentos *</p>
       <ul className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1 text-sm">
@@ -294,8 +297,7 @@ function Consignacion({ api, c, puedeOperar, onCambio, avisar }) {
 export function SeccionConsignacion({ api, lead, datos, onCambio, avisar }) {
   const { datos: lista, recargar } = useCarga(() => api("consignaciones.list", { vista: "lead", leadId: lead.id }), [api, lead.id, datos.eventos.length]);
   const tasada = (datos.tasaciones || []).find((t) => t.estado === "completada" && t.tipo !== "parte_pago");
-  const cl0 = datos.cliente || {};
-  const [cuenta, setCuenta] = useState({ banco: cl0.banco || "", tipoCuenta: cl0.tipo_cuenta || "", numeroCuenta: cl0.numero_cuenta || "" });
+  const [reqCompleto, setReqCompleto] = useState(false);
   const [f, setF] = useState({ precioPiso: "", precioPublicacion: tasada && Number(tasada.valor_consignacion) > 0 ? String(tasada.valor_consignacion) : lead.vehiculo_ofrecido && lead.vehiculo_ofrecido.precioEsperado ? String(lead.vehiculo_ofrecido.precioEsperado) : "", plazoDias: 90, notas: "" });
   const [error, setError] = useState("");
   const [ocupado, setOcupado] = useState(false);
@@ -308,10 +310,8 @@ export function SeccionConsignacion({ api, lead, datos, onCambio, avisar }) {
     setError("");
     const val = validarConsignacion(f);
     if (!val.ok) { setError(mensajeError({ message: val.error })); return; }
-    const cu = validarCuentaBancaria(cuenta);
-    if (!cu.ok) { setError(mensajeError({ message: cu.error })); return; }
     setOcupado(true);
-    try { await api("consignaciones.crear", { leadId: lead.id, datos: { ...f, cuenta } }); await cambio(); } catch (e) { setError(mensajeError(e)); }
+    try { await api("consignaciones.crear", { leadId: lead.id, datos: f }); await cambio(); } catch (e) { setError(mensajeError(e)); }
     setOcupado(false);
   };
   return (
@@ -326,6 +326,10 @@ export function SeccionConsignacion({ api, lead, datos, onCambio, avisar }) {
         </div>
       )}
       {!abierta && !cerrado && datos.puedeEditar && lista.consignaciones.every((c) => !["vendida"].includes(c.estado)) && (
+        <RequisitosCompra api={api} c={{ id: lead.id, estado: "" }} puedeOperar onCambio={cambio} onCompleto={setReqCompleto} persona="dueño"
+          ops={{ requisitos: "consignaciones.requisitos", datos: "consignaciones.datosCliente" }} args={{ leadId: lead.id }} clave={lista.consignaciones.length} destino="registrar la consignación" />
+      )}
+      {!abierta && !cerrado && datos.puedeEditar && lista.consignaciones.every((c) => !["vendida"].includes(c.estado)) && (
         <div className="border border-stone-200 bg-stone-50 p-3 flex flex-col gap-3">
           <p className="text-xs uppercase tracking-wide text-stone-400">Contrato de consignación</p>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -336,7 +340,7 @@ export function SeccionConsignacion({ api, lead, datos, onCambio, avisar }) {
           </div>
           {Number(f.precioPublicacion) >= Number(f.precioPiso) && Number(f.precioPiso) > 0 && <p className="text-xs text-stone-600">Si se vende a la publicación, el margen es <strong className="font-mono">{clp(Number(f.precioPublicacion) - Number(f.precioPiso))}</strong>; tu comisión es el 25 % de lo que quede sobre el piso.</p>}
           {error && <Aviso>{error}</Aviso>}
-          <div><button disabled={ocupado} onClick={crear} className={BTN_AMBAR}>Registrar la consignación</button></div>
+          <div><button disabled={ocupado || !reqCompleto} title={reqCompleto ? "" : "Completa los datos del dueño y los documentos"} onClick={crear} className={BTN_AMBAR}>Registrar la consignación</button></div>
         </div>
       )}
       {lista.consignaciones.map((c) => <Consignacion key={c.id} api={api} c={c} puedeOperar={datos.puedeEditar || lista.puedeSupervisar} onCambio={cambio} avisar={avisar} />)}
