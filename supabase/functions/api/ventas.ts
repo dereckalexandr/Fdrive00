@@ -2463,7 +2463,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     }
     /**
      * Datos para el contrato de consignación que se firma y luego se sube como documento obligatorio. Se entrega solo con los datos del dueño
-     * completos, el precio piso aceptado por el cliente y los precios y el plazo válidos; los documentos todavía no hacen falta (el contrato es uno de ellos).
+     * completos y los precios y el plazo válidos; los documentos todavía no hacen falta (el contrato es uno de ellos).
      */
     if (op === "consignaciones.contrato") {
       const lead = await cargarLead(String(body.leadId ?? ""));
@@ -2472,7 +2472,6 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       if (ETAPAS_CERRADAS.includes(lead.etapa)) return err("lead_cerrado");
       const cl = lead.cliente_id ? (await sb.from("clientes").select("*").eq("id", lead.cliente_id).maybeSingle()).data : null;
       if (faltantesCompra({ cliente: cl, docs: [], lista: [], persona: "dueño" }).length > 0) return err("contrato_datos_incompletos", 409);
-      if (body.datos?.pisoAceptado !== true) return err("piso_no_aceptado", 409);
       const v = validarConsignacion(body.datos);
       if (!v.ok) return err(v.error!);
       const [loc] = lead.local_id ? await porIds("locales", [lead.local_id]) : [null];

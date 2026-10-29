@@ -142,7 +142,6 @@ const MENSAJES = {
   nombre_apellido_requerido: "Escribe el nombre y el apellido del vendedor.",
   direccion_requerida: "Escribe la dirección del vendedor.",
   contrato_datos_incompletos: "Completa primero los datos del dueño (RUT, nombre, teléfono, correo, dirección y cuenta bancaria).",
-  piso_no_aceptado: "Marca que el dueño aceptó el precio piso.",
   operacion_invalida: "Elige la oferta de compra o la de consignación.",
   tasacion_pendiente: "Todavía no hay una tasación completada de este vehículo: espera el resultado del Tasador.",
   tasacion_no_aplica_operacion: "El Tasador indicó que este vehículo no aplica para esa operación.",

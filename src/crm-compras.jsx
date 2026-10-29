@@ -175,7 +175,7 @@ async function descargarComprobanteConsignacion(api, c) {
   setTimeout(() => URL.revokeObjectURL(url), 3000);
 }
 
-/** Genera y descarga el contrato de consignación para firmar (borrador). El servidor valida datos del dueño, piso aceptado, precios y plazo. */
+/** Genera y descarga el contrato de consignación para firmar (borrador). El servidor valida los datos del dueño, los precios y el plazo. */
 async function descargarContratoConsignacion(api, leadId, datos) {
   const { contrato } = await api("consignaciones.contrato", { leadId, datos });
   const bytes = buildContratoConsignacionPdf(contrato, { fmt: clp });
@@ -398,7 +398,6 @@ export function SeccionConsignacion({ api, lead, datos, operacion, setOperacion,
   const tasada = (datos.tasaciones || []).find((t) => t.estado === "completada" && t.tipo !== "parte_pago");
   const [reqCompleto, setReqCompleto] = useState(false);
   const [datosListos, setDatosListos] = useState(false);
-  const [pisoAceptado, setPisoAceptado] = useState(false);
   const [f, setF] = useState({ precioPiso: tasada && Number(tasada.valor_consignacion) > 0 ? String(tasada.valor_consignacion) : "", precioPublicacion: tasada && Number(tasada.valor_venta) > 0 ? String(tasada.valor_venta) : lead.vehiculo_ofrecido && lead.vehiculo_ofrecido.precioEsperado ? String(lead.vehiculo_ofrecido.precioEsperado) : "", plazoDias: 90, notas: "" });
   const [error, setError] = useState("");
   const [ocupado, setOcupado] = useState(false);
@@ -410,10 +409,13 @@ export function SeccionConsignacion({ api, lead, datos, operacion, setOperacion,
   const descargarContrato = async () => {
     setError("");
     setOcupado(true);
-    try { await descargarContratoConsignacion(api, lead.id, { ...f, pisoAceptado }); await cambio(); } catch (e) { setError(mensajeError(e)); }
+    try { await descargarContratoConsignacion(api, lead.id, f); await cambio(); } catch (e) { setError(mensajeError(e)); }
     setOcupado(false);
   };
-  const contratoListo = datosListos && pisoAceptado && validarConsignacion(f).ok;
+  // El contrato se habilita en cuanto están guardados los datos del dueño (y hay piso, publicación y plazo válidos para escribirlos en él).
+  const preciosOk = validarConsignacion(f).ok;
+  const contratoListo = datosListos && preciosOk;
+  const faltaContrato = !datosListos ? "Guarda primero los datos del dueño." : !preciosOk ? "Escribe el precio piso, el de publicación (no menor al piso) y el plazo." : "";
   const crear = async () => {
     setError("");
     const val = validarConsignacion(f);
@@ -454,10 +456,9 @@ export function SeccionConsignacion({ api, lead, datos, operacion, setOperacion,
             <Campo etiqueta="Nota (opcional)"><input value={f.notas} maxLength={300} onChange={(e) => setF({ ...f, notas: e.target.value })} className={INPUT} /></Campo>
           </div>
           {Number(f.precioPublicacion) >= Number(f.precioPiso) && Number(f.precioPiso) > 0 && <p className="text-xs text-stone-600">Si se vende a la publicación, el margen es <strong className="font-mono">{clp(Number(f.precioPublicacion) - Number(f.precioPiso))}</strong>; tu comisión es el 25 % de lo que quede sobre el piso.</p>}
-          <label className="flex items-start gap-2 text-sm text-stone-700"><input type="checkbox" checked={pisoAceptado} onChange={(e) => setPisoAceptado(e.target.checked)} className="mt-0.5" /><span>El dueño aceptó el precio piso y el plazo.</span></label>
           <div className="flex flex-wrap items-center gap-3">
-            <button disabled={ocupado || !contratoListo} onClick={descargarContrato} title={contratoListo ? "" : "Completa los datos del dueño, el piso, la publicación y el plazo, y marca que el dueño aceptó el piso"} className={BTN}>Descargar contrato de consignación (PDF)</button>
-            <span className="text-xs text-stone-500">Se firma con el dueño y luego se sube como «Contrato de consignación» en los documentos.</span>
+            <button disabled={ocupado || !contratoListo} onClick={descargarContrato} title={faltaContrato} className={BTN}>Descargar contrato de consignación (PDF)</button>
+            <span className="text-xs text-stone-500">{faltaContrato || "Se firma con el dueño y luego se sube como «Contrato de consignación» en los documentos."}</span>
           </div>
           {error && <Aviso>{error}</Aviso>}
           <div><button disabled={ocupado || !reqCompleto} title={reqCompleto ? "" : "Completa los datos del dueño y los documentos"} onClick={crear} className={BTN_AMBAR}>Enviar a validar</button><span className="ml-3 text-xs text-stone-500">Registra el contrato y envía los documentos al Validador.</span></div>

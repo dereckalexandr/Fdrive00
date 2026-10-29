@@ -786,15 +786,14 @@ test("La solicitud que llega sola por el sitio web no se edita; la que el equipo
   }
 });
 
-test("Consignación: el contrato para firmar se entrega con los datos del dueño completos, el piso aceptado y los precios y el plazo válidos", async () => {
+test("Consignación: el contrato para firmar se entrega con los datos del dueño completos y los precios y el plazo válidos", async () => {
   const lead = await leadDe(U.c1.token, "consignacion");
   const pedir = (datos) => ve(U.c1.token, "consignaciones.contrato", { leadId: lead.id, datos });
-  const buenos = { precioPiso: 8100000, precioPublicacion: 9100000, plazoDias: 60, notas: "Llaves en el local", pisoAceptado: true };
+  const buenos = { precioPiso: 8100000, precioPublicacion: 9100000, plazoDias: 60, notas: "Llaves en el local" };
   // Sin los datos del dueño no hay contrato.
   assert.equal((await pedir(buenos)).error, "contrato_datos_incompletos");
   assert.equal((await ve(U.c1.token, "consignaciones.datosCliente", { leadId: lead.id, datos: DATOS_VENDEDOR() })).status, 200);
   // El piso debe estar aceptado por el dueño, y los precios y el plazo, bien.
-  assert.equal((await pedir({ ...buenos, pisoAceptado: false })).error, "piso_no_aceptado");
   assert.equal((await pedir({ ...buenos, precioPublicacion: 8000000 })).error, "publicacion_bajo_piso");
   assert.equal((await pedir({ ...buenos, plazoDias: 5 })).error, "plazo_invalido");
   // Los documentos todavía no hacen falta: el contrato es uno de ellos.
