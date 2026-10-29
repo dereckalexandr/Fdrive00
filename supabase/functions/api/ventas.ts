@@ -2112,7 +2112,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       const cl = r.cliente;
       return json({
         aplica: r.aplica, completo: r.aplica ? r.faltantes.length === 0 : true, faltantes: r.faltantes, validacionId: r.val ? r.val.id : null,
-        cliente: cl ? { nombre: cl.nombre, rut: cl.rut, telefono: cl.telefono, email: cl.email, direccion: cl.direccion ?? "", banco: cl.banco ?? "", tipo_cuenta: cl.tipo_cuenta ?? "", numero_cuenta: cl.numero_cuenta ?? "" } : null,
+        cliente: cl ? { nombre: cl.nombre, rut: cl.rut, telefono: cl.telefono, email: cl.email, direccion: cl.direccion ?? "", comuna: cl.comuna ?? "", banco: cl.banco ?? "", tipo_cuenta: cl.tipo_cuenta ?? "", numero_cuenta: cl.numero_cuenta ?? "" } : null,
         docs: r.docs.filter((d: any) => reglaDoc(d.clave)).map((d: any) => ({ id: d.id, clave: d.clave, nombre: d.nombre, estado: d.estado, nArchivos: (d.archivos ?? []).length, vence_en: d.vence_en ?? null, precio: d.precio ?? null })),
       });
     }
@@ -2146,7 +2146,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
         nota: {
           folio: folioCompra(c.numero), fecha: c.aprobado_en || c.actualizado_en, local: loc ? loc.nombre : "", ejecutivo: c.ejecutivo, aprobado_por: c.aprobado_por,
           monto_final: c.monto_final, medio_pago: c.medio_pago, fecha_pago: c.fecha_pago, vehiculo: c.vehiculo || {},
-          vendedor: r.cliente ? { nombre: r.cliente.nombre, rut: r.cliente.rut, telefono: r.cliente.telefono, email: r.cliente.email, direccion: r.cliente.direccion, banco: r.cliente.banco, tipo_cuenta: r.cliente.tipo_cuenta, numero_cuenta: r.cliente.numero_cuenta } : null,
+          vendedor: r.cliente ? { nombre: r.cliente.nombre, rut: r.cliente.rut, telefono: r.cliente.telefono, email: r.cliente.email, direccion: r.cliente.direccion, comuna: r.cliente.comuna, banco: r.cliente.banco, tipo_cuenta: r.cliente.tipo_cuenta, numero_cuenta: r.cliente.numero_cuenta } : null,
           permiso: { vence_en: reg("permiso_circulacion").vence_en ?? null, precio: reg("permiso_circulacion").precio ?? null },
           revision_tecnica: { vence_en: reg("revision_tecnica").vence_en ?? null }, soap: { vence_en: reg("soap").vence_en ?? null },
           documentos: r.aplica ? DOCS_COMPRA.map((d) => d.nombre) : [],
@@ -2376,7 +2376,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       const cl = r.cliente;
       return json({
         aplica: r.aplica, completo: r.aplica ? r.faltantes.length === 0 : true, faltantes: r.faltantes, validacionId: r.val ? r.val.id : null,
-        cliente: cl ? { nombre: cl.nombre, rut: cl.rut, telefono: cl.telefono, email: cl.email, direccion: cl.direccion ?? "", banco: cl.banco ?? "", tipo_cuenta: cl.tipo_cuenta ?? "", numero_cuenta: cl.numero_cuenta ?? "" } : null,
+        cliente: cl ? { nombre: cl.nombre, rut: cl.rut, telefono: cl.telefono, email: cl.email, direccion: cl.direccion ?? "", comuna: cl.comuna ?? "", banco: cl.banco ?? "", tipo_cuenta: cl.tipo_cuenta ?? "", numero_cuenta: cl.numero_cuenta ?? "" } : null,
         docs: r.docs.filter((d: any) => reglaDoc(d.clave)).map((d: any) => ({ id: d.id, clave: d.clave, nombre: d.nombre, estado: d.estado, nArchivos: (d.archivos ?? []).length, vence_en: d.vence_en ?? null, precio: d.precio ?? null })),
       });
     }
@@ -2419,7 +2419,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       return json({
         contrato: {
           fecha, local: loc ? { nombre: loc.nombre, direccion: loc.direccion ?? "" } : { nombre: "", direccion: "" }, ejecutivo: eje ? eje.nombre : userName,
-          dueno: { nombre: cl.nombre, rut: cl.rut, telefono: cl.telefono, email: cl.email, direccion: cl.direccion, banco: cl.banco, tipo_cuenta: cl.tipo_cuenta, numero_cuenta: cl.numero_cuenta },
+          dueno: { nombre: cl.nombre, rut: cl.rut, telefono: cl.telefono, email: cl.email, direccion: cl.direccion, comuna: cl.comuna, banco: cl.banco, tipo_cuenta: cl.tipo_cuenta, numero_cuenta: cl.numero_cuenta },
           vehiculo: lead.vehiculo_ofrecido || {}, precio_piso: v.value.precio_piso, precio_publicacion: v.value.precio_publicacion, plazo_dias: v.value.plazo_dias, notas: v.value.notas,
         },
       });
@@ -2445,7 +2445,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
         comprobante: {
           folio: folioConsignacion(c.numero), fecha: c.activada_en || c.creado_en, local: loc ? loc.nombre : "", ejecutivo: eje ? eje.nombre : "",
           vehiculo: c.vehiculo || {}, precio_piso: c.precio_piso, precio_publicacion: c.precio_publicacion, plazo_dias: c.plazo_dias, vence_en: c.vence_en ?? null, notas: c.notas ?? null,
-          dueno: cl ? { nombre: cl.nombre, rut: cl.rut, telefono: cl.telefono, email: cl.email, direccion: cl.direccion, banco: cl.banco, tipo_cuenta: cl.tipo_cuenta, numero_cuenta: cl.numero_cuenta } : null,
+          dueno: cl ? { nombre: cl.nombre, rut: cl.rut, telefono: cl.telefono, email: cl.email, direccion: cl.direccion, comuna: cl.comuna, banco: cl.banco, tipo_cuenta: cl.tipo_cuenta, numero_cuenta: cl.numero_cuenta } : null,
           permiso: { vence_en: reg("permiso_circulacion").vence_en ?? null, precio: reg("permiso_circulacion").precio ?? null },
           revision_tecnica: { vence_en: reg("revision_tecnica").vence_en ?? null }, soap: { vence_en: reg("soap").vence_en ?? null },
           documentos: actual ? DOCS_CONSIGNACION.map((d) => d.nombre) : [],

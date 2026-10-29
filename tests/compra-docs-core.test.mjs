@@ -4,7 +4,7 @@ import {
   BANCOS_CHILE, TIPOS_CUENTA, validarCuentaBancaria, DOCS_COMPRA, checklistPara, reglaDocCompra, archivoPermitidoParaDoc, validarDatosDoc, validarDatosCliente, faltantesCompra, esChecklistCompraActual, filaDoc,
 } from "../supabase/functions/api/validaciones-core.js";
 
-const CLIENTE = { nombre: "Juan Pérez", rut: "12.345.678-5", telefono: "9 1234 5678", email: "juan@correo.cl", direccion: "Av. Siempre Viva 742", banco: "BancoEstado", tipo_cuenta: "Cuenta RUT", numero_cuenta: "123456789" };
+const CLIENTE = { nombre: "Juan Pérez", rut: "12.345.678-5", telefono: "9 1234 5678", email: "juan@correo.cl", direccion: "Av. Siempre Viva 742", comuna: "Providencia", banco: "BancoEstado", tipo_cuenta: "Cuenta RUT", numero_cuenta: "123456789" };
 const completos = () => DOCS_COMPRA.map((d) => ({ clave: d.clave, archivos: [{ id: "abc123" }], ...(d.vence ? { vence_en: "2027-03-31" } : {}), ...(d.precio ? { precio: 98000 } : {}) }));
 
 test("Compra: los 11 documentos obligatorios, con su tipo de archivo, vencimiento y precio", () => {
@@ -44,6 +44,14 @@ test("Datos críticos del vendedor: RUT, nombre y apellido, teléfono, correo, d
   assert.equal(e({ telefono: "123" }), "telefono_invalido");
   assert.equal(e({ email: "sin-arroba" }), "email_invalido");
   assert.equal(e({ direccion: "Calle" }), "direccion_requerida");
+  assert.equal(e({ comuna: "" }), "comuna_invalida");
+  assert.equal(e({ comuna: "Narnia" }), "comuna_invalida");
+  assert.equal(ok.value.comuna, "Providencia");
+  // El RUT se verifica con su dígito verificador (módulo 11): un número cualquiera no pasa.
+  assert.equal(e({ rut: "11.111.111-2" }), "rut_invalido");
+  assert.equal(e({ rut: "12345678" }), "rut_invalido");
+  assert.equal(e({ rut: "12.345.67K-5" }), "rut_invalido");
+  assert.equal(validarDatosCliente({ ...base, rut: "7.654.321-6" }).ok, true);
   assert.equal(e({ banco: "" }), "banco_invalido");
   assert.equal(e({ banco: "Banco Inventado" }), "banco_invalido");
   assert.equal(e({ tipoCuenta: "Libreta" }), "tipo_cuenta_invalido");
@@ -55,7 +63,7 @@ test("Datos críticos del vendedor: RUT, nombre y apellido, teléfono, correo, d
 test("Faltantes: la compra solo se concreta con todos los datos y documentos", () => {
   assert.equal(faltantesCompra({ cliente: CLIENTE, docs: completos() }).length, 0);
   const vacio = faltantesCompra({ cliente: {}, docs: [] });
-  assert.equal(vacio.length, 8 + 11);
+  assert.equal(vacio.length, 9 + 11);
   // Un documento sin archivo, o sin su vencimiento o precio, sigue faltando.
   const docs = completos();
   docs.find((d) => d.clave === "cav").archivos = [];
@@ -84,7 +92,7 @@ test("Consignación: los mismos documentos que la compra, sin Dicom ni Pensión 
   const docs = DOCS_CONSIGNACION.map((d) => ({ clave: d.clave, archivos: [{ id: "abc123" }], ...(d.vence ? { vence_en: "2027-03-31" } : {}), ...(d.precio ? { precio: 98000 } : {}) }));
   assert.equal(faltantesConsignacion({ cliente: CLIENTE, docs }).length, 0);
   const vacio = faltantesConsignacion({ cliente: {}, docs: [] });
-  assert.equal(vacio.length, 8 + 9);
+  assert.equal(vacio.length, 9 + 9);
   assert.ok(vacio.some((f) => f.texto === "RUT del dueño") && vacio.some((f) => f.texto === "Banco del dueño"));
   assert.ok(!vacio.some((f) => /Dicom|Pensión/.test(f.texto)));
 });

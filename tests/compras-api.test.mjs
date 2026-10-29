@@ -44,7 +44,7 @@ const PAGO = (extra = {}) => ({ montoFinal: 5800000, medioPago: "Transferencia",
 const dvRut = (n) => { let suma = 0; let m = 2; for (const d of String(n).split("").reverse()) { suma += Number(d) * m; m = m === 7 ? 2 : m + 1; } const r = 11 - (suma % 11); return r === 11 ? "0" : r === 10 ? "K" : String(r); };
 let rutN = 20000000; let archN = 0;
 const rutNuevo = () => { const n = ++rutN; return `${n}-${dvRut(n)}`; };
-const DATOS_VENDEDOR = (extra = {}) => ({ nombre: "Vendedor Prueba", rut: rutNuevo(), telefono: "912345678", email: "vendedor@x.cl", direccion: "Calle Falsa 123, Santiago", banco: "BancoEstado", tipoCuenta: "Cuenta vista", numeroCuenta: "12345678", ...extra });
+const DATOS_VENDEDOR = (extra = {}) => ({ nombre: "Vendedor Prueba", rut: rutNuevo(), telefono: "912345678", email: "vendedor@x.cl", direccion: "Calle Falsa 123", comuna: "Santiago", banco: "BancoEstado", tipoCuenta: "Cuenta vista", numeroCuenta: "12345678", ...extra });
 const CUENTA = (extra = {}) => ({ banco: "Banco de Chile", tipoCuenta: "Cuenta corriente", numeroCuenta: "00123456789", ...extra });
 /** El ejecutivo completa los datos del vendedor y sube los 11 documentos (con vencimiento y precio del permiso). */
 async function cumplirRequisitos(compraId, token = U.c1.token) {
@@ -657,7 +657,9 @@ test("Compra: sin los datos del vendedor y los 11 documentos no se pide el pago,
   assert.equal((await ve(U.c2.token, "compras.datosCliente", { id: o.compra.id, datos: DATOS_VENDEDOR() })).status, 404, "otro ejecutivo no toca la compra");
   assert.equal((await dc({})).status, 200);
   const cli = db.tablas.clientes.find((c) => c.id === db.tablas.compras.find((x) => x.id === o.compra.id).cliente_id);
-  assert.equal(cli.direccion, "Calle Falsa 123, Santiago");
+  assert.deepEqual([cli.direccion, cli.comuna], ["Calle Falsa 123", "Santiago"]);
+  assert.equal((await dc({ comuna: "Narnia" })).error, "comuna_invalida");
+  assert.equal((await dc({ rut: "12.345.678-9" })).error, "rut_invalido", "el RUT se verifica con su dígito verificador");
   assert.deepEqual([cli.banco, cli.tipo_cuenta, cli.numero_cuenta], ["BancoEstado", "Cuenta vista", "12345678"]);
 
   // Tipos de archivo por documento: el CAV solo acepta PDF; el padrón, imagen o PDF.

@@ -13,6 +13,8 @@ import { InputDinero } from "./campo-dinero.jsx";
 import { MEDIOS_PAGO } from "../supabase/functions/api/ventas-core.js";
 import { compraNombre, consignacionNombre, COMPRA_ABIERTA, CONSIGNACION_ABIERTA, validarOferta, validarConsignacion } from "../supabase/functions/api/compras-core.js";
 import { ResultadoTasacion } from "./crm-tasaciones.jsx";
+import { validarRut, formatearRut } from "../supabase/functions/api/crm-core.js";
+import { COMUNAS_CHILE } from "../supabase/functions/api/comunas-chile.js";
 import { topeDeOferta } from "../supabase/functions/api/tasaciones-core.js";
 import { ValidacionDetalle } from "./crm-validaciones.jsx";
 import { buildNotaCompraPdf, buildComprobanteConsignacionPdf, buildContratoConsignacionPdf } from "./pdf-report.js";
@@ -31,7 +33,6 @@ const fechaCorta = (d) => (d ? new Date(`${String(d).slice(0, 10)}T12:00:00`).to
 ========================================================= */
 const DATOS_VENDEDOR = [
   ["nombre", "Nombre y apellido", "text"], ["rut", "RUT", "text"], ["telefono", "Teléfono", "tel"], ["email", "Correo", "email"],
-  ["direccion", "Dirección", "text"],
 ];
 
 /**
@@ -49,7 +50,7 @@ function RequisitosCompra({ api, c, puedeOperar, onCambio, onCompleto, onDatosLi
     onCompleto(datos.completo);
     if (onDatosListos) onDatosListos(!datos.faltantes.some((x) => x.tipo === "dato"));
     const cl = datos.cliente || {};
-    setF({ nombre: cl.nombre || "", rut: cl.rut || "", telefono: cl.telefono || "", email: cl.email || "", direccion: cl.direccion || "", banco: cl.banco || "", tipoCuenta: cl.tipo_cuenta || "", numeroCuenta: cl.numero_cuenta || "" });
+    setF({ nombre: cl.nombre || "", rut: cl.rut || "", telefono: cl.telefono || "", email: cl.email || "", direccion: cl.direccion || "", comuna: cl.comuna || "", banco: cl.banco || "", tipoCuenta: cl.tipo_cuenta || "", numeroCuenta: cl.numero_cuenta || "" });
   }, [datos]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!datos || !datos.aplica || !f) return null;
   const editable = puedeOperar && (ops.datos === "consignaciones.datosCliente" || c.estado === "aceptada" || c.estado === "pago_pendiente");
@@ -60,6 +61,7 @@ function RequisitosCompra({ api, c, puedeOperar, onCambio, onCompleto, onDatosLi
     catch (e) { setMsg({ tipo: "error", texto: mensajeError(e) }); }
     setOcupado(false);
   };
+  const rutOk = validarRut(f.rut);
   const faltaDato = (clave) => datos.faltantes.some((x) => x.tipo === "dato" && x.clave === clave);
   const faltan = { banco: faltaDato("banco"), tipo_cuenta: faltaDato("tipo_cuenta"), numero_cuenta: faltaDato("numero_cuenta") };
   return (
@@ -71,10 +73,17 @@ function RequisitosCompra({ api, c, puedeOperar, onCambio, onCompleto, onDatosLi
       <p className="text-xs uppercase tracking-wide text-stone-400">Datos del {persona} *</p>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         {DATOS_VENDEDOR.map(([k, etiqueta, tipo]) => (
-          <Campo key={k} etiqueta={etiqueta}>
-            <input type={tipo} value={f[k]} disabled={!editable} maxLength={160} onChange={(e) => setF({ ...f, [k]: e.target.value })} className={`${INPUT} ${faltaDato(k) ? "border-amber-500" : ""}`} />
+          <Campo key={k} etiqueta={etiqueta} ayuda={k === "rut" && f.rut.trim() ? (rutOk ? `RUT válido ✓ ${formatearRut(f.rut)}` : "RUT no válido: revisa el número y el dígito verificador.") : undefined}>
+            <input type={tipo} value={f[k]} disabled={!editable} maxLength={160} onChange={(e) => setF({ ...f, [k]: e.target.value })} onBlur={k === "rut" && rutOk ? () => setF({ ...f, rut: formatearRut(f.rut) }) : undefined}
+              className={`${INPUT} ${faltaDato(k) || (k === "rut" && f.rut.trim() && !rutOk) ? "border-amber-500" : ""}`} />
           </Campo>
         ))}
+        <Campo etiqueta="Dirección (calle y número)"><input value={f.direccion} disabled={!editable} maxLength={160} onChange={(e) => setF({ ...f, direccion: e.target.value })} className={`${INPUT} ${faltaDato("direccion") ? "border-amber-500" : ""}`} /></Campo>
+        <Campo etiqueta="Comuna">
+          <select value={f.comuna} disabled={!editable} onChange={(e) => setF({ ...f, comuna: e.target.value })} className={`${INPUT} ${faltaDato("comuna") ? "border-amber-500" : ""}`}>
+            <option value="">Elige la comuna…</option>{COMUNAS_CHILE.map((x) => <option key={x} value={x}>{x}</option>)}
+          </select>
+        </Campo>
       </div>
       <CuentaBancaria v={f} set={setF} disabled={!editable} faltan={faltan} />
       {editable && <div><button disabled={ocupado} onClick={guardar} className={BTN_PRIMARIO}>Guardar datos del {persona}</button></div>}

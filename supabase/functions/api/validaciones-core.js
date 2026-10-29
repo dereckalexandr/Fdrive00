@@ -2,6 +2,7 @@
 // JavaScript puro (sin APIs de Deno ni del navegador): lo usan el servidor, la pantalla y las pruebas.
 import { horasDesde, mesChile, soloDigitos } from "./ventas-core.js";
 import { validarRut, normalizarRut } from "./crm-core.js";
+import { COMUNAS_CHILE } from "./comunas-chile.js";
 
 /* ---------- Catálogos ---------- */
 export const TIPOS_VALIDACION = [
@@ -136,6 +137,7 @@ const DATOS_CLIENTE = [
   { campo: "telefono", etiqueta: "Teléfono del vendedor", error: "telefono_invalido", ok: (v) => soloDigitos(texto(v, 30)).length >= 8 },
   { campo: "email", etiqueta: "Correo del vendedor", error: "email_invalido", ok: (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(texto(v, 80)) },
   { campo: "direccion", etiqueta: "Dirección del vendedor", error: "direccion_requerida", ok: (v) => texto(v, 160).length >= 6 },
+  { campo: "comuna", etiqueta: "Comuna del vendedor", error: "comuna_invalida", ok: (v) => COMUNAS_CHILE.includes(v) },
   { campo: "banco", etiqueta: "Banco del vendedor", error: "banco_invalido", ok: (v) => BANCOS_CHILE.includes(v) },
   { campo: "tipo_cuenta", etiqueta: "Tipo de cuenta del vendedor", error: "tipo_cuenta_invalido", ok: (v) => TIPOS_CUENTA.includes(v) },
   { campo: "numero_cuenta", etiqueta: "Número de cuenta del vendedor", error: "numero_cuenta_invalido", ok: (v) => numeroCuentaValido(v) },
@@ -143,9 +145,9 @@ const DATOS_CLIENTE = [
 
 export function validarDatosCliente(input) {
   const i = input || {};
-  const v = { rut: i.rut, nombre: i.nombre, telefono: i.telefono, email: i.email, direccion: i.direccion, banco: i.banco, tipo_cuenta: i.tipoCuenta, numero_cuenta: i.numeroCuenta };
+  const v = { rut: i.rut, nombre: i.nombre, telefono: i.telefono, email: i.email, direccion: i.direccion, comuna: i.comuna, banco: i.banco, tipo_cuenta: i.tipoCuenta, numero_cuenta: i.numeroCuenta };
   for (const d of DATOS_CLIENTE) if (!d.ok(v[d.campo])) return { ok: false, error: d.error };
-  return { ok: true, value: { nombre: texto(v.nombre, 80), rut: normalizarRut(v.rut), telefono: texto(v.telefono, 30), email: texto(v.email, 80).toLowerCase(), direccion: texto(v.direccion, 160), banco: v.banco, tipo_cuenta: v.tipo_cuenta, numero_cuenta: limpiarNumeroCuenta(v.numero_cuenta) } };
+  return { ok: true, value: { nombre: texto(v.nombre, 80), rut: normalizarRut(v.rut), telefono: texto(v.telefono, 30), email: texto(v.email, 80).toLowerCase(), direccion: texto(v.direccion, 160), comuna: v.comuna, banco: v.banco, tipo_cuenta: v.tipo_cuenta, numero_cuenta: limpiarNumeroCuenta(v.numero_cuenta) } };
 }
 
 /**

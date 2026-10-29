@@ -474,7 +474,7 @@ export function buildNotaCompraPdf(n, { fmt }) {
   pdf.title(`Nota de compra ${n.folio}`, fechaLarga(String(n.fecha || "").slice(0, 10)));
   const ven = n.vendedor || {};
   pdf.sectionBar("Vendedor");
-  pdf.fields([["NOMBRE", ven.nombre], ["RUT", ven.rut], ["TELÉFONO", ven.telefono], ["CORREO", ven.email], ["DIRECCIÓN", ven.direccion], ["BANCO", ven.banco], ["TIPO DE CUENTA", ven.tipo_cuenta], ["NÚMERO DE CUENTA", ven.numero_cuenta]]);
+  pdf.fields([["NOMBRE", ven.nombre], ["RUT", ven.rut], ["TELÉFONO", ven.telefono], ["CORREO", ven.email], ["DIRECCIÓN", ven.direccion], ["COMUNA", ven.comuna], ["BANCO", ven.banco], ["TIPO DE CUENTA", ven.tipo_cuenta], ["NÚMERO DE CUENTA", ven.numero_cuenta]]);
   pdf.sectionBar("Vehículo");
   pdf.fields([
     ["PATENTE", v.patente], ["MARCA", v.marca], ["MODELO", [v.modelo, v.version].filter(Boolean).join(" ")], ["AÑO", v.anio],
@@ -505,7 +505,7 @@ export function buildComprobanteConsignacionPdf(n, { fmt }) {
   pdf.title(`Comprobante de consignación ${n.folio}`, fechaLarga(String(n.fecha || "").slice(0, 10)));
   const d = n.dueno || {};
   pdf.sectionBar("Dueño del vehículo");
-  pdf.fields([["NOMBRE", d.nombre], ["RUT", d.rut], ["TELÉFONO", d.telefono], ["CORREO", d.email], ["DIRECCIÓN", d.direccion], ["BANCO", d.banco], ["TIPO DE CUENTA", d.tipo_cuenta], ["NÚMERO DE CUENTA", d.numero_cuenta]]);
+  pdf.fields([["NOMBRE", d.nombre], ["RUT", d.rut], ["TELÉFONO", d.telefono], ["CORREO", d.email], ["DIRECCIÓN", d.direccion], ["COMUNA", d.comuna], ["BANCO", d.banco], ["TIPO DE CUENTA", d.tipo_cuenta], ["NÚMERO DE CUENTA", d.numero_cuenta]]);
   pdf.sectionBar("Vehículo");
   pdf.fields([
     ["PATENTE", v.patente], ["MARCA", v.marca], ["MODELO", [v.modelo, v.version].filter(Boolean).join(" ")], ["AÑO", v.anio],
