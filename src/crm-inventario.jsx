@@ -10,7 +10,6 @@ import React, { useState, useEffect, useMemo } from "react";
 import { InputDinero } from "./campo-dinero.jsx";
 import { ESTADOS_VEHICULO, TRANSMISIONES, COMBUSTIBLES, validarVehiculo, validarCliente, textoVencimiento } from "../supabase/functions/api/ventas-core.js";
 import { compressImage, makePhotoId } from "./photos.js";
-import { SeccionInspeccion } from "./crm-inspecciones.jsx";
 import { SeccionValidacion } from "./crm-validaciones.jsx";
 import { INPUT, BTN, BTN_PRIMARIO, clp, Aviso, Cargando, Campo, Modal, Tarjeta, useCarga, mensajeError, fechaCorta, BuscarPatente } from "./crm-ui.jsx";
 import { aplicarCampos } from "./datos-patente.js";
@@ -143,7 +142,6 @@ function FormVehiculo({ api, vehiculo, puedeCosto, onCerrar, onGuardado }) {
       </div>
 
       {f.id && <SeccionValidacion api={api} origen={{ tipo: "vehiculo", id: f.id }} titulo="Documentos del vehículo" />}
-      {f.id && <SeccionInspeccion api={api} origen={{ tipo: "vehiculo", id: f.id }} vehiculo={f} />}
 
       {error && <Aviso>{error}</Aviso>}
       <div className="flex gap-2">
