@@ -14,7 +14,7 @@ import { MEDIOS_PAGO } from "../supabase/functions/api/ventas-core.js";
 import { compraNombre, consignacionNombre, COMPRA_ABIERTA, CONSIGNACION_ABIERTA, validarOferta, validarConsignacion } from "../supabase/functions/api/compras-core.js";
 import { ResultadoTasacion } from "./crm-tasaciones.jsx";
 import { ValidacionDetalle } from "./crm-validaciones.jsx";
-import { buildNotaCompraPdf, buildComprobanteConsignacionPdf } from "./pdf-report.js";
+import { buildNotaCompraPdf, buildComprobanteConsignacionPdf, buildContratoConsignacionPdf } from "./pdf-report.js";
 import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, hace, Aviso, Cargando, Tarjeta, Campo, Pestanas, useCarga, mensajeError, DatosDelDueno, CuentaBancaria } from "./crm-ui.jsx";
 
 const COLOR_COMPRA = { oferta: "bg-amber-100 text-amber-800", aceptada: "bg-sky-100 text-sky-800", pago_pendiente: "bg-violet-100 text-violet-800", comprada: "bg-emerald-100 text-emerald-800", rechazada: "bg-stone-200 text-stone-600", anulada: "bg-stone-200 text-stone-600", cancelada: "bg-stone-200 text-stone-600" };
@@ -37,7 +37,7 @@ const DATOS_VENDEDOR = [
  * Panel de requisitos de una compra (vendedor) o de una consignación (dueño). `ops` = nombres de las operaciones y `args` = cómo se identifica
  * la operación en el servidor ({ id } para la compra, { leadId } para la consignación).
  */
-function RequisitosCompra({ api, c, puedeOperar, onCambio, onCompleto, persona = "vendedor", ops = { requisitos: "compras.requisitos", datos: "compras.datosCliente" }, args = { id: c.id }, clave = c.estado, destino = "concretar la compra" }) {
+function RequisitosCompra({ api, c, puedeOperar, onCambio, onCompleto, onDatosListos, persona = "vendedor", ops = { requisitos: "compras.requisitos", datos: "compras.datosCliente" }, args = { id: c.id }, clave = c.estado, destino = "concretar la compra" }) {
   const { datos, recargar } = useCarga(() => api(ops.requisitos, args), [api, args.id, args.leadId, clave]);
   const [f, setF] = useState(null);
   const [msg, setMsg] = useState({ tipo: "", texto: "" });
@@ -46,6 +46,7 @@ function RequisitosCompra({ api, c, puedeOperar, onCambio, onCompleto, persona =
   useEffect(() => {
     if (!datos) return;
     onCompleto(datos.completo);
+    if (onDatosListos) onDatosListos(!datos.faltantes.some((x) => x.tipo === "dato"));
     const cl = datos.cliente || {};
     setF({ nombre: cl.nombre || "", rut: cl.rut || "", telefono: cl.telefono || "", email: cl.email || "", direccion: cl.direccion || "", banco: cl.banco || "", tipoCuenta: cl.tipo_cuenta || "", numeroCuenta: cl.numero_cuenta || "" });
   }, [datos]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -117,6 +118,18 @@ async function descargarComprobanteConsignacion(api, c) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url; a.download = `Comprobante-de-consignacion_${comprobante.folio}_${(comprobante.vehiculo && comprobante.vehiculo.patente) || "vehiculo"}.pdf`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 3000);
+}
+
+/** Genera y descarga el contrato de consignación para firmar (borrador). El servidor valida datos del dueño, piso aceptado, precios y plazo. */
+async function descargarContratoConsignacion(api, leadId, datos) {
+  const { contrato } = await api("consignaciones.contrato", { leadId, datos });
+  const bytes = buildContratoConsignacionPdf(contrato, { fmt: clp });
+  const blob = new Blob([bytes], { type: "application/pdf" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = `Contrato-de-consignacion_${(contrato.vehiculo && contrato.vehiculo.patente) || "vehiculo"}.pdf`;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 3000);
 }
@@ -313,6 +326,8 @@ export function SeccionConsignacion({ api, lead, datos, onCambio, avisar }) {
   const { datos: lista, recargar } = useCarga(() => api("consignaciones.list", { vista: "lead", leadId: lead.id }), [api, lead.id, datos.eventos.length]);
   const tasada = (datos.tasaciones || []).find((t) => t.estado === "completada" && t.tipo !== "parte_pago");
   const [reqCompleto, setReqCompleto] = useState(false);
+  const [datosListos, setDatosListos] = useState(false);
+  const [pisoAceptado, setPisoAceptado] = useState(false);
   const [f, setF] = useState({ precioPiso: "", precioPublicacion: tasada && Number(tasada.valor_consignacion) > 0 ? String(tasada.valor_consignacion) : lead.vehiculo_ofrecido && lead.vehiculo_ofrecido.precioEsperado ? String(lead.vehiculo_ofrecido.precioEsperado) : "", plazoDias: 90, notas: "" });
   const [error, setError] = useState("");
   const [ocupado, setOcupado] = useState(false);
@@ -321,6 +336,13 @@ export function SeccionConsignacion({ api, lead, datos, onCambio, avisar }) {
   const abierta = lista.consignaciones.some((c) => CONSIGNACION_ABIERTA.includes(c.estado));
   const cambio = async () => { await recargar(); await onCambio(); };
   const o = lead.vehiculo_ofrecido || {};
+  const descargarContrato = async () => {
+    setError("");
+    setOcupado(true);
+    try { await descargarContratoConsignacion(api, lead.id, { ...f, pisoAceptado }); await cambio(); } catch (e) { setError(mensajeError(e)); }
+    setOcupado(false);
+  };
+  const contratoListo = datosListos && pisoAceptado && validarConsignacion(f).ok;
   const crear = async () => {
     setError("");
     const val = validarConsignacion(f);
@@ -341,7 +363,7 @@ export function SeccionConsignacion({ api, lead, datos, onCambio, avisar }) {
         </div>
       )}
       {!abierta && !cerrado && datos.puedeEditar && lista.consignaciones.every((c) => !["vendida"].includes(c.estado)) && (
-        <RequisitosCompra api={api} c={{ id: lead.id, estado: "" }} puedeOperar onCambio={cambio} onCompleto={setReqCompleto} persona="dueño"
+        <RequisitosCompra api={api} c={{ id: lead.id, estado: "" }} puedeOperar onCambio={cambio} onCompleto={setReqCompleto} onDatosListos={setDatosListos} persona="dueño"
           ops={{ requisitos: "consignaciones.requisitos", datos: "consignaciones.datosCliente" }} args={{ leadId: lead.id }} clave={lista.consignaciones.length} destino="registrar la consignación" />
       )}
       {!abierta && !cerrado && datos.puedeEditar && lista.consignaciones.every((c) => !["vendida"].includes(c.estado)) && (
@@ -354,6 +376,11 @@ export function SeccionConsignacion({ api, lead, datos, onCambio, avisar }) {
             <Campo etiqueta="Nota (opcional)"><input value={f.notas} maxLength={300} onChange={(e) => setF({ ...f, notas: e.target.value })} className={INPUT} /></Campo>
           </div>
           {Number(f.precioPublicacion) >= Number(f.precioPiso) && Number(f.precioPiso) > 0 && <p className="text-xs text-stone-600">Si se vende a la publicación, el margen es <strong className="font-mono">{clp(Number(f.precioPublicacion) - Number(f.precioPiso))}</strong>; tu comisión es el 25 % de lo que quede sobre el piso.</p>}
+          <label className="flex items-start gap-2 text-sm text-stone-700"><input type="checkbox" checked={pisoAceptado} onChange={(e) => setPisoAceptado(e.target.checked)} className="mt-0.5" /><span>El dueño aceptó el precio piso y el plazo.</span></label>
+          <div className="flex flex-wrap items-center gap-3">
+            <button disabled={ocupado || !contratoListo} onClick={descargarContrato} title={contratoListo ? "" : "Completa los datos del dueño, el piso, la publicación y el plazo, y marca que el dueño aceptó el piso"} className={BTN}>Descargar contrato de consignación (PDF)</button>
+            <span className="text-xs text-stone-500">Se firma con el dueño y luego se sube como «Contrato de consignación» en los documentos.</span>
+          </div>
           {error && <Aviso>{error}</Aviso>}
           <div><button disabled={ocupado || !reqCompleto} title={reqCompleto ? "" : "Completa los datos del dueño y los documentos"} onClick={crear} className={BTN_AMBAR}>Registrar la consignación</button></div>
         </div>

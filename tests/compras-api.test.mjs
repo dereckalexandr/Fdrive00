@@ -781,3 +781,29 @@ test("La solicitud que llega sola por el sitio web no se edita; la que el equipo
     assert.deepEqual([r.status, r.error], [409, "lead_no_editable"], tipo);
   }
 });
+
+test("Consignación: el contrato para firmar se entrega con los datos del dueño completos, el piso aceptado y los precios y el plazo válidos", async () => {
+  const lead = await leadDe(U.c1.token, "consignacion");
+  const pedir = (datos) => ve(U.c1.token, "consignaciones.contrato", { leadId: lead.id, datos });
+  const buenos = { precioPiso: 8100000, precioPublicacion: 9100000, plazoDias: 60, notas: "Llaves en el local", pisoAceptado: true };
+  // Sin los datos del dueño no hay contrato.
+  assert.equal((await pedir(buenos)).error, "contrato_datos_incompletos");
+  assert.equal((await ve(U.c1.token, "consignaciones.datosCliente", { leadId: lead.id, datos: DATOS_VENDEDOR() })).status, 200);
+  // El piso debe estar aceptado por el dueño, y los precios y el plazo, bien.
+  assert.equal((await pedir({ ...buenos, pisoAceptado: false })).error, "piso_no_aceptado");
+  assert.equal((await pedir({ ...buenos, precioPublicacion: 8000000 })).error, "publicacion_bajo_piso");
+  assert.equal((await pedir({ ...buenos, plazoDias: 5 })).error, "plazo_invalido");
+  // Los documentos todavía no hacen falta: el contrato es uno de ellos.
+  const ok = await pedir(buenos);
+  assert.equal(ok.status, 200, JSON.stringify(ok));
+  const c = ok.contrato;
+  assert.deepEqual([c.precio_piso, c.precio_publicacion, c.plazo_dias], [8100000, 9100000, 60]);
+  assert.equal(c.dueno.banco, "BancoEstado");
+  assert.equal(c.dueno.numero_cuenta, "12345678");
+  assert.ok(c.vehiculo.patente);
+  assert.ok(db.tablas.lead_eventos.some((e) => e.lead_id === lead.id && /descargó el contrato de consignación/.test(e.detalle)));
+  // Quien no tiene Consignaciones no lo pide, y un lead que no es de consignación tampoco.
+  assert.equal((await ve(U.c2.token, "consignaciones.contrato", { leadId: lead.id, datos: buenos })).status, 403);
+  const compra = await leadDe(U.c1.token, "compra");
+  assert.equal((await ve(U.c1.token, "consignaciones.contrato", { leadId: compra.id, datos: buenos })).status, 403);
+});

@@ -13,6 +13,7 @@
 
 import { computeTasacionTotals, computeValorFinal } from "./tasacion-totals.js";
 import { calcularCotizacion } from "../supabase/functions/api/ventas-core.js";
+import { contratoConsignacion } from "../supabase/functions/api/contrato-consignacion-core.js";
 
 const PAGE_W = 595;
 const PAGE_H = 842;
@@ -524,6 +525,52 @@ export function buildComprobanteConsignacionPdf(n, { fmt }) {
   if ((n.documentos || []).length) pdf.paragraph("DOCUMENTOS RECIBIDOS", n.documentos.join(" · "));
   pdf.sectionBar("Consignación registrada por");
   pdf.fields([["EJECUTIVO", n.ejecutivo], ["LOCAL", n.local]]);
+  return pdf.build();
+}
+
+/**
+ * Contrato de consignación para firmar (borrador): comparecencia, cláusulas y hoja de firmas con huella y testigos.
+ * @param c  datos para contratoConsignacion (ver contrato-consignacion-core.js)
+ */
+export function buildContratoConsignacionPdf(c, { fmt }) {
+  const { partes, clausulas } = contratoConsignacion(c, fmt);
+  const v = c.vehiculo || {};
+  const pdf = new PdfDoc(`Contrato de consignación · ${[v.marca, v.modelo].filter(Boolean).join(" ")} ${v.patente || ""} · ${(c.local && c.local.nombre) || "Drive Futuro"}`);
+  pdf.title("Contrato de consignación de vehículo", fechaLarga(String(c.fecha || "").slice(0, 10)));
+  pdf.paragraph("COMPARECENCIA", partes);
+  pdf.sectionBar("Condiciones principales");
+  pdf.fields([
+    ["PATENTE", v.patente], ["VEHÍCULO", [v.marca, v.modelo, v.anio].filter(Boolean).join(" ")],
+    ["PRECIO PISO", fmt(c.precio_piso)], ["PRECIO DE PUBLICACIÓN", fmt(c.precio_publicacion)],
+    ["PLAZO", c.plazo_dias ? `${c.plazo_dias} días` : ""], ["VENCE", fechaLarga(contratoConsignacion(c, fmt).vence)],
+  ]);
+  pdf.sectionBar("Cláusulas");
+  for (const cl of clausulas) pdf.paragraph(cl.titulo, cl.texto);
+
+  // Hoja de firmas: el dueño (con huella), el representante del local y dos testigos.
+  pdf.newPage();
+  pdf.sectionBar("Firmas");
+  const d = c.dueno || {};
+  const caja = (x, w, titulo, nombre, rut, conHuella) => {
+    const top = pdf.y;
+    const h = 96;
+    pdf.line(x, top, x + w, top, 0.6); pdf.line(x, top - h, x + w, top - h, 0.6); pdf.line(x, top, x, top - h, 0.6); pdf.line(x + w, top, x + w, top - h, 0.6);
+    pdf.text(x + 6, top - 12, titulo, { size: 8, bold: true, gray: 0.4 });
+    if (conHuella) { const hx = x + w - 62; pdf.line(hx, top - 20, hx + 52, top - 20, 0.7); pdf.line(hx, top - 82, hx + 52, top - 82, 0.7); pdf.line(hx, top - 20, hx, top - 82, 0.7); pdf.line(hx + 52, top - 20, hx + 52, top - 82, 0.7); pdf.text(hx + 14, top - 90, "HUELLA", { size: 6.5, gray: 0.5 }); }
+    pdf.line(x + 8, top - 66, x + (conHuella ? w - 72 : w - 8), top - 66, 0.5);
+    pdf.text(x + 8, top - 77, nombre || "Nombre", { size: 8.5 });
+    pdf.text(x + 8, top - 88, rut ? `RUT ${rut}` : "RUT", { size: 8.5 });
+  };
+  const mitad = (CONTENT_W - 16) / 2;
+  pdf.ensure(110);
+  caja(MARGIN, mitad, "EL CONSIGNANTE (DUEÑO)", d.nombre, d.rut, true);
+  caja(MARGIN + mitad + 16, mitad, "EL CONSIGNATARIO (DRIVE FUTURO)", c.ejecutivo, "", false);
+  pdf.y -= 112;
+  pdf.ensure(110);
+  caja(MARGIN, mitad, "TESTIGO 1", "", "", false);
+  caja(MARGIN + mitad + 16, mitad, "TESTIGO 2", "", "", false);
+  pdf.y -= 112;
+  pdf.paragraph("NOTA", "Este contrato debe ser firmado por ambas partes. Una vez firmado, el ejecutivo lo sube como documento obligatorio de la consignación.");
   return pdf.build();
 }
 

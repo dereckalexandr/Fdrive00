@@ -2346,6 +2346,33 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       return json({ ok: true });
     }
     /**
+     * Datos para el contrato de consignación que se firma y luego se sube como documento obligatorio. Se entrega solo con los datos del dueño
+     * completos, el precio piso aceptado por el cliente y los precios y el plazo válidos; los documentos todavía no hacen falta (el contrato es uno de ellos).
+     */
+    if (op === "consignaciones.contrato") {
+      const lead = await cargarLead(String(body.leadId ?? ""));
+      if (!lead || !puedeVer(lead)) return err("no_existe", 404);
+      if (!puedeTocar(lead) || lead.tipo !== "consignacion") return err("forbidden", 403);
+      if (ETAPAS_CERRADAS.includes(lead.etapa)) return err("lead_cerrado");
+      const cl = lead.cliente_id ? (await sb.from("clientes").select("*").eq("id", lead.cliente_id).maybeSingle()).data : null;
+      if (faltantesCompra({ cliente: cl, docs: [], lista: [], persona: "dueño" }).length > 0) return err("contrato_datos_incompletos", 409);
+      if (body.datos?.pisoAceptado !== true) return err("piso_no_aceptado", 409);
+      const v = validarConsignacion(body.datos);
+      if (!v.ok) return err(v.error!);
+      const [loc] = lead.local_id ? await porIds("locales", [lead.local_id]) : [null];
+      const [eje] = lead.asignado_a ? await porIds("usuarios", [lead.asignado_a]) : [null];
+      const fecha = new Date().toLocaleDateString("en-CA", { timeZone: "America/Santiago" });
+      await evento(lead.id, "consignacion", `${userName} descargó el contrato de consignación (piso ${dinero(v.value.precio_piso)}, publicación ${dinero(v.value.precio_publicacion)}, ${v.value.plazo_dias} días)`);
+      await audit(ctx.actor, "consignacion.contrato", "lead", lead.id, { piso: v.value.precio_piso, publicacion: v.value.precio_publicacion, plazo: v.value.plazo_dias });
+      return json({
+        contrato: {
+          fecha, local: loc ? { nombre: loc.nombre, direccion: loc.direccion ?? "" } : { nombre: "", direccion: "" }, ejecutivo: eje ? eje.nombre : userName,
+          dueno: { nombre: cl.nombre, rut: cl.rut, telefono: cl.telefono, email: cl.email, direccion: cl.direccion, banco: cl.banco, tipo_cuenta: cl.tipo_cuenta, numero_cuenta: cl.numero_cuenta },
+          vehiculo: lead.vehiculo_ofrecido || {}, precio_piso: v.value.precio_piso, precio_publicacion: v.value.precio_publicacion, plazo_dias: v.value.plazo_dias, notas: v.value.notas,
+        },
+      });
+    }
+    /**
      * Datos del comprobante de consignación. Existe con el contrato registrado (no devuelto ni cancelado) y con los datos del dueño y los
      * documentos completos; las consignaciones anteriores a esta exigencia (lista antigua de documentos) lo generan sin la lista de documentos.
      */

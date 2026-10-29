@@ -140,6 +140,8 @@ const MENSAJES = {
   compra_incompleta: "Faltan datos del vendedor o documentos para concretar la compra. Revisa la lista de requisitos de la compra.",
   nombre_apellido_requerido: "Escribe el nombre y el apellido del vendedor.",
   direccion_requerida: "Escribe la dirección del vendedor.",
+  contrato_datos_incompletos: "Completa primero los datos del dueño (RUT, nombre, teléfono, correo, dirección y cuenta bancaria).",
+  piso_no_aceptado: "Marca que el dueño aceptó el precio piso.",
   lead_no_editable: "La solicitud que el cliente envió por el sitio web no se puede editar.",
   lugar_requerido: "Elige dónde se hará la inspección.",
   lugar_invalido: "Ese lugar ya no está disponible. Elige otro.",
