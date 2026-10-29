@@ -172,6 +172,18 @@ export function resumenSolicitud(v, vehiculoTexto = "") {
   return partes.join(". ");
 }
 
+/**
+ * Nombre que debe quedar en la ficha del cliente cuando el teléfono ya existía. El formulario es público, así que no se pisa el nombre
+ * de una persona real: solo se reemplaza el que es un marcador («Lead 01», «Cliente3»), está vacío o es una sola palabra.
+ */
+export function nombreTrasSolicitud(actual, indicado) {
+  const a = String(actual || "").trim();
+  const n = String(indicado || "").trim();
+  if (!n || a.toLowerCase() === n.toLowerCase()) return a || n;
+  const marcador = !a || /^(lead|cliente|prueba|test)\s*\d*$/i.test(a) || a.split(/\s+/).length < 2;
+  return marcador ? n : a;
+}
+
 /** Mensajes para el visitante (no técnicos). */
 export const MENSAJES_WEB = {
   consentimiento_requerido: "Para continuar, acepta el uso de tus datos para que podamos contactarte.",

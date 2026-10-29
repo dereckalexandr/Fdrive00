@@ -12,7 +12,7 @@ import { enviarAviso, enSegundoPlano, correoActivo } from "./correo.ts";
 import { consultarPatente } from "./patentes.ts";
 import { LIMITE_WEB_IP_HORA } from "./patentes-core.js";
 import {
-  visibleEnCatalogo, vehiculoPublico, validarSolicitudWeb, cuotaReferencial, tipoLeadDe, resumenSolicitud, FUENTE_WEB,
+  visibleEnCatalogo, vehiculoPublico, validarSolicitudWeb, cuotaReferencial, tipoLeadDe, resumenSolicitud, nombreTrasSolicitud, FUENTE_WEB,
   LIMITE_IP_HORA, LIMITE_TELEFONO_HORA, LIMITE_LOCAL_HORA, ESTADOS_VISIBLES,
 } from "./publico-core.js";
 
@@ -205,6 +205,13 @@ export async function publicOp(ctx: CtxPublico, body: any): Promise<Response> {
     if (cq.error) return fallo(cq.error);
     let cliente: any = (cq.data ?? [])[0] ?? null;
     if (cliente) {
+      // Mismo teléfono con otro nombre: si el guardado es un marcador («Lead 01»), queda el nombre que escribió ahora.
+      const nombreFinal = nombreTrasSolicitud(cliente.nombre, s.contacto.nombre);
+      if (nombreFinal !== cliente.nombre) {
+        const up = await sb.from("clientes").update({ nombre: nombreFinal }).eq("id", cliente.id);
+        if (up.error) return fallo(up.error);
+        cliente = { ...cliente, nombre: nombreFinal };
+      }
       const delTel = new Set((cq.data ?? []).map((c: any) => c.id));
       if ((recientes.data ?? []).filter((l: any) => delTel.has(l.cliente_id)).length >= LIMITE_TELEFONO_HORA) return err("demasiadas_solicitudes", 429);
     } else {
@@ -240,7 +247,7 @@ export async function publicOp(ctx: CtxPublico, body: any): Promise<Response> {
       vehiculo_interes: s.tipo === "vender" ? `${s.vende.modalidad === "consignar" ? "CONSIGNA" : "VENDE"}: ${s.vende.marca} ${s.vende.modelo} ${s.vende.anio} · ${s.vende.patente}` : null,
       // Renovar: su auto queda como vehículo en parte de pago del lead (el valor lo fija la tasación).
       parte_pago: s.tipo === "renovar" ? { tiene: true, patente: s.vende.patente, marca: s.vende.marca, modelo: s.vende.modelo, anio: s.vende.anio, km: s.vende.km, valor: 0, transmision: s.vende.transmision, combustible: s.vende.combustible, duenos: s.vende.duenos, prenda: s.vende.prenda, mantenciones: s.vende.mantenciones, precioEsperado: s.vende.precioEsperado } : {}, financiamiento, asignado_a: asignado ? asignado.id : null, ...(vtWeb && vtWeb.ok ? { vehiculo_ofrecido: vtWeb.value } : {}),
-      notas: [resumen, cuota ? `Cuota referencial: $${cuota.cuota.toLocaleString("es-CL")} por mes (financiando $${cuota.montoFinanciar.toLocaleString("es-CL")} a ${s.plazo} cuotas, tasa ${cfg.tasa_mensual_web}% mensual). Sujeta a evaluación.` : ""].filter(Boolean).join("\n").slice(0, 1000),
+      notas: [`Contacto: ${s.contacto.nombre} · ${s.contacto.telefono}`, resumen, cuota ? `Cuota referencial: $${cuota.cuota.toLocaleString("es-CL")} por mes (financiando $${cuota.montoFinanciar.toLocaleString("es-CL")} a ${s.plazo} cuotas, tasa ${cfg.tasa_mensual_web}% mensual). Sujeta a evaluación.` : ""].filter(Boolean).join("\n").slice(0, 1000),
     }).select().single();
     if (ins.error) return fallo(ins.error);
     const lead = ins.data;

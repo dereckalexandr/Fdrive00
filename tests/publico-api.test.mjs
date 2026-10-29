@@ -138,6 +138,25 @@ test("Consulta por un vehículo: crea cliente y lead «Sitio web», repartido a 
   assert.ok(mias.leads.some((x) => x.id === l.id));
 });
 
+test("Mismo teléfono con otro nombre: el marcador «Lead 01» se reemplaza por el nombre escrito; el de una persona real no se pisa", async () => {
+  nuevaIp();
+  const tel = `9${String(70000000 + ++n)}`;
+  const cli0 = db.tablas.clientes.length;
+  db.tablas.clientes.push({ id: randomUUID(), nombre: "Lead 01", telefono: tel, local_id: L1 });
+  assert.equal((await sol("consulta", { vehiculoId: U.disp.id, nombre: "María González", telefono: tel })).status, 200);
+  const clientes = db.tablas.clientes.filter((c) => c.telefono === tel);
+  assert.equal(clientes.length, 1, "no se duplica el cliente");
+  assert.equal(clientes[0].nombre, "María González");
+  const l = leadsWeb()[leadsWeb().length - 1];
+  assert.match(l.notas, /^Contacto: María González · /, "el nombre escrito queda también en las notas del lead");
+  // Una persona real no cambia de nombre porque alguien use su teléfono.
+  nuevaIp();
+  assert.equal((await sol("consulta", { vehiculoId: U.disp.id, nombre: "Otra Persona", telefono: tel })).status, 200);
+  assert.equal(db.tablas.clientes.find((c) => c.telefono === tel).nombre, "María González");
+  assert.match(leadsWeb()[leadsWeb().length - 1].notas, /^Contacto: Otra Persona · /);
+  assert.equal(db.tablas.clientes.length, cli0 + 1);
+});
+
 test("El reparto es rotativo entre los ejecutivos", async () => {
   nuevaIp();
   const a = [];
