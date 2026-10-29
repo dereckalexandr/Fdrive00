@@ -8,7 +8,7 @@
 //    contrato con precio piso y precio de publicación → documentos validados → el vehículo entra al inventario como
 //    «consignado» → al venderse, el margen (precio de venta − piso) paga la comisión del ejecutivo.
 import { MEDIOS_PAGO, mesChile, esMes, normalizarPatente } from "./ventas-core.js";
-import { validarVehiculoTasacion } from "./tasaciones-core.js";
+import { validarVehiculoTasacion, topeDeOferta } from "./tasaciones-core.js";
 
 /* ---------- Catálogos ---------- */
 export const ESTADOS_COMPRA = [
@@ -103,11 +103,11 @@ export function validarVehiculoOfrecido(input) {
  */
 export function validarOferta(input, tasacion, patenteLead) {
   if (tasacion && tasacion.estado === "completada" && (tasacion.aplica_para === "consignacion" || tasacion.aplica_para === "ninguna")) return { ok: false, error: "tasacion_no_aplica_compra" };
-  if (!tasacion || tasacion.estado !== "completada" || !(Number(tasacion.valor_compra) > 0)) return { ok: false, error: "tasacion_incompleta" };
+  if (!tasacion || tasacion.estado !== "completada" || !(topeDeOferta(tasacion) > 0)) return { ok: false, error: "tasacion_incompleta" };
   if (patenteLead && normalizarPatente(tasacion.patente) !== normalizarPatente(patenteLead)) return { ok: false, error: "tasacion_no_corresponde" };
   const monto = entero(input && input.monto, 1, 2_000_000_000);
   if (monto === null || Number.isNaN(monto)) return { ok: false, error: "monto_invalido" };
-  if (monto > Number(tasacion.valor_compra)) return { ok: false, error: "oferta_excede_tasacion" };
+  if (monto > topeDeOferta(tasacion)) return { ok: false, error: "oferta_excede_tasacion" };
   return { ok: true, value: { monto_oferta: monto, notas: texto(input && input.notas, 300) || null } };
 }
 

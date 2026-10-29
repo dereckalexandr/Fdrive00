@@ -29,7 +29,7 @@ const consultasPorPersona = new Map<string, { n: number; reset: number }>();
 import {
   folioTasacion, validarSolicitudTasacion, validarTasacionDirecta, validarBorradorTasacion, validarCompletarTasacion, validarTransicionTasacion,
   topeParteDePago, verificarTopeParteDePago, fusionarParteDePago, metricasTasador, colaTasaciones,
-  vehiculoDelCliente,
+  vehiculoDelCliente, topeDeOferta,
 } from "./tasaciones-core.js";
 
 import {
@@ -168,7 +168,8 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
   /** Texto con la decisión del Tasador y sus precios (para el historial del lead y el aviso al ejecutivo). */
   function resultadoTasacion(t: any) {
     const retoma = Number(t.valor_retoma) > 0 ? ` Retoma: ${dinero(t.valor_retoma)}.` : "";
-    if (t.aplica_para === "consignacion") return `aplica para CONSIGNACIÓN, precio de consignación ${dinero(t.valor_consignacion)}${Number(t.valor_compra) > 0 ? ` (compra referencial ${dinero(t.valor_compra)})` : ""}.${retoma} Ya se puede registrar el contrato.`;
+    if (t.aplica_para === "consignacion") return `aplica para CONSIGNACIÓN, el dueño recibiría ${dinero(t.valor_consignacion)} (venta estimada ${dinero(t.valor_venta)}).${retoma} Ya se puede registrar el contrato.`;
+    if (t.aplica_para === "ambas") return `aplica para COMPRA y CONSIGNACIÓN: compra ${dinero(t.valor_compra)}, consignación ${dinero(t.valor_consignacion)}, venta estimada ${dinero(t.valor_venta)}. Se puede ofertar hasta ${dinero(topeDeOferta(t))} (el precio de consignación).${retoma}`;
     if (t.aplica_para === "ninguna") return `NO aplica para compra ni consignación${t.observaciones ? `: ${t.observaciones}` : ""}.${retoma}`;
     return `aplica para COMPRA, se paga hasta ${dinero(t.valor_compra)} (venta esperada ${dinero(t.valor_venta)}).${retoma} Ya se puede hacer la oferta.`;
   }
@@ -2138,12 +2139,12 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       if ((abierta.data ?? []).some((c: any) => COMPRA_ABIERTA.includes(c.estado))) return err("compra_en_curso", 409);
       const ins = await sb.from("compras").insert({
         ...v.value, local_id: lead.local_id, lead_id: lead.id, cliente_id: lead.cliente_id, ejecutivo_id: lead.asignado_a, tasacion_id: tas.id,
-        vehiculo: tas.vehiculo || lead.vehiculo_ofrecido || {}, patente: tas.patente, valor_tasado: tas.valor_compra, estado: "oferta", creado_por: userName,
+        vehiculo: tas.vehiculo || lead.vehiculo_ofrecido || {}, patente: tas.patente, valor_tasado: topeDeOferta(tas), estado: "oferta", creado_por: userName,
       }).select().single();
       if (ins.error) return ins.error.code === "23505" ? err("compra_en_curso", 409) : fallar(ins.error);
       await sb.from("leads").update({ etapa: "cotizado", actualizado_en: new Date().toISOString() }).eq("id", lead.id);
-      await evento(lead.id, "compra", `Oferta ${folioCompra(ins.data.numero)} por ${dinero(v.value.monto_oferta)} (tasado en ${dinero(tas.valor_compra)}) hecha por ${userName}`);
-      await audit(ctx.actor, "compra.ofertar", "compra", ins.data.id, { numero: ins.data.numero, monto: v.value.monto_oferta, tasado: tas.valor_compra, lead_id: lead.id });
+      await evento(lead.id, "compra", `Oferta ${folioCompra(ins.data.numero)} por ${dinero(v.value.monto_oferta)} (tasado en ${dinero(topeDeOferta(tas))}) hecha por ${userName}`);
+      await audit(ctx.actor, "compra.ofertar", "compra", ins.data.id, { numero: ins.data.numero, monto: v.value.monto_oferta, tasado: topeDeOferta(tas), lead_id: lead.id });
       return json(await compraDetalle(ins.data));
     }
 

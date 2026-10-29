@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   tasacionNombre, folioTasacion, validarVehiculoTasacion, validarSolicitudTasacion, validarTasacionDirecta,
   limpiarEstimacion, limpiarInspeccionRef, validarBorradorTasacion, validarCompletarTasacion, validarTransicionTasacion,
-  topeParteDePago, verificarTopeParteDePago, fusionarParteDePago, metricasTasador, colaTasaciones,
+  topeParteDePago, verificarTopeParteDePago, fusionarParteDePago, metricasTasador, colaTasaciones, topeDeOferta,
 } from "../supabase/functions/api/tasaciones-core.js";
 
 const VEH = { patente: "ab cd-12", marca: "Toyota", modelo: "Yaris", anio: 2018, km: 78000, version: "1.5 GLI", color: "Gris", transmision: "Automática", combustible: "Bencina" };
@@ -188,9 +188,19 @@ test("Completar con decisión del Tasador: compra, consignación, no aplica y re
   const c = validarCompletarTasacion({ tipo: "directa", aplica_para: "compra", valor_compra: 5000000, valor_venta: 6000000, valor_retoma: 4800000 });
   assert.deepEqual([c.value.aplica_para, c.value.valor_compra, c.value.valor_retoma, c.value.valor_consignacion], ["compra", 5000000, 4800000, null]);
   assert.equal(e({ tipo: "directa", aplica_para: "compra", valor_compra: 5000000 }), "valor_venta_invalido");
-  const k = validarCompletarTasacion({ tipo: "directa", aplica_para: "consignacion", valor_consignacion: 7000000 });
-  assert.deepEqual([k.ok, k.value.aplica_para, k.value.valor_consignacion, k.value.valor_compra], [true, "consignacion", 7000000, null]);
+  const k = validarCompletarTasacion({ tipo: "directa", aplica_para: "consignacion", valor_consignacion: 7000000, valor_venta: 8500000 });
+  assert.deepEqual([k.ok, k.value.aplica_para, k.value.valor_consignacion, k.value.valor_compra, k.value.valor_venta], [true, "consignacion", 7000000, null, 8500000]);
   assert.equal(e({ tipo: "directa", aplica_para: "consignacion" }), "valor_consignacion_invalido");
+  assert.equal(e({ tipo: "directa", aplica_para: "consignacion", valor_consignacion: 7000000 }), "valor_venta_invalido", "el precio estimado de venta es obligatorio");
+  assert.equal(e({ tipo: "directa", aplica_para: "consignacion", valor_consignacion: 7000000, valor_venta: 6000000 }), "valor_venta_menor");
+  // Compra y consignación: los dos precios y un solo precio estimado de venta; la oferta tope es el precio de consignación.
+  const a = validarCompletarTasacion({ tipo: "directa", aplica_para: "ambas", valor_compra: 6000000, valor_consignacion: 7000000, valor_venta: 8500000 });
+  assert.deepEqual([a.ok, a.value.aplica_para, a.value.valor_compra, a.value.valor_consignacion, a.value.valor_venta, a.value.margen_esperado], [true, "ambas", 6000000, 7000000, 8500000, 1500000]);
+  assert.equal(topeDeOferta({ aplica_para: "ambas", valor_compra: 6000000, valor_consignacion: 7000000 }), 7000000);
+  assert.equal(topeDeOferta({ aplica_para: "compra", valor_compra: 6000000, valor_consignacion: 7000000 }), 6000000);
+  assert.equal(e({ tipo: "directa", aplica_para: "ambas", valor_consignacion: 7000000, valor_venta: 8500000 }), "valor_compra_invalido");
+  assert.equal(e({ tipo: "directa", aplica_para: "ambas", valor_compra: 6000000, valor_venta: 8500000 }), "valor_consignacion_invalido");
+  assert.equal(e({ tipo: "directa", aplica_para: "ambas", valor_compra: 6000000, valor_consignacion: 7000000 }), "valor_venta_invalido");
   const n = validarCompletarTasacion({ tipo: "directa", aplica_para: "ninguna", observaciones: "Siniestro grave" });
   assert.deepEqual([n.ok, n.value.aplica_para, n.value.valor_compra], [true, "ninguna", null]);
   assert.equal(e({ tipo: "directa", aplica_para: "ninguna" }), "motivo_no_aplica_requerido");

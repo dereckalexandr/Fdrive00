@@ -12,7 +12,7 @@
 import React, { useState, useEffect } from "react";
 import { InputDinero } from "./campo-dinero.jsx";
 import { mesChile } from "../supabase/functions/api/ventas-core.js";
-import { tasacionNombre, aplicaParaNombre, validarVehiculoTasacion, validarTasacionDirecta, MAX_FOTOS_TASACION } from "../supabase/functions/api/tasaciones-core.js";
+import { tasacionNombre, aplicaParaNombre, validarVehiculoTasacion, validarTasacionDirecta, MAX_FOTOS_TASACION, topeDeOferta } from "../supabase/functions/api/tasaciones-core.js";
 import { compressImage, makePhotoId } from "./photos.js";
 import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, useCarga, mensajeError, CamposVehiculo, aVehiculoForm, VEH_VACIO, apiPorDefecto } from "./crm-ui.jsx";
 import { SeccionInspeccion, Miniatura as MiniaturaInspeccion } from "./crm-inspecciones.jsx";
@@ -153,14 +153,19 @@ function TasacionDetalle({ api, id, renderEstimador, onCerrar, onCambio }) {
   const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
   const total = fotos.length + nuevas.length;
   const esRetoma = t.tipo === "parte_pago";
-  const margen = Number(f.valorVenta) - Number(esRetoma ? f.valorRetoma : f.valorCompra);
+  const pagaCompra = f.aplicaPara === "compra" || f.aplicaPara === "ambas";
+  const pagaConsig = f.aplicaPara === "consignacion" || f.aplicaPara === "ambas";
+  const pago = esRetoma ? Number(f.valorRetoma) : f.aplicaPara === "ambas" ? Math.max(Number(f.valorCompra), Number(f.valorConsignacion)) : f.aplicaPara === "consignacion" ? Number(f.valorConsignacion) : Number(f.valorCompra);
+  const margen = Number(f.valorVenta) - pago;
   // Qué falta para poder completar, según el tipo de tasación y lo que el Tasador decida.
   const falta = (() => {
     if (esRetoma) return f.valorRetoma === "" || f.valorVenta === "" || margen < 0 ? "Escribe el valor de retoma y la venta esperada." : "";
-    if (!f.aplicaPara) return "Indica si el vehículo aplica para compra, consignación o ninguna.";
+    if (!f.aplicaPara) return "Indica si el vehículo aplica para compra, consignación, ambas o ninguna.";
     if (f.aplicaPara === "ninguna") return String(f.observaciones || "").trim().length < 3 ? "Explica en las observaciones por qué no aplica." : "";
-    if (f.aplicaPara === "consignacion") return f.valorConsignacion === "" ? "Escribe el precio de consignación." : "";
-    return f.valorCompra === "" || f.valorVenta === "" || margen < 0 ? "Escribe el valor de compra y la venta esperada." : "";
+    if (pagaConsig && f.valorConsignacion === "") return "Escribe el precio de consignación (lo que recibiría el dueño).";
+    if (pagaCompra && f.valorCompra === "") return "Escribe el precio de compra.";
+    if (f.valorVenta === "") return "Escribe el precio estimado de venta.";
+    return margen < 0 ? "El precio estimado de venta no puede ser menor que lo que se paga." : "";
   })();
 
   const agregarFotos = async (ev) => {
@@ -223,7 +228,7 @@ function TasacionDetalle({ api, id, renderEstimador, onCerrar, onCambio }) {
           <div className="mb-4">
             <p className="text-sm text-stone-700 mb-2">¿Para qué aplica este vehículo?</p>
             <div className="flex flex-wrap gap-2">
-              {[["compra", "Compra"], ["consignacion", "Consignación"], ["ninguna", "No aplica"]].map(([id, nombre]) => (
+              {[["compra", "Compra"], ["consignacion", "Consignación"], ["ambas", "Compra y consignación"], ["ninguna", "No aplica"]].map(([id, nombre]) => (
                 <button key={id} type="button" disabled={!editable} onClick={() => set("aplicaPara", id)}
                   className={`px-4 py-2 text-sm border ${f.aplicaPara === id ? (id === "ninguna" ? "bg-rose-600 text-white border-rose-600" : "bg-stone-900 text-white border-stone-900") : "bg-white text-stone-700 border-stone-300"} disabled:opacity-60`}>{nombre}</button>
               ))}
@@ -231,17 +236,16 @@ function TasacionDetalle({ api, id, renderEstimador, onCerrar, onCambio }) {
           </div>
         )}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
-          {!esRetoma && <Campo etiqueta={`Precio de compra ($)${f.aplicaPara === "compra" ? " *" : ""}`} ayuda="Lo máximo que se ofrece pagar por comprarlo."><InputDinero value={f.valorCompra} disabled={!editable} onChange={(e) => set("valorCompra", e.target.value)} className={`${INPUT} font-mono`} /></Campo>}
-          {!esRetoma && <Campo etiqueta={`Precio de consignación ($)${f.aplicaPara === "consignacion" ? " *" : ""}`} ayuda="Precio de publicación sugerido si se consigna."><InputDinero value={f.valorConsignacion} disabled={!editable} onChange={(e) => set("valorConsignacion", e.target.value)} className={`${INPUT} font-mono`} /></Campo>}
+          {!esRetoma && <Campo etiqueta={`Precio de compra ($)${pagaCompra ? " *" : ""}`} ayuda="Lo máximo que se ofrece pagar por comprarlo."><InputDinero value={f.valorCompra} disabled={!editable} onChange={(e) => set("valorCompra", e.target.value)} className={`${INPUT} font-mono`} /></Campo>}
+          {!esRetoma && <Campo etiqueta={`Precio de consignación ($)${pagaConsig ? " *" : ""}`} ayuda={f.aplicaPara === "ambas" ? "Lo que recibiría el dueño (piso). Es el máximo que se puede ofertar." : "Lo que recibiría el dueño (piso) si se consigna."}><InputDinero value={f.valorConsignacion} disabled={!editable} onChange={(e) => set("valorConsignacion", e.target.value)} className={`${INPUT} font-mono`} /></Campo>}
           <Campo etiqueta={`Valor de retoma ($)${esRetoma ? " *" : ""}`} ayuda="Lo que se reconoce si el cliente lo entrega en parte de pago."><InputDinero value={f.valorRetoma} disabled={!editable} onChange={(e) => set("valorRetoma", e.target.value)} className={`${INPUT} font-mono`} /></Campo>
-          {(esRetoma || f.aplicaPara === "compra") && <Campo etiqueta="Valor de venta esperado ($) *"><InputDinero value={f.valorVenta} disabled={!editable} onChange={(e) => set("valorVenta", e.target.value)} className={`${INPUT} font-mono`} /></Campo>}
-          {(esRetoma || f.aplicaPara === "compra") && <div className="text-sm"><p className="text-xs text-stone-500">Margen esperado</p><p className={`font-mono text-lg ${margen < 0 ? "text-rose-600" : "text-stone-900"}`}>{(esRetoma ? f.valorRetoma : f.valorCompra) !== "" && f.valorVenta !== "" ? clp(margen) : "—"}</p></div>}
+          {(esRetoma || pagaCompra || pagaConsig) && <Campo etiqueta={esRetoma ? "Valor de venta esperado ($) *" : "Precio estimado de venta ($) *"}><InputDinero value={f.valorVenta} disabled={!editable} onChange={(e) => set("valorVenta", e.target.value)} className={`${INPUT} font-mono`} /></Campo>}
+          {(esRetoma || pagaCompra || pagaConsig) && <div className="text-sm"><p className="text-xs text-stone-500">Margen esperado</p><p className={`font-mono text-lg ${margen < 0 ? "text-rose-600" : "text-stone-900"}`}>{!Number.isNaN(pago) && pago > 0 && f.valorVenta !== "" ? clp(margen) : "—"}</p></div>}
         </div>
         {editable && f.estimacion.compra && (
           <div className="flex flex-wrap gap-2 mt-3">
             <button type="button" onClick={() => set(esRetoma ? "valorRetoma" : "valorCompra", f.estimacion.compra)} className={BTN}>Usar la compra sugerida ({clp(f.estimacion.compra)})</button>
             <button type="button" onClick={() => set("valorVenta", f.estimacion.publicacion)} className={BTN}>Usar la publicación sugerida ({clp(f.estimacion.publicacion)})</button>
-            {!esRetoma && <button type="button" onClick={() => set("valorConsignacion", f.estimacion.publicacion)} className={BTN}>Usar la publicación como precio de consignación</button>}
           </div>
         )}
         {editable && falta && <p className="text-xs text-rose-600 mt-2">{falta}</p>}
@@ -308,7 +312,7 @@ function TasacionDetalle({ api, id, renderEstimador, onCerrar, onCambio }) {
 }
 
 /** Valor principal de una tasación completada, según lo que decidió el Tasador (o null si no aplica). */
-export const valorPrincipal = (t) => (t.aplica_para === "ninguna" ? null : t.aplica_para === "consignacion" ? Number(t.valor_consignacion) || null : Number(t.valor_compra) || null);
+export const valorPrincipal = (t) => (t.aplica_para === "ninguna" ? null : t.aplica_para === "consignacion" ? Number(t.valor_consignacion) || null : (topeDeOferta(t) || null));
 
 /** Resultado de una tasación completada: a qué aplica y sus precios. */
 export function ResultadoTasacion({ t }) {
@@ -318,8 +322,10 @@ export function ResultadoTasacion({ t }) {
     <>
       {aplica ? <>Aplica para <strong>{aplica.toLowerCase()}</strong>. </> : null}
       {t.aplica_para === "ninguna" ? "No se compra ni se consigna." : null}
-      {t.aplica_para !== "ninguna" && Number(t.valor_compra) > 0 && <>Compra: <strong>{clp(t.valor_compra)}</strong>{t.valor_venta ? ` (venta esperada ${clp(t.valor_venta)})` : ""}. </>}
-      {t.aplica_para !== "ninguna" && Number(t.valor_consignacion) > 0 && <>Consignación: <strong>{clp(t.valor_consignacion)}</strong>. </>}
+      {t.aplica_para !== "ninguna" && Number(t.valor_compra) > 0 && <>Compra: <strong>{clp(t.valor_compra)}</strong>. </>}
+      {t.aplica_para !== "ninguna" && Number(t.valor_consignacion) > 0 && <>Consignación (lo que recibe el dueño): <strong>{clp(t.valor_consignacion)}</strong>. </>}
+      {t.aplica_para === "ambas" && <>Se puede ofertar hasta <strong>{clp(topeDeOferta(t))}</strong>. </>}
+      {t.aplica_para !== "ninguna" && Number(t.valor_venta) > 0 && <>Precio estimado de venta: <strong>{clp(t.valor_venta)}</strong>. </>}
       {Number(t.valor_retoma) > 0 && <>Retoma: <strong>{clp(t.valor_retoma)}</strong>.</>}
     </>
   );

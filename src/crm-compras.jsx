@@ -13,6 +13,7 @@ import { InputDinero } from "./campo-dinero.jsx";
 import { MEDIOS_PAGO } from "../supabase/functions/api/ventas-core.js";
 import { compraNombre, consignacionNombre, COMPRA_ABIERTA, CONSIGNACION_ABIERTA, validarOferta, validarConsignacion } from "../supabase/functions/api/compras-core.js";
 import { ResultadoTasacion } from "./crm-tasaciones.jsx";
+import { topeDeOferta } from "../supabase/functions/api/tasaciones-core.js";
 import { ValidacionDetalle } from "./crm-validaciones.jsx";
 import { buildNotaCompraPdf, buildComprobanteConsignacionPdf, buildContratoConsignacionPdf } from "./pdf-report.js";
 import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, hace, Aviso, Cargando, Tarjeta, Campo, Pestanas, useCarga, mensajeError, DatosDelDueno, CuentaBancaria } from "./crm-ui.jsx";
@@ -217,7 +218,7 @@ export function SeccionCompra({ api, lead, datos, onCambio, avisar }) {
   const abierta = lista.compras.some((c) => COMPRA_ABIERTA.includes(c.estado));
   const completas = tas.tasaciones;
   // Solo se puede ofertar sobre tasaciones que el Tasador dejó como aplicables a compra (o anteriores a esta decisión).
-  const ofertables = completas.filter((t) => !t.aplica_para || t.aplica_para === "compra");
+  const ofertables = completas.filter((t) => !t.aplica_para || t.aplica_para === "compra" || t.aplica_para === "ambas");
   const cambio = async () => { await recargar(); await recargarTas(); await onCambio(); };
   const elegida = ofertables.find((t) => t.id === (oferta.tasacionId || (ofertables[0] && ofertables[0].id)));
   const o = lead.vehiculo_ofrecido || {};
@@ -225,8 +226,8 @@ export function SeccionCompra({ api, lead, datos, onCambio, avisar }) {
   const pedirTasacion = async () => { avisar(""); setOcupado(true); try { await api("compras.pedirTasacion", { leadId: lead.id }); await cambio(); } catch (e) { avisar(mensajeError(e)); } setOcupado(false); };
   const ofertar = async () => {
     setError("");
-    const monto = oferta.monto === "" ? elegida.valor_compra : Number(oferta.monto);
-    const val = validarOferta({ monto }, { estado: "completada", valor_compra: elegida.valor_compra, patente: o.patente }, o.patente);
+    const monto = oferta.monto === "" ? topeDeOferta(elegida) : Number(oferta.monto);
+    const val = validarOferta({ monto }, { estado: "completada", valor_compra: elegida.valor_compra, valor_consignacion: elegida.valor_consignacion, aplica_para: elegida.aplica_para, patente: o.patente }, o.patente);
     if (!val.ok) { setError(mensajeError({ message: val.error })); return; }
     setOcupado(true);
     try { await api("compras.ofertar", { leadId: lead.id, tasacionId: elegida.id, datos: { monto, notas: oferta.notas } }); setOferta({ tasacionId: "", monto: "", notas: "" }); await cambio(); } catch (e) { setError(mensajeError(e)); }
@@ -257,8 +258,8 @@ export function SeccionCompra({ api, lead, datos, onCambio, avisar }) {
             <>
               <p className="text-xs uppercase tracking-wide text-stone-400">2 · Oferta al cliente</p>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
-                {ofertables.length > 1 && <Campo etiqueta="Tasación"><select value={oferta.tasacionId || ofertables[0].id} onChange={(e) => setOferta({ ...oferta, tasacionId: e.target.value })} className={INPUT}>{ofertables.map((t) => <option key={t.id} value={t.id}>{t.folio} · {clp(t.valor_compra)}</option>)}</select></Campo>}
-                <Campo etiqueta="Monto ofrecido ($)" ayuda={`Máximo ${clp(elegida.valor_compra)}`}><InputDinero value={oferta.monto === "" ? elegida.valor_compra : oferta.monto} onChange={(e) => setOferta({ ...oferta, monto: e.target.value })} className={`${INPUT} font-mono`} /></Campo>
+                {ofertables.length > 1 && <Campo etiqueta="Tasación"><select value={oferta.tasacionId || ofertables[0].id} onChange={(e) => setOferta({ ...oferta, tasacionId: e.target.value })} className={INPUT}>{ofertables.map((t) => <option key={t.id} value={t.id}>{t.folio} · {clp(topeDeOferta(t))}</option>)}</select></Campo>}
+                <Campo etiqueta="Monto ofrecido ($)" ayuda={elegida.aplica_para === "ambas" ? `Máximo ${clp(topeDeOferta(elegida))} (el precio de consignación, porque aplica para compra y consignación)` : `Máximo ${clp(topeDeOferta(elegida))}`}><InputDinero value={oferta.monto === "" ? topeDeOferta(elegida) : oferta.monto} onChange={(e) => setOferta({ ...oferta, monto: e.target.value })} className={`${INPUT} font-mono`} /></Campo>
                 <Campo etiqueta="Nota (opcional)"><input value={oferta.notas} maxLength={300} onChange={(e) => setOferta({ ...oferta, notas: e.target.value })} className={INPUT} /></Campo>
               </div>
               {error && <Aviso>{error}</Aviso>}
@@ -328,7 +329,7 @@ export function SeccionConsignacion({ api, lead, datos, onCambio, avisar }) {
   const [reqCompleto, setReqCompleto] = useState(false);
   const [datosListos, setDatosListos] = useState(false);
   const [pisoAceptado, setPisoAceptado] = useState(false);
-  const [f, setF] = useState({ precioPiso: "", precioPublicacion: tasada && Number(tasada.valor_consignacion) > 0 ? String(tasada.valor_consignacion) : lead.vehiculo_ofrecido && lead.vehiculo_ofrecido.precioEsperado ? String(lead.vehiculo_ofrecido.precioEsperado) : "", plazoDias: 90, notas: "" });
+  const [f, setF] = useState({ precioPiso: tasada && Number(tasada.valor_consignacion) > 0 ? String(tasada.valor_consignacion) : "", precioPublicacion: tasada && Number(tasada.valor_venta) > 0 ? String(tasada.valor_venta) : lead.vehiculo_ofrecido && lead.vehiculo_ofrecido.precioEsperado ? String(lead.vehiculo_ofrecido.precioEsperado) : "", plazoDias: 90, notas: "" });
   const [error, setError] = useState("");
   const [ocupado, setOcupado] = useState(false);
   if (!lista) return <Cargando />;

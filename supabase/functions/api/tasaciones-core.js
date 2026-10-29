@@ -109,8 +109,14 @@ const limpiarFotos = (f) => (Array.isArray(f) ? Array.from(new Set(f.map(String)
  */
 export const vehiculoDelCliente = (t) => !!t && t.creado_por === "sitio web";
 
-export const APLICA_PARA = ["compra", "consignacion", "ninguna"];
-export const aplicaParaNombre = (id) => ({ compra: "Compra", consignacion: "Consignación", ninguna: "No aplica" }[id] || "");
+export const APLICA_PARA = ["compra", "consignacion", "ambas", "ninguna"];
+export const aplicaParaNombre = (id) => ({ compra: "Compra", consignacion: "Consignación", ambas: "Compra y consignación", ninguna: "No aplica" }[id] || "");
+
+/**
+ * Lo máximo que se puede ofertar al cliente por comprar el vehículo. Si aplica para compra y consignación, el tope es el precio de consignación
+ * (lo que recibiría el dueño); si solo para compra, el precio de compra.
+ */
+export const topeDeOferta = (t) => (t && t.aplica_para === "ambas" ? Number(t.valor_consignacion) || 0 : Number(t && t.valor_compra) || 0);
 
 /** Borrador: lo que el Tasador va guardando antes de terminar. Todo es opcional, pero lo que venga debe ser válido. */
 export function validarBorradorTasacion(input) {
@@ -162,10 +168,17 @@ export function validarCompletarTasacion(actual) {
       if (String(a.observaciones || "").trim().length < 3) return { ok: false, error: "motivo_no_aplica_requerido" };
       return base({ aplica_para: "ninguna" });
     }
-    if (a.aplica_para === "consignacion") {
+    if (a.aplica_para === "consignacion" || a.aplica_para === "ambas") {
       const cons = entero(a.valor_consignacion, 1, 2_000_000_000);
       if (cons === null || Number.isNaN(cons)) return { ok: false, error: "valor_consignacion_invalido" };
-      return base({ aplica_para: "consignacion", valor_consignacion: cons, valor_compra: opcional(a.valor_compra), valor_venta: opcional(a.valor_venta) });
+      const comp = entero(a.valor_compra, 1, 2_000_000_000);
+      if (a.aplica_para === "ambas" && (comp === null || Number.isNaN(comp))) return { ok: false, error: "valor_compra_invalido" };
+      // El precio estimado de venta es obligatorio y no puede quedar bajo lo que se paga.
+      const vta = entero(a.valor_venta, 1, 2_000_000_000);
+      if (vta === null || Number.isNaN(vta)) return { ok: false, error: "valor_venta_invalido" };
+      const pago = a.aplica_para === "ambas" ? Math.max(cons, comp) : cons;
+      if (vta < pago) return { ok: false, error: "valor_venta_menor" };
+      return base({ aplica_para: a.aplica_para, valor_consignacion: cons, valor_compra: a.aplica_para === "ambas" ? comp : opcional(a.valor_compra), valor_venta: vta, margen_esperado: vta - pago });
     }
   }
   const compra = entero(a.valor_compra, 1, 2_000_000_000);

@@ -590,6 +590,8 @@ test("Tasador: debe decidir a qué aplica y poner el precio que corresponde", as
   assert.equal((await completar({ aplicaPara: "otra" })).error, "aplica_para_invalido");
   assert.equal((await completar({ aplicaPara: "compra", valorCompra: 0, valorVenta: 8000000 })).error, "valor_compra_invalido");
   assert.equal((await completar({ aplicaPara: "consignacion", valorConsignacion: 0 })).error, "valor_consignacion_invalido");
+  assert.equal((await completar({ aplicaPara: "consignacion", valorConsignacion: 7000000 })).error, "valor_venta_invalido");
+  assert.equal((await completar({ aplicaPara: "ambas", valorCompra: 6000000, valorVenta: 8000000 })).error, "valor_consignacion_invalido");
   assert.equal((await completar({ aplicaPara: "ninguna", observaciones: "" })).error, "motivo_no_aplica_requerido");
   const ok = await completar({ aplicaPara: "compra", valorCompra: 6000000, valorVenta: 8000000, valorConsignacion: 8300000, valorRetoma: 5800000 });
   assert.equal(ok.status, 200, JSON.stringify(ok));
@@ -611,7 +613,7 @@ test("Tasador: el resultado vuelve al ejecutivo (historial y correo) y la oferta
 
 test("Tasador: si decide consignación en un lead de compra, el lead cambia de tipo y sigue con quien está habilitado", async () => {
   const lead = await leadDe(U.c1.token, "compra");
-  const { r } = await tasarCon(lead, { aplicaPara: "consignacion", valorConsignacion: 9000000 });
+  const { r } = await tasarCon(lead, { aplicaPara: "consignacion", valorConsignacion: 9000000, valorVenta: 10500000 });
   assert.equal(r.status, 200, JSON.stringify(r));
   const l = fila("leads", lead.id);
   assert.equal(l.tipo, "consignacion");
@@ -624,7 +626,7 @@ test("Tasador: si decide consignación en un lead de compra, el lead cambia de t
 
 test("Tasador: si el ejecutivo no está habilitado para el nuevo tipo, el lead pasa a quien sí lo está", async () => {
   const lead = await leadDe(U.c2.token, "compra"); // Camilo solo tiene Compras
-  const { r } = await tasarCon(lead, { aplicaPara: "consignacion", valorConsignacion: 9000000 }, U.c2.token);
+  const { r } = await tasarCon(lead, { aplicaPara: "consignacion", valorConsignacion: 9000000, valorVenta: 10500000 }, U.c2.token);
   assert.equal(r.status, 200, JSON.stringify(r));
   const l = fila("leads", lead.id);
   assert.equal(l.tipo, "consignacion");
@@ -806,4 +808,18 @@ test("Consignación: el contrato para firmar se entrega con los datos del dueño
   assert.equal((await ve(U.c2.token, "consignaciones.contrato", { leadId: lead.id, datos: buenos })).status, 403);
   const compra = await leadDe(U.c1.token, "compra");
   assert.equal((await ve(U.c1.token, "consignaciones.contrato", { leadId: compra.id, datos: buenos })).status, 403);
+});
+
+test("Tasador: si aplica para compra y consignación, la oferta tiene como tope el precio de consignación y el lead no cambia de tipo", async () => {
+  const lead = await leadDe(U.c1.token, "compra");
+  const { id, r } = await tasarCon(lead, { aplicaPara: "ambas", valorCompra: 6000000, valorConsignacion: 7000000, valorVenta: 8500000 });
+  assert.equal(r.status, 200, JSON.stringify(r));
+  const t = fila("tasaciones", id);
+  assert.deepEqual([t.aplica_para, t.valor_compra, t.valor_consignacion, t.valor_venta], ["ambas", 6000000, 7000000, 8500000]);
+  assert.equal(fila("leads", lead.id).tipo, "compra", "sigue como compra: el ejecutivo decide con el cliente");
+  assert.ok(db.tablas.lead_eventos.some((e) => e.lead_id === lead.id && e.tipo === "tasacion" && /COMPRA y CONSIGNACIÓN/.test(e.detalle) && /\$7\.000\.000/.test(e.detalle)));
+  assert.equal((await ofertar(U.c1.token, lead.id, id, 7000001)).error, "oferta_excede_tasacion");
+  const ok = await ofertar(U.c1.token, lead.id, id, 7000000);
+  assert.equal(ok.status, 200, JSON.stringify(ok));
+  assert.equal(ok.compra.valor_tasado, 7000000);
 });
