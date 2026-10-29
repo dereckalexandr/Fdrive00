@@ -103,6 +103,12 @@ export function limpiarInspeccionRef(r) {
 const limpiarFotos = (f) => (Array.isArray(f) ? Array.from(new Set(f.map(String))).filter((x) => FOTO_ID.test(x)).slice(0, MAX_FOTOS_TASACION) : []);
 
 /** A qué aplica el vehículo tasado, según el Tasador: se compra, se consigna o no aplica a ninguno. */
+/**
+ * ¿Los datos del vehículo los dio el cliente al pedir por un canal (el sitio web)? Entonces el Tasador no los edita: tasa lo que el cliente declaró.
+ * Las tasaciones que pide o crea una persona del equipo sí se pueden editar.
+ */
+export const vehiculoDelCliente = (t) => !!t && t.creado_por === "sitio web";
+
 export const APLICA_PARA = ["compra", "consignacion", "ninguna"];
 export const aplicaParaNombre = (id) => ({ compra: "Compra", consignacion: "Consignación", ninguna: "No aplica" }[id] || "");
 

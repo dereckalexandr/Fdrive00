@@ -29,6 +29,7 @@ const consultasPorPersona = new Map<string, { n: number; reset: number }>();
 import {
   folioTasacion, validarSolicitudTasacion, validarTasacionDirecta, validarBorradorTasacion, validarCompletarTasacion, validarTransicionTasacion,
   topeParteDePago, verificarTopeParteDePago, fusionarParteDePago, metricasTasador, colaTasaciones,
+  vehiculoDelCliente,
 } from "./tasaciones-core.js";
 
 import {
@@ -758,7 +759,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       if (!t || !(await veTasacion(t))) return err("no_existe", 404);
       const detalle: any = (await enriquecer([t]))[0];
       if (detalle.inspeccion && detalle.inspeccion.key) detalle.inspeccion = { ...detalle.inspeccion, fotos: await fotosDeFicha(detalle.inspeccion.key) };
-      return json({ tasacion: detalle, puedeEditar: t.estado === "en_proceso" && (t.tasador_id === userId), puedeGestionar: esSupervisor, puedeRealizar: realiza });
+      return json({ tasacion: detalle, puedeEditar: t.estado === "en_proceso" && (t.tasador_id === userId), vehiculoBloqueado: vehiculoDelCliente(t), puedeGestionar: esSupervisor, puedeRealizar: realiza });
     }
 
     if (op === "tasaciones.tomar") {
@@ -811,7 +812,9 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       const b = validarBorradorTasacion(body.borrador);
       if (!b.ok) return err(b.error!);
       const patch: Record<string, any> = { ...b.value, actualizado_en: new Date().toISOString() };
-      if (b.value.vehiculo) { patch.patente = b.value.vehiculo.patente; }
+      // Lo que el cliente declaró por el sitio web no se modifica.
+      if (vehiculoDelCliente(t)) delete patch.vehiculo;
+      if (patch.vehiculo) { patch.patente = b.value.vehiculo.patente; }
       if (completar) {
         const pick = (k: string) => (patch[k] !== undefined ? patch[k] : t[k]);
         const fin = validarCompletarTasacion({ tipo: t.tipo, valor_compra: pick("valor_compra"), valor_venta: pick("valor_venta"), valor_consignacion: pick("valor_consignacion"), valor_retoma: pick("valor_retoma"), aplica_para: pick("aplica_para"), observaciones: pick("observaciones") });

@@ -207,7 +207,7 @@ function TasacionDetalle({ api, id, renderEstimador, onCerrar, onCambio }) {
         {t.motivo_cancelacion && <p className="basis-full text-rose-700">Cancelada: {t.motivo_cancelacion}</p>}
       </div>
 
-      <Tarjeta titulo="Vehículo"><CamposVehiculo v={f.vehiculo} set={(v) => set("vehiculo", v)} bloqueado={!editable} /></Tarjeta>
+      <Tarjeta titulo="Vehículo"><CamposVehiculo v={f.vehiculo} set={(v) => set("vehiculo", v)} bloqueado={!editable || !!datos.vehiculoBloqueado} />{editable && datos.vehiculoBloqueado && <p className="text-xs text-stone-500 mt-2">Estos datos los dio el cliente por el sitio web y no se editan.</p>}</Tarjeta>
 
       {editable && renderEstimador && (
         <Tarjeta titulo="Estimación con Chileautos" derecha={<button type="button" onClick={() => setVerEstimador(!verEstimador)} className={BTN}>{verEstimador ? "Ocultar estimador" : "Abrir estimador"}</button>}>

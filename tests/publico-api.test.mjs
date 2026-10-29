@@ -348,6 +348,33 @@ test("Sin ejecutivos habilitados el lead queda sin asignar; con varios locales h
   assert.equal(leadsWeb()[leadsWeb().length - 1].local_id, L2);
 });
 
+test("Tasación pedida desde el sitio web: el Tasador no puede editar los datos que dio el cliente", async () => {
+  nuevaIp();
+  const datos = { patente: "LK-ZZ 33", marca: "Kia", modelo: "Morning", anio: 2019, km: 40000, transmision: "Mecánica", combustible: "Bencina", duenos: 1, prenda: "no", mantenciones: "si", precioEsperado: 5000000 };
+  const rs = await sol("vender", { ...datos, modalidad: "vender", localId: L1 });
+  assert.equal(rs.status, 200, JSON.stringify(rs));
+  const t = db.tablas.tasaciones.find((x) => x.patente === "LKZZ33");
+  assert.ok(t);
+  assert.equal((await ve(U.t1.token, "tasaciones.tomar", { id: t.id })).status, 200);
+  const g = await ve(U.t1.token, "tasaciones.get", { id: t.id });
+  assert.equal(g.vehiculoBloqueado, true);
+  // Intenta cambiar el vehículo: se ignora; lo demás del borrador sí se guarda.
+  const r = await ve(U.t1.token, "tasaciones.guardar", { id: t.id, borrador: { vehiculo: { ...t.vehiculo, km: 1, marca: "Otra" }, observaciones: "Se ve bien" } });
+  assert.equal(r.status, 200, JSON.stringify(r));
+  const fila = db.tablas.tasaciones.find((x) => x.id === t.id);
+  assert.deepEqual([fila.vehiculo.km, fila.vehiculo.marca], [40000, "Kia"]);
+  assert.equal(fila.observaciones, "Se ve bien");
+  // La que pide una persona del equipo sí se edita.
+  const l = (await ve(U.e1.token, "leads.create", { lead: { tipo: "venta", fuente: "WhatsApp", cliente: { nombre: "Cliente Manual", telefono: "987654321" }, notas: "" } }));
+  if (l.status === 200) {
+    const p = await ve(U.e1.token, "tasaciones.pedir", { leadId: l.lead.id, datos: { vehiculo: { patente: "MN-OP 12", marca: "Fiat", modelo: "Uno", anio: 2015, km: 90000 } } });
+    if (p.status === 200) {
+      await ve(U.t1.token, "tasaciones.tomar", { id: p.tasacion.id });
+      assert.equal((await ve(U.t1.token, "tasaciones.get", { id: p.tasacion.id })).vehiculoBloqueado, false);
+    }
+  }
+});
+
 test("El freno general por local corta una avalancha de solicitudes", async () => {
   const hace = new Date().toISOString();
   for (let i = 0; i < 60; i++) db.tablas.leads.push({ id: randomUUID(), local_id: L1, fuente: "Sitio web", creado_en: hace, etapa: "nuevo", cliente_id: null, asignado_a: null });
