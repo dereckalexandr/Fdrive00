@@ -175,6 +175,22 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
   }
 
   /**
+   * Cambia el tipo de un lead entre compra y consignación. Sigue con el mismo ejecutivo si está habilitado para el nuevo tipo; si no, pasa a quien
+   * corresponda por el reparto.
+   */
+  async function cambiarTipoLead(lead: any, nuevoTipo: string, razon: string, extraAuditoria: Record<string, unknown> = {}) {
+    const cands = await elegibles(lead.local_id, nuevoTipo);
+    let asignado = lead.asignado_a && cands.some((c: any) => c.id === lead.asignado_a) ? { id: lead.asignado_a, nombre: "" } : null;
+    if (!asignado) asignado = elegirAsignado(cands, await ultimasAsignaciones(nuevoTipo)) ?? null;
+    const up = await sb.from("leads").update({ tipo: nuevoTipo, asignado_a: asignado ? asignado.id : lead.asignado_a, actualizado_en: new Date().toISOString() }).eq("id", lead.id);
+    if (up.error) return { ok: false as const, cambio: false, asignadoId: null as string | null };
+    const cambio = !!asignado && asignado.id !== lead.asignado_a;
+    await evento(lead.id, "tipo", `El lead pasó de ${tipoCorto(lead.tipo)} a ${tipoCorto(nuevoTipo)} ${razon}${cambio ? "; se reasignó a un ejecutivo habilitado para ese tipo" : ""}`);
+    await audit(ctx.actor, "lead.cambiar_tipo", "lead", lead.id, { de: lead.tipo, a: nuevoTipo, ...extraAuditoria, reasignado: cambio });
+    return { ok: true as const, cambio, asignadoId: asignado ? asignado.id : null };
+  }
+
+  /**
    * El resultado vuelve al ejecutivo del lead (y a quien pidió la tasación). Si el Tasador decidió que el vehículo aplica para el otro tipo
    * (compra ↔ consignación), el lead cambia de tipo; sigue con el mismo ejecutivo si está habilitado para ese tipo y, si no, pasa a quien corresponda por el reparto.
    */
@@ -187,16 +203,10 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       const nuevoTipo = data.aplica_para === "compra" || data.aplica_para === "consignacion" ? data.aplica_para : null;
       let destinatarios: string[] = [t.solicitante_id, lead.asignado_a].filter(Boolean);
       if (nuevoTipo && lead.tipo !== nuevoTipo && ["compra", "consignacion"].includes(lead.tipo) && !ETAPAS_CERRADAS.includes(lead.etapa)) {
-        const cands = await elegibles(lead.local_id, nuevoTipo);
-        let asignado = lead.asignado_a && cands.some((c: any) => c.id === lead.asignado_a) ? { id: lead.asignado_a, nombre: "" } : null;
-        if (!asignado) asignado = elegirAsignado(cands, await ultimasAsignaciones(nuevoTipo)) ?? null;
-        const up = await sb.from("leads").update({ tipo: nuevoTipo, asignado_a: asignado ? asignado.id : lead.asignado_a, actualizado_en: new Date().toISOString() }).eq("id", lead.id);
-        if (!up.error) {
-          const cambio = asignado && asignado.id !== lead.asignado_a;
-          await evento(lead.id, "tipo", `El lead pasó de ${tipoCorto(lead.tipo)} a ${tipoCorto(nuevoTipo)} por decisión del Tasador${cambio ? "; se reasignó a un ejecutivo habilitado para ese tipo" : ""}`);
-          lineas.push(`El lead pasó de ${tipoCorto(lead.tipo)} a ${tipoCorto(nuevoTipo)}${cambio ? " y se reasignó a un ejecutivo habilitado" : ""}.`);
-          if (cambio) destinatarios = [...destinatarios, asignado!.id];
-          await audit(ctx.actor, "lead.cambiar_tipo", "lead", lead.id, { de: lead.tipo, a: nuevoTipo, por_tasacion: t.id, reasignado: !!cambio });
+        const r = await cambiarTipoLead(lead, nuevoTipo, "por decisión del Tasador", { por_tasacion: t.id });
+        if (r.ok) {
+          lineas.push(`El lead pasó de ${tipoCorto(lead.tipo)} a ${tipoCorto(nuevoTipo)}${r.cambio ? " y se reasignó a un ejecutivo habilitado" : ""}.`);
+          if (r.cambio && r.asignadoId) destinatarios = [...destinatarios, r.asignadoId];
         }
       }
       await avisarA(destinatarios, verbo === "completó" ? "Tasación completada" : "Tasación corregida", lineas);
@@ -226,6 +236,17 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       if (para.length === 0) { await audit(ctx.actor, "aviso.omitido", "aviso", undefined, { asunto, motivo: "la persona no tiene correo en su ficha o está inactiva" }); return; }
       await enSegundoPlano(enviarAviso({ para, asunto, titulo: asunto, lineas, ruta }, (error) => audit(ctx.actor, "aviso.fallido", "aviso", undefined, { asunto, error })));
     } catch (e) { console.error("avisarA:", String((e as any)?.message ?? e)); }
+  }
+  /** Avisa a los Validadores del local que hay documentos nuevos en su cola. */
+  async function avisarValidadores(local: string, asunto: string, lineas: string[]) {
+    try {
+      if (!correoActivo() || !local) return;
+      const overrides = await ctx.rolePermOverrides();
+      const { data, error } = await sb.from("usuarios").select("id, roles, permisos_extra, activo, local_id").eq("local_id", local);
+      if (error) throw error;
+      const ids = (data ?? []).filter((u: any) => u.activo && permisosEfectivos(u.roles ?? [], overrides, u.permisos_extra).includes("validacion.realizar")).map((u: any) => u.id);
+      await avisarA(ids, asunto, lineas);
+    } catch (e) { console.error("avisarValidadores:", String((e as any)?.message ?? e)); }
   }
   /** Avisa a quienes aprueban (Jefes Local) del local. */
   async function avisarSupervisores(local: string, asunto: string, lineas: string[]) {
@@ -275,11 +296,13 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     return (data ?? []).some((u: any) => u.activo && permisosEfectivos(u.roles ?? [], overrides, u.permisos_extra).includes("validacion.realizar"));
   }
   /** Crea una validación con su lista de documentos (reutiliza los del vehículo ya aprobados). null si las tablas aún no existen. */
-  async function crearValidacion(p: { tipo: string; local_id: string; cierre_id?: string; compra_id?: string; consignacion_id?: string; reutilizarDe?: string; lead_id?: string | null; vehiculo_id?: string | null; tasacion_id?: string | null; sujeto: Record<string, unknown>; opciones?: { conFinanciamiento?: boolean; conParteDePago?: boolean } }) {
+  async function crearValidacion(p: { tipo: string; local_id: string; cierre_id?: string; compra_id?: string; consignacion_id?: string; reutilizarDe?: string; sinEnviar?: boolean; lead_id?: string | null; vehiculo_id?: string | null; tasacion_id?: string | null; sujeto: Record<string, unknown>; opciones?: { conFinanciamiento?: boolean; conParteDePago?: boolean } }) {
     try {
       const ins = await sb.from("validaciones").insert({
         local_id: p.local_id, tipo: p.tipo, cierre_id: p.cierre_id ?? null, lead_id: p.lead_id ?? null, vehiculo_id: p.vehiculo_id ?? null,
         tasacion_id: p.tasacion_id ?? null, sujeto: p.sujeto, creado_por: userId,
+        // Las de compra y consignación nacen «sin enviar»: entran a la cola del Validador cuando el ejecutivo las envía con todo completo.
+        enviada_en: p.sinEnviar ? null : new Date().toISOString(),
         ...(p.compra_id ? { compra_id: p.compra_id } : {}), ...(p.consignacion_id ? { consignacion_id: p.consignacion_id } : {}),
       }).select().single();
       if (ins.error) { if (ctx.isMissingTable(ins.error)) return null; throw ins.error; }
@@ -310,7 +333,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     const vq = await sb.from("validaciones").select("*").eq("compra_id", c.id);
     if (vq.error) { if (ctx.isMissingTable(vq.error)) return { aplica: false, val: null, docs: [], cliente: null, faltantes: [] as any[] }; throw vq.error; }
     let val: any = (vq.data ?? []).filter((x: any) => x.estado !== "cancelada").sort((a: any, b: any) => String(b.creado_en).localeCompare(String(a.creado_en)))[0] ?? null;
-    if (!val) val = await crearValidacion({ tipo: "compra", local_id: c.local_id, compra_id: c.id, lead_id: c.lead_id, tasacion_id: c.tasacion_id, sujeto: sujetoDeVehiculo(c.vehiculo || {}, { folio: folioCompra(c.numero) }) });
+    if (!val) val = await crearValidacion({ tipo: "compra", local_id: c.local_id, compra_id: c.id, lead_id: c.lead_id, tasacion_id: c.tasacion_id, sinEnviar: true, sujeto: sujetoDeVehiculo(c.vehiculo || {}, { folio: folioCompra(c.numero) }) });
     if (!val) return { aplica: false, val: null, docs: [], cliente: null, faltantes: [] as any[] };
     const docs = (await enLotes("validacion_docs", "validacion_id", [val.id])).sort((a: any, b: any) => (a.orden ?? 0) - (b.orden ?? 0));
     if (!esChecklistCompraActual(docs)) return { aplica: false, val, docs, cliente: null, faltantes: [] as any[] };
@@ -329,7 +352,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     let val: any = propias.sort((a: any, b: any) => String(b.creado_en).localeCompare(String(a.creado_en)))[0] ?? null;
     if (!val) {
       const ofr = lead.vehiculo_ofrecido || {};
-      val = await crearValidacion({ tipo: "consignacion", local_id: lead.local_id, lead_id: lead.id, sujeto: sujetoDeVehiculo(ofr, {}) });
+      val = await crearValidacion({ tipo: "consignacion", local_id: lead.local_id, lead_id: lead.id, sinEnviar: true, sujeto: sujetoDeVehiculo(ofr, {}) });
     }
     if (!val) return { aplica: false, val: null, docs: [], cliente: null, faltantes: [] as any[] };
     const docs = (await enLotes("validacion_docs", "validacion_id", [val.id])).sort((a: any, b: any) => (a.orden ?? 0) - (b.orden ?? 0));
@@ -1498,9 +1521,9 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       const cierres = await porIds("cierres", filas.map((v) => v.cierre_id));
       const vigente = (v: any) => v.estado !== "cancelada" && (v.tipo !== "venta" || !v.cierre_id || ["pendiente", "aprobada"].includes((cierres.find((c: any) => c.id === v.cierre_id) || {}).estado));
       filas = filas.filter(vigente);
-      if (vista === "cola") { if (!realiza && !esSupervisor) return err("forbidden", 403); filas = filas.filter((v) => v.estado === "pendiente"); }
+      if (vista === "cola") { if (!realiza && !esSupervisor) return err("forbidden", 403); filas = filas.filter((v) => v.estado === "pendiente" && v.enviada_en); }
       else if (vista === "mias") { if (!realiza) return err("forbidden", 403); filas = filas.filter((v) => v.validador_id === userId && (v.estado !== "aprobada" || Date.now() - Date.parse(v.resuelta_en ?? v.actualizado_en) < 14 * 86_400_000)); }
-      else if (vista === "local") { if (!realiza && !esSupervisor) return err("forbidden", 403); if (body.estado) filas = filas.filter((v) => v.estado === String(body.estado)); }
+      else if (vista === "local") { if (!realiza && !esSupervisor) return err("forbidden", 403); if (!esSupervisor) filas = filas.filter((v) => v.enviada_en); if (body.estado) filas = filas.filter((v) => v.estado === String(body.estado)); }
       else if (vista === "origen") {
         const campo = body.cierreId ? "cierre_id" : body.leadId ? "lead_id" : body.vehiculoId ? "vehiculo_id" : body.tasacionId ? "tasacion_id" : "";
         if (!campo) return err("vista_invalida");
@@ -1523,6 +1546,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       if (!realiza) return err("forbidden", 403);
       const v = await cargarVal(String(body.id ?? ""));
       if (!v) return err("no_existe", 404);
+      if (!v.enviada_en) return err("validacion_sin_enviar", 409);
       const tr = validarTransicionValidacion(v.estado, "tomar");
       if (!tr.ok) return err(v.validador_id ? "validacion_ya_tomada" : tr.error!, 409);
       const ahora = new Date().toISOString();
@@ -1532,6 +1556,41 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       await anotarVal(v, `${userName} tomó la validación ${folioValidacion(v.numero)}`);
       await audit(ctx.actor, "validacion.tomar", "validacion", v.id, { numero: v.numero });
       return json(await detalle(r.data));
+    }
+
+    /**
+     * El ejecutivo (o el supervisor) envía a validar los documentos de una compra o consignación: recién ahí entran a la cola del Validador.
+     * Exige los datos del cliente y todos los documentos completos.
+     */
+    if (op === "validacion.enviar") {
+      const v = await cargarVal(String(body.id ?? ""));
+      if (!v || !(await veVal(v))) return err("no_existe", 404);
+      if (!(await puedeAdjuntar(v))) return err("forbidden", 403);
+      if (!["compra", "consignacion"].includes(v.tipo)) return err("validacion_estado_invalido");
+      if (v.enviada_en) return err("validacion_ya_enviada", 409);
+      if (v.estado === "cancelada" || v.estado === "aprobada") return err("validacion_estado_invalido");
+      let falta = 0;
+      if (v.tipo === "compra") {
+        const c = v.compra_id ? (await sb.from("compras").select("*").eq("id", v.compra_id).maybeSingle()).data : null;
+        if (!c) return err("no_existe", 404);
+        const r = await requisitosDeCompra(c);
+        falta = r.aplica ? r.faltantes.length : 0;
+      } else {
+        if (!v.consignacion_id) return err("consignacion_sin_contrato", 409);
+        const lead = v.lead_id ? await cargarLead(v.lead_id) : null;
+        if (!lead) return err("no_existe", 404);
+        const r = await requisitosDeConsignacion(lead);
+        falta = r.aplica ? r.faltantes.length : 0;
+      }
+      if (falta > 0) return err("envio_incompleto", 409);
+      const ahora = new Date().toISOString();
+      const up = await sb.from("validaciones").update({ enviada_en: ahora, actualizado_en: ahora }).eq("id", v.id).select().maybeSingle();
+      if (up.error) return fallar(up.error);
+      if (!up.data) return err("validacion_ya_enviada", 409);
+      await anotarVal(v, `${userName} envió a validar los documentos (${folioValidacion(v.numero)})`);
+      await audit(ctx.actor, "validacion.enviar", "validacion", v.id, { numero: v.numero });
+      await avisarValidadores(v.local_id, "Documentos por validar", [`${userName} envió a validar ${folioValidacion(v.numero)}${v.sujeto && v.sujeto.patente ? ` (vehículo ${v.sujeto.patente})` : ""}.`]);
+      return json(await detalle(up.data));
     }
 
     if (op === "validacion.liberar" || op === "validacion.asignar") {
@@ -1655,7 +1714,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
         personas = [...base, ...extra];
       } else personas = await porIds("usuarios", [userId]);
       const validadores = personas.map((u: any) => ({ id: u.id, nombre: u.nombre, ...metricasValidador(todas, u.id, mes) })).sort((a: any, b: any) => b.aprobadas - a.aprobadas || a.nombre.localeCompare(b.nombre));
-      const cola = colaValidaciones(todas, new Date(), cfg.horas_validacion);
+      const cola = colaValidaciones(todas.filter((v: any) => v.enviada_en), new Date(), cfg.horas_validacion);
       return json({ mes, nombreMes: nombreMes(mes), validadores, cola: { pendientes: cola.pendientes, masAntiguaHoras: cola.masAntiguaHoras, atrasadas: cola.atrasadas.length }, horasLimite: cfg.horas_validacion, esSupervisor });
     }
 
@@ -2060,7 +2119,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
         const t = tasaciones.find((x: any) => x.id === c.tasacion_id);
         return {
           ...c, folio: folioCompra(c.numero), ejecutivo: (usuarios.find((u: any) => u.id === c.ejecutivo_id) || {}).nombre ?? "",
-          cliente: (clientes.find((x: any) => x.id === c.cliente_id) || {}).nombre ?? "", validacion: v ? { id: v.id, folio: folioValidacion(v.numero), estado: v.estado } : null,
+          cliente: (clientes.find((x: any) => x.id === c.cliente_id) || {}).nombre ?? "", validacion: v ? { id: v.id, folio: folioValidacion(v.numero), estado: v.estado, enviada: !!v.enviada_en } : null,
           tasacion: t ? { id: t.id, valor_compra: t.valor_compra, valor_venta: t.valor_venta } : null,
         };
       });
@@ -2111,7 +2170,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       const r = await requisitosDeCompra(c);
       const cl = r.cliente;
       return json({
-        aplica: r.aplica, completo: r.aplica ? r.faltantes.length === 0 : true, faltantes: r.faltantes, validacionId: r.val ? r.val.id : null,
+        aplica: r.aplica, completo: r.aplica ? r.faltantes.length === 0 : true, faltantes: r.faltantes, validacionId: r.val ? r.val.id : null, enviada: r.val ? !!r.val.enviada_en : false,
         cliente: cl ? { nombre: cl.nombre, rut: cl.rut, telefono: cl.telefono, email: cl.email, direccion: cl.direccion ?? "", comuna: cl.comuna ?? "", banco: cl.banco ?? "", tipo_cuenta: cl.tipo_cuenta ?? "", numero_cuenta: cl.numero_cuenta ?? "" } : null,
         docs: r.docs.filter((d: any) => reglaDoc(d.clave)).map((d: any) => ({ id: d.id, clave: d.clave, nombre: d.nombre, estado: d.estado, nArchivos: (d.archivos ?? []).length, vence_en: d.vence_en ?? null, precio: d.precio ?? null })),
       });
@@ -2211,7 +2270,10 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
         // Los documentos se revisan desde que el cliente acepta.
         const ex = await sb.from("validaciones").select("*").eq("tasacion_id", c.tasacion_id);
         const previa = (ex.error ? [] : ex.data ?? []).find((x: any) => x.tipo === "compra" && !x.compra_id && x.estado !== "cancelada");
-        if (previa) await sb.from("validaciones").update({ compra_id: c.id, lead_id: c.lead_id }).eq("id", previa.id);
+        const yaDeLaCompra = ((await sb.from("validaciones").select("id, estado").eq("compra_id", c.id)).data ?? []).some((x: any) => x.estado !== "cancelada");
+        // Si los documentos ya se empezaron a cargar al hacer la oferta, no se crea otra validación.
+        if (yaDeLaCompra) { /* ya existe */ }
+        else if (previa) await sb.from("validaciones").update({ compra_id: c.id, lead_id: c.lead_id }).eq("id", previa.id);
         else await crearValidacion({ tipo: "compra", local_id: c.local_id, compra_id: c.id, lead_id: c.lead_id, tasacion_id: c.tasacion_id, sujeto: sujetoDeVehiculo(c.vehiculo || {}, { folio: folioCompra(c.numero) }) });
       } else {
         await sb.from("leads").update({ etapa: "cotizado", actualizado_en: ahora }).eq("id", c.lead_id).eq("etapa", "cotizado");
@@ -2231,6 +2293,8 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       if (!v.ok) return err(v.error!);
       const req = await requisitosDeCompra(c);
       if (req.aplica && req.faltantes.length > 0) return err("compra_incompleta", 409);
+      // Los documentos se envían a validar antes de pedir el pago (cuando hay Validadores en el local).
+      if (req.aplica && req.val && !req.val.enviada_en && (await hayValidadores(c.local_id))) return err("validacion_sin_enviar", 409);
       const { data, error } = await sb.from("compras").update({ ...v.value, estado: "pago_pendiente", solicitado_por: userName, motivo_rechazo_pago: null, actualizado_en: new Date().toISOString() }).eq("id", c.id).select().single();
       if (error) return fallar(error);
       await evento(c.lead_id, "compra", `Pago de ${dinero(v.value.monto_final)} (${v.value.medio_pago}) solicitado por ${userName} para ${folioCompra(c.numero)}`);
@@ -2339,7 +2403,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
         const dias = c.estado === "vigente" ? diasParaVencer(c.vence_en, ahora) : null;
         return {
           ...c, folio: folioConsignacion(c.numero), ejecutivo: (usuarios.find((u: any) => u.id === c.ejecutivo_id) || {}).nombre ?? "",
-          cliente: (clientes.find((x: any) => x.id === c.cliente_id) || {}).nombre ?? "", validacion: v ? { id: v.id, folio: folioValidacion(v.numero), estado: v.estado } : null,
+          cliente: (clientes.find((x: any) => x.id === c.cliente_id) || {}).nombre ?? "", validacion: v ? { id: v.id, folio: folioValidacion(v.numero), estado: v.estado, enviada: !!v.enviada_en } : null,
           diasRestantes: dias, vencida: dias !== null && dias < 0, margenEsperado: Number(c.precio_publicacion) - Number(c.precio_piso),
         };
       });
@@ -2482,7 +2546,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       // La validación de documentos ya existe (se creó al pedir los requisitos): el contrato la toma.
       let val: any = req.val && !req.val.consignacion_id ? req.val : null;
       if (val) {
-        const lig = await sb.from("validaciones").update({ consignacion_id: c.id, sujeto: sujetoDeVehiculo(vh.value, { folio: folioConsignacion(c.numero) }) }).eq("id", val.id).select().single();
+        const lig = await sb.from("validaciones").update({ consignacion_id: c.id, enviada_en: new Date().toISOString(), sujeto: sujetoDeVehiculo(vh.value, { folio: folioConsignacion(c.numero) }) }).eq("id", val.id).select().single();
         val = lig.error ? val : lig.data;
       } else val = await crearValidacion({ tipo: "consignacion", local_id: c.local_id, consignacion_id: c.id, lead_id: lead.id, sujeto: sujetoDeVehiculo(vh.value, { folio: folioConsignacion(c.numero) }) });
       // Sin Validadores en el local, el vehículo entra al inventario de inmediato; si no, cuando se aprueben los documentos.
@@ -2763,6 +2827,37 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     if (error) return fallo(error);
     await evento(lead.id, "nota", "Se actualizaron los datos del lead");
     return json({ lead: data });
+  }
+
+  /**
+   * El ejecutivo elige con qué oferta sigue un lead de compra o consignación (por ejemplo, uno que entró por el sitio web): la oferta elegida
+   * fija el tipo del lead. Exige la tasación completada y que el Tasador haya dejado el vehículo aplicable a esa operación. Una vez hecha la oferta
+   * (compra o contrato) ya no se cambia a la otra mientras siga en curso.
+   */
+  if (op === "leads.elegirOperacion") {
+    const lead = await cargarLead(String(body.leadId ?? ""));
+    if (!lead || !puedeVer(lead)) return err("no_existe", 404);
+    if (!puedeTocar(lead) || !["compra", "consignacion"].includes(lead.tipo)) return err("forbidden", 403);
+    const oper = String(body.operacion ?? "");
+    if (!["compra", "consignacion"].includes(oper)) return err("operacion_invalida");
+    if (ETAPAS_CERRADAS.includes(lead.etapa)) return err("lead_cerrado");
+    const patente = String((lead.vehiculo_ofrecido || {}).patente ?? "");
+    const tq = patente ? await scoped(sb.from("tasaciones").select("*").eq("patente", patente).eq("estado", "completada").order("completada_en", { ascending: false })) : { data: [], error: null };
+    if (tq.error) return fallo(tq.error);
+    const tas = (tq.data ?? []).find((t: any) => t.tipo !== "parte_pago");
+    if (!tas) return err("tasacion_pendiente", 409);
+    const ap = tas.aplica_para;
+    const aplica = ap === oper || ap === "ambas" || (!ap && oper === "compra");
+    if (!aplica) return err("tasacion_no_aplica_operacion", 409);
+    const [cs, ns] = await Promise.all([sb.from("compras").select("estado").eq("lead_id", lead.id), sb.from("consignaciones").select("estado").eq("lead_id", lead.id)]);
+    if ((cs.data ?? []).some((c: any) => COMPRA_ABIERTA.includes(c.estado)) || (ns.data ?? []).some((c: any) => CONSIGNACION_ABIERTA.includes(c.estado))) return err("operacion_en_curso", 409);
+    if (lead.tipo === oper) return json({ ok: true, cambio: false, tipo: oper });
+    // Quien no supervisa solo puede seguir con una operación para la que está habilitado; el Jefe Local puede pasarla y reasignar.
+    if (!esSupervisor && !can(permisoDeTipo(oper))) return err("operacion_no_habilitada", 403);
+    const r = await cambiarTipoLead(lead, oper, "porque se eligió hacer esa oferta", { por_oferta: true });
+    if (!r.ok) return err("server_error", 500);
+    if (r.cambio && r.asignadoId) await avisarA([r.asignadoId], "Lead reasignado", [`Se te asignó un lead de ${oper === "compra" ? "compra" : "consignación"} que ${userName} pasó a esa operación.`]);
+    return json({ ok: true, cambio: true, tipo: oper, reasignado: r.cambio });
   }
 
   if (op === "leads.mover") {

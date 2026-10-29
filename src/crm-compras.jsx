@@ -14,6 +14,7 @@ import { MEDIOS_PAGO } from "../supabase/functions/api/ventas-core.js";
 import { compraNombre, consignacionNombre, COMPRA_ABIERTA, CONSIGNACION_ABIERTA, validarOferta, validarConsignacion } from "../supabase/functions/api/compras-core.js";
 import { ResultadoTasacion } from "./crm-tasaciones.jsx";
 import { validarRut, formatearRut } from "../supabase/functions/api/crm-core.js";
+import { DOCS_COMPRA } from "../supabase/functions/api/validaciones-core.js";
 import { COMUNAS_CHILE } from "../supabase/functions/api/comunas-chile.js";
 import { topeDeOferta } from "../supabase/functions/api/tasaciones-core.js";
 import { ValidacionDetalle } from "./crm-validaciones.jsx";
@@ -39,9 +40,10 @@ const DATOS_VENDEDOR = [
  * Panel de requisitos de una compra (vendedor) o de una consignación (dueño). `ops` = nombres de las operaciones y `args` = cómo se identifica
  * la operación en el servidor ({ id } para la compra, { leadId } para la consignación).
  */
-function RequisitosCompra({ api, c, puedeOperar, onCambio, onCompleto, onDatosListos, persona = "vendedor", ops = { requisitos: "compras.requisitos", datos: "compras.datosCliente" }, args = { id: c.id }, clave = c.estado, destino = "concretar la compra" }) {
+function RequisitosCompra({ api, c, puedeOperar, onCambio, onCompleto, onDatosListos, onInfo, persona = "vendedor", ops = { requisitos: "compras.requisitos", datos: "compras.datosCliente" }, args = { id: c.id }, clave = c.estado, destino = "concretar la compra" }) {
   const { datos, recargar } = useCarga(() => api(ops.requisitos, args), [api, args.id, args.leadId, clave]);
   const [f, setF] = useState(null);
+  useEffect(() => { if (datos && onInfo) onInfo(datos); }, [datos]); // eslint-disable-line react-hooks/exhaustive-deps
   const [msg, setMsg] = useState({ tipo: "", texto: "" });
   const [ocupado, setOcupado] = useState(false);
   const [verDocs, setVerDocs] = useState(false);
@@ -53,7 +55,7 @@ function RequisitosCompra({ api, c, puedeOperar, onCambio, onCompleto, onDatosLi
     setF({ nombre: cl.nombre || "", rut: cl.rut || "", telefono: cl.telefono || "", email: cl.email || "", direccion: cl.direccion || "", comuna: cl.comuna || "", banco: cl.banco || "", tipoCuenta: cl.tipo_cuenta || "", numeroCuenta: cl.numero_cuenta || "" });
   }, [datos]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!datos || !datos.aplica || !f) return null;
-  const editable = puedeOperar && (ops.datos === "consignaciones.datosCliente" || c.estado === "aceptada" || c.estado === "pago_pendiente");
+  const editable = puedeOperar && (ops.datos === "consignaciones.datosCliente" || c.estado === "oferta" || c.estado === "aceptada" || c.estado === "pago_pendiente");
   const cambio = async () => { await recargar(); await onCambio(); };
   const guardar = async () => {
     setMsg({ tipo: "", texto: "" }); setOcupado(true);
@@ -108,6 +110,47 @@ function RequisitosCompra({ api, c, puedeOperar, onCambio, onCompleto, onDatosLi
   );
 }
 
+/**
+ * ¿A qué operaciones aplica el vehículo según el Tasador? Sin decisión (tasaciones anteriores) se asume compra.
+ */
+const aplicaA = (t, op) => !!t && (t.aplica_para === op || t.aplica_para === "ambas" || (!t.aplica_para && op === "compra"));
+
+/**
+ * Los dos botones con los que el ejecutivo elige la oferta final al cliente. La oferta elegida fija el tipo del lead (compra o consignación):
+ * al elegirla se despliegan sus datos y documentos para cargarlos y enviarlos a validar.
+ */
+function BotonesOferta({ api, lead, tasada, operacion, setOperacion, onCambio, avisar, bloqueado }) {
+  const [ocupado, setOcupado] = useState(false);
+  const elegir = async (op) => {
+    avisar(""); setOcupado(true);
+    try {
+      if (lead.tipo !== op) { await api("leads.elegirOperacion", { leadId: lead.id, operacion: op }); setOperacion(op); await onCambio(); }
+      else setOperacion(op);
+    } catch (e) { avisar(mensajeError(e)); }
+    setOcupado(false);
+  };
+  // Sin tasación completada, cada lead sigue con su propia operación (los de consignación anteriores a este paso no la exigían).
+  const habilita = (op) => (tasada ? aplicaA(tasada, op) : lead.tipo === op && op === "consignacion");
+  const clase = (op) => (operacion === op ? "bg-stone-900 text-white border-stone-900" : "bg-white text-stone-800 border-stone-300");
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <button type="button" disabled={ocupado || bloqueado || !habilita("compra")} onClick={() => elegir("compra")} title={habilita("compra") ? "" : "Espera la tasación o el Tasador no la dejó aplicable a compra"} className={`px-4 py-2 text-sm border disabled:opacity-50 ${clase("compra")}`}>Hacer oferta compra</button>
+      <button type="button" disabled={ocupado || bloqueado || !habilita("consignacion")} onClick={() => elegir("consignacion")} title={habilita("consignacion") ? "" : "Espera la tasación o el Tasador no la dejó aplicable a consignación"} className={`px-4 py-2 text-sm border disabled:opacity-50 ${clase("consignacion")}`}>Hacer oferta consignación</button>
+      <span className="text-xs text-stone-500">La oferta que elijas fija el tipo del lead.</span>
+    </div>
+  );
+}
+
+/** Los documentos que se cargarán según la oferta elegida (la lista completa, antes de empezar a subirlos). */
+function ListaDocumentosPrevia({ lista, titulo }) {
+  return (
+    <div className="text-xs text-stone-600 border border-dashed border-stone-300 p-3">
+      <p className="uppercase tracking-wide text-stone-400 mb-1">{titulo}</p>
+      <ul className="list-disc ml-5 grid grid-cols-1 md:grid-cols-2 gap-x-6">{lista.map((d) => <li key={d.clave}>{d.nombre}</li>)}</ul>
+    </div>
+  );
+}
+
 /** Genera y descarga la nota de compra (solo existe si la compra está concretada y completa). */
 async function descargarNotaCompra(api, c) {
   const { nota } = await api("compras.nota", { id: c.id });
@@ -153,6 +196,13 @@ function Compra({ api, c, puedeOperar, puedeAprobar, cerrado, onCambio, avisar }
   const [pago, setPago] = useState({ montoFinal: c.monto_oferta, medioPago: "Transferencia", fechaPago: hoyISO(), notas: "" });
   const [ocupado, setOcupado] = useState(false);
   const [reqCompleto, setReqCompleto] = useState(true);
+  const [req, setReq] = useState(null);
+  const [envios, setEnvios] = useState(0);
+  const enviarAValidar = async () => {
+    avisar(""); setOcupado(true);
+    try { await api("validacion.enviar", { id: req.validacionId }); setEnvios((n) => n + 1); await onCambio(); } catch (e) { avisar(mensajeError(e)); }
+    setOcupado(false);
+  };
   const correr = async (op, extra, despues) => {
     avisar(""); setOcupado(true);
     try { await api(op, { id: c.id, ...extra }); setModo(""); setMotivo(""); await onCambio(); if (despues) despues(); } catch (e) { avisar(mensajeError(e)); }
@@ -172,9 +222,16 @@ function Compra({ api, c, puedeOperar, puedeAprobar, cerrado, onCambio, avisar }
       </p>
       {c.estado === "rechazada" && c.motivo && <p className="text-xs text-stone-600">El cliente rechazó: {c.motivo}</p>}
       {c.motivo_rechazo_pago && c.estado === "aceptada" && <p className="text-xs text-rose-700">Pago rechazado por el supervisor: {c.motivo_rechazo_pago}. Corrígelo y vuelve a solicitarlo.</p>}
-      {(c.estado === "aceptada" || c.estado === "pago_pendiente") && v && v.estado !== "aprobada" && <p className="text-xs text-amber-700">Documentos: {v.folio} está «{({ pendiente: "esperando a un Validador", en_revision: "en revisión", observada: "con observaciones", rechazada: "rechazada" })[v.estado] || v.estado}». El pago no se aprueba hasta que estén validados.</p>}
+      {["oferta", "aceptada", "pago_pendiente"].includes(c.estado) && v && v.estado !== "aprobada" && <p className="text-xs text-amber-700">Documentos: {v.folio} {v.enviada === false ? "aún no se envía a validar" : `está «${({ pendiente: "esperando a un Validador", en_revision: "en revisión", observada: "con observaciones", rechazada: "rechazada" })[v.estado] || v.estado}»`}. El pago no se aprueba hasta que estén validados.</p>}
 
-      {(c.estado === "aceptada" || c.estado === "pago_pendiente") && <RequisitosCompra api={api} c={c} puedeOperar={puedeOperar && !cerrado} onCambio={onCambio} onCompleto={setReqCompleto} />}
+      {["oferta", "aceptada", "pago_pendiente"].includes(c.estado) && <RequisitosCompra api={api} c={c} puedeOperar={puedeOperar && !cerrado} onCambio={onCambio} onCompleto={setReqCompleto} onInfo={setReq} clave={`${c.estado}:${envios}`} />}
+      {["oferta", "aceptada", "pago_pendiente"].includes(c.estado) && puedeOperar && !cerrado && req && req.aplica && req.validacionId && !req.enviada && (
+        <div className="flex flex-wrap items-center gap-3">
+          <button disabled={ocupado || !reqCompleto} title={reqCompleto ? "" : "Completa los datos del vendedor y los documentos"} onClick={enviarAValidar} className={BTN_AMBAR}>Enviar a validar</button>
+          <span className="text-xs text-stone-500">El Validador los verá en su cola recién cuando los envíes.</span>
+        </div>
+      )}
+      {["oferta", "aceptada", "pago_pendiente"].includes(c.estado) && req && req.enviada && <p className="text-xs text-emerald-700">Documentos enviados a validar ✓</p>}
       {puedeOperar && !cerrado && c.estado === "oferta" && modo === "" && (
         <div className="flex flex-wrap gap-2"><button disabled={ocupado} onClick={() => correr("compras.responder", { acepta: true })} className={BTN_AMBAR}>El cliente aceptó</button><button onClick={() => setModo("rechazo")} className={BTN}>El cliente rechazó</button><button onClick={() => setModo("cancelar")} className={BTN}>Cancelar</button></div>
       )}
@@ -215,7 +272,7 @@ function Compra({ api, c, puedeOperar, puedeAprobar, cerrado, onCambio, avisar }
   );
 }
 
-export function SeccionCompra({ api, lead, datos, onCambio, avisar }) {
+export function SeccionCompra({ api, lead, datos, operacion, setOperacion, onCambio, avisar }) {
   const { datos: lista, recargar } = useCarga(() => api("compras.list", { vista: "lead", leadId: lead.id }), [api, lead.id, datos.eventos.length]);
   const { datos: tas, recargar: recargarTas } = useCarga(() => api("compras.tasaciones", { leadId: lead.id }), [api, lead.id, datos.eventos.length]);
   const [oferta, setOferta] = useState({ tasacionId: "", monto: "", notas: "" });
@@ -256,23 +313,27 @@ export function SeccionCompra({ api, lead, datos, onCambio, avisar }) {
             <div className="text-sm text-stone-700">
               <p><span className="text-xs uppercase text-stone-400">Resultado del Tasador · {completas[0].folio}: </span><ResultadoTasacion t={completas[0]} /> {ofertables.length > 0 && "El monto de compra es lo máximo que puedes ofrecer."}</p>
               {completas[0].observaciones && <p className="text-xs text-stone-500 mt-1">Observaciones: {completas[0].observaciones}</p>}
-              {ofertables.length === 0 && <p className="mt-2 text-rose-700">El Tasador indicó que este vehículo no aplica para compra, así que no se puede ofertar. {completas[0].aplica_para === "consignacion" ? "Si el lead cambió a Consignación, sigue desde la ficha." : "Puedes pedir una nueva tasación o marcar el lead como perdido."}</p>}
+              {ofertables.length === 0 && <p className="mt-2 text-rose-700">El Tasador indicó que este vehículo no aplica para compra, así que no se puede ofertar. {completas[0].aplica_para === "consignacion" ? "Usa «Hacer oferta consignación»." : "Puedes pedir una nueva tasación o marcar el lead como perdido."}</p>}
             </div>
           ) : tas.pendiente ? (
             <p className="text-sm text-stone-700">La tasación {tas.pendiente.folio} está {tas.pendiente.estado === "pendiente" ? "esperando a un Tasador" : "en proceso"}. Cuando termine podrás ofertar.</p>
           ) : (
             <div className="flex items-center gap-3"><p className="text-sm text-stone-700">Aún no hay una tasación de este vehículo.</p><button disabled={ocupado} onClick={pedirTasacion} className={BTN_AMBAR}>Pedir tasación</button></div>
           )}
-          {ofertables.length > 0 && elegida && (
+          {completas.length > 0 && <>
+            <p className="text-xs uppercase tracking-wide text-stone-400">2 · Oferta final al cliente</p>
+            <BotonesOferta api={api} lead={lead} tasada={completas[0]} operacion={operacion} setOperacion={setOperacion} onCambio={cambio} avisar={avisar} />
+          </>}
+          {operacion === "compra" && ofertables.length > 0 && elegida && (
             <>
-              <p className="text-xs uppercase tracking-wide text-stone-400">2 · Oferta al cliente</p>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
                 {ofertables.length > 1 && <Campo etiqueta="Tasación"><select value={oferta.tasacionId || ofertables[0].id} onChange={(e) => setOferta({ ...oferta, tasacionId: e.target.value })} className={INPUT}>{ofertables.map((t) => <option key={t.id} value={t.id}>{t.folio} · {clp(topeDeOferta(t))}</option>)}</select></Campo>}
                 <Campo etiqueta="Monto ofrecido ($)" ayuda={elegida.aplica_para === "ambas" ? `Máximo ${clp(topeDeOferta(elegida))} (el precio de consignación, porque aplica para compra y consignación)` : `Máximo ${clp(topeDeOferta(elegida))}`}><InputDinero value={oferta.monto === "" ? topeDeOferta(elegida) : oferta.monto} onChange={(e) => setOferta({ ...oferta, monto: e.target.value })} className={`${INPUT} font-mono`} /></Campo>
                 <Campo etiqueta="Nota (opcional)"><input value={oferta.notas} maxLength={300} onChange={(e) => setOferta({ ...oferta, notas: e.target.value })} className={INPUT} /></Campo>
               </div>
               {error && <Aviso>{error}</Aviso>}
-              <div><button disabled={ocupado} onClick={ofertar} className={BTN_AMBAR}>Hacer la oferta</button></div>
+              <div className="flex flex-wrap items-center gap-3"><button disabled={ocupado} onClick={ofertar} className={BTN_AMBAR}>Registrar oferta de compra</button><span className="text-xs text-stone-500">Al registrarla se despliegan los datos del vendedor y los documentos para cargarlos y enviarlos a validar.</span></div>
+              <ListaDocumentosPrevia lista={DOCS_COMPRA} titulo="Documentos que se cargan para la compra" />
             </>
           )}
         </div>
@@ -332,7 +393,7 @@ function Consignacion({ api, c, puedeOperar, onCambio, avisar }) {
   );
 }
 
-export function SeccionConsignacion({ api, lead, datos, onCambio, avisar }) {
+export function SeccionConsignacion({ api, lead, datos, operacion, setOperacion, onCambio, avisar }) {
   const { datos: lista, recargar } = useCarga(() => api("consignaciones.list", { vista: "lead", leadId: lead.id }), [api, lead.id, datos.eventos.length]);
   const tasada = (datos.tasaciones || []).find((t) => t.estado === "completada" && t.tipo !== "parte_pago");
   const [reqCompleto, setReqCompleto] = useState(false);
@@ -373,12 +434,19 @@ export function SeccionConsignacion({ api, lead, datos, onCambio, avisar }) {
         </div>
       )}
       {!abierta && !cerrado && datos.puedeEditar && lista.consignaciones.every((c) => !["vendida"].includes(c.estado)) && (
+        <div className="border border-stone-200 bg-stone-50 p-3 flex flex-col gap-2">
+          <p className="text-xs uppercase tracking-wide text-stone-400">Oferta final al cliente</p>
+          {!tasada && <p className="text-xs text-stone-600">Aún no hay una tasación completada de este vehículo. Cuando el Tasador la termine podrás elegir también la oferta de compra.</p>}
+          <BotonesOferta api={api} lead={lead} tasada={tasada} operacion={operacion} setOperacion={setOperacion} onCambio={cambio} avisar={avisar} />
+        </div>
+      )}
+      {operacion === "consignacion" && !abierta && !cerrado && datos.puedeEditar && lista.consignaciones.every((c) => !["vendida"].includes(c.estado)) && (
         <RequisitosCompra api={api} c={{ id: lead.id, estado: "" }} puedeOperar onCambio={cambio} onCompleto={setReqCompleto} onDatosListos={setDatosListos} persona="dueño"
           ops={{ requisitos: "consignaciones.requisitos", datos: "consignaciones.datosCliente" }} args={{ leadId: lead.id }} clave={lista.consignaciones.length} destino="registrar la consignación" />
       )}
-      {!abierta && !cerrado && datos.puedeEditar && lista.consignaciones.every((c) => !["vendida"].includes(c.estado)) && (
+      {operacion === "consignacion" && !abierta && !cerrado && datos.puedeEditar && lista.consignaciones.every((c) => !["vendida"].includes(c.estado)) && (
         <div className="border border-stone-200 bg-stone-50 p-3 flex flex-col gap-3">
-          <p className="text-xs uppercase tracking-wide text-stone-400">Contrato de consignación</p>
+          <p className="text-xs uppercase tracking-wide text-stone-400">Oferta de consignación y contrato</p>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <Campo etiqueta="Precio piso ($)" ayuda="Lo mínimo que quiere recibir el dueño."><InputDinero value={f.precioPiso} onChange={(e) => setF({ ...f, precioPiso: e.target.value })} className={`${INPUT} font-mono`} /></Campo>
             <Campo etiqueta="Precio de publicación ($)" ayuda="No puede ser menor que el piso."><InputDinero value={f.precioPublicacion} onChange={(e) => setF({ ...f, precioPublicacion: e.target.value })} className={`${INPUT} font-mono`} /></Campo>
@@ -392,7 +460,7 @@ export function SeccionConsignacion({ api, lead, datos, onCambio, avisar }) {
             <span className="text-xs text-stone-500">Se firma con el dueño y luego se sube como «Contrato de consignación» en los documentos.</span>
           </div>
           {error && <Aviso>{error}</Aviso>}
-          <div><button disabled={ocupado || !reqCompleto} title={reqCompleto ? "" : "Completa los datos del dueño y los documentos"} onClick={crear} className={BTN_AMBAR}>Registrar la consignación</button></div>
+          <div><button disabled={ocupado || !reqCompleto} title={reqCompleto ? "" : "Completa los datos del dueño y los documentos"} onClick={crear} className={BTN_AMBAR}>Enviar a validar</button><span className="ml-3 text-xs text-stone-500">Registra el contrato y envía los documentos al Validador.</span></div>
         </div>
       )}
       {lista.consignaciones.map((c) => <Consignacion key={c.id} api={api} c={c} puedeOperar={datos.puedeEditar || lista.puedeSupervisar} onCambio={cambio} avisar={avisar} />)}

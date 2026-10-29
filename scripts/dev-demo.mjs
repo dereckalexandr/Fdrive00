@@ -106,6 +106,16 @@ for (const i of [0, 1, 2]) {
   }
 }
 
+// Un lead de compra con la tasación lista y aplicable a compra y consignación, para ver los dos botones de oferta.
+{
+  const l = (await ve(U.e1.token, "leads.create", { cliente: { nombre: "Sra. Paula Reyes", telefono: "955500111" }, lead: { tipo: "compra", fuente: "Sitio web", vehiculoOfrecido: { patente: "MNOP12", marca: "Mini", modelo: "Cooper", anio: 2020, km: 45000, transmision: "Automática", combustible: "Bencina", duenos: 1, prenda: "no", mantenciones: "si", precioEsperado: 14500000 } } })).lead;
+  if (l) {
+    const p = await ve(U.e1.token, "compras.pedirTasacion", { leadId: l.id });
+    await ve(U.tasador.token, "tasaciones.tomar", { id: p.tasacion.id });
+    await ve(U.tasador.token, "tasaciones.completar", { id: p.tasacion.id, borrador: { aplicaPara: "ambas", valorCompra: 12000000, valorConsignacion: 13000000, valorVenta: 15500000 } });
+  }
+}
+
 // Un lead de consignación, para ver los requisitos (datos del dueño y documentos) antes de registrar el contrato.
 await ve(U.e1.token, "leads.create", { cliente: { nombre: "Doña Marta Silva", telefono: "955567890" }, lead: { tipo: "consignacion", fuente: "Visita al local", vehiculoOfrecido: { patente: "JJKK77", marca: "Nissan", modelo: "Kicks", anio: 2021, km: 33000, transmision: "Automática", combustible: "Bencina", duenos: 1, prenda: "no", mantenciones: "si", precioEsperado: 11500000 } } });
 

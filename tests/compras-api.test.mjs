@@ -825,3 +825,97 @@ test("Tasador: si aplica para compra y consignación, la oferta tiene como tope 
   assert.equal(ok.status, 200, JSON.stringify(ok));
   assert.equal(ok.compra.valor_tasado, 7000000);
 });
+
+/** Tasación completada del lead con la decisión del Tasador (compra, consignación, ambas o ninguna). */
+async function tasarCon2(lead, borrador, token = U.c1.token) {
+  const p = await ve(token, "compras.pedirTasacion", { leadId: lead.id });
+  assert.equal(p.status, 200, JSON.stringify(p));
+  assert.equal((await ve(U.t1.token, "tasaciones.tomar", { id: p.tasacion.id })).status, 200);
+  const r = await ve(U.t1.token, "tasaciones.completar", { id: p.tasacion.id, borrador });
+  assert.equal(r.status, 200, JSON.stringify(r));
+  return r.tasacion;
+}
+
+test("Hacer oferta compra o consignación: la operación elegida fija el tipo del lead", async () => {
+  const AMBAS = { aplicaPara: "ambas", valorCompra: 6000000, valorConsignacion: 7000000, valorVenta: 8500000 };
+  // Sin tasación completada no se elige.
+  const l0 = await leadDe(U.c1.token, "compra");
+  assert.equal((await ve(U.c1.token, "leads.elegirOperacion", { leadId: l0.id, operacion: "consignacion" })).error, "tasacion_pendiente");
+  assert.equal((await ve(U.c1.token, "leads.elegirOperacion", { leadId: l0.id, operacion: "otra" })).error, "operacion_invalida");
+
+  // Aplica para compra y consignación: puede seguir con cualquiera de las dos.
+  await tasarCon2(l0, AMBAS);
+  assert.equal(fila("leads", l0.id).tipo, "compra", "el Tasador no cambia el tipo si aplica para ambas");
+  const a = await ve(U.c1.token, "leads.elegirOperacion", { leadId: l0.id, operacion: "consignacion" });
+  assert.equal(a.status, 200, JSON.stringify(a));
+  assert.equal(fila("leads", l0.id).tipo, "consignacion");
+  assert.ok(db.tablas.lead_eventos.some((e) => e.lead_id === l0.id && e.tipo === "tipo" && /Compra a Consignación/.test(e.detalle) && /se eligió hacer esa oferta/.test(e.detalle)));
+  const b = await ve(U.c1.token, "leads.elegirOperacion", { leadId: l0.id, operacion: "compra" });
+  assert.equal(b.status, 200, "mientras no haya una oferta en curso se puede cambiar de opinión");
+  assert.equal(fila("leads", l0.id).tipo, "compra");
+
+  // Con una oferta de compra en curso ya no se cambia.
+  const tas = db.tablas.tasaciones.find((t) => t.lead_id === l0.id);
+  assert.equal((await ofertar(U.c1.token, l0.id, tas.id, 7000000)).status, 200);
+  assert.equal((await ve(U.c1.token, "leads.elegirOperacion", { leadId: l0.id, operacion: "consignacion" })).error, "operacion_en_curso");
+
+  // Si el Tasador dejó solo compra, la consignación no se ofrece.
+  const l1 = await leadDe(U.c1.token, "compra");
+  await tasarCon2(l1, { aplicaPara: "compra", valorCompra: 6000000, valorVenta: 8000000 });
+  assert.equal((await ve(U.c1.token, "leads.elegirOperacion", { leadId: l1.id, operacion: "consignacion" })).error, "tasacion_no_aplica_operacion");
+
+  // Un ejecutivo sin la habilitación de la otra operación no la toma; el Jefe Local sí y el lead pasa a quien corresponde.
+  const l2 = await leadDe(U.c2.token, "compra");
+  await tasarCon2(l2, AMBAS, U.c2.token);
+  assert.equal((await ve(U.c2.token, "leads.elegirOperacion", { leadId: l2.id, operacion: "consignacion" })).error, "operacion_no_habilitada");
+  const j = await ve(U.jefe.token, "leads.elegirOperacion", { leadId: l2.id, operacion: "consignacion" });
+  assert.equal(j.status, 200, JSON.stringify(j));
+  assert.deepEqual([fila("leads", l2.id).tipo, fila("leads", l2.id).asignado_a], ["consignacion", U.c1.id], "pasa a Carla, que sí tiene Consignaciones");
+});
+
+test("Enviar a validar: los documentos de una compra recién entran a la cola del Validador cuando el ejecutivo los envía completos", async () => {
+  await crear("vv", "Vera Validadora", "11.111.111-1", ["validador"], L1);
+  try {
+    const lead = await leadDe(U.c1.token, "compra");
+    const tas = await tasar(lead);
+    const o = await ofertar(U.c1.token, lead.id, tas.id, 6000000);
+    assert.equal(o.status, 200, JSON.stringify(o));
+    // Los documentos se cargan desde que se hace la oferta.
+    const rq = await ve(U.c1.token, "compras.requisitos", { id: o.compra.id });
+    assert.equal(rq.status, 200, JSON.stringify(rq));
+    const val = () => db.tablas.validaciones.find((v) => v.id === rq.validacionId);
+    assert.equal(val().enviada_en, null, "nace sin enviar");
+    // El Validador no la ve en su cola ni puede tomarla.
+    const cola = await ve(U.vv.token, "validacion.list", { vista: "cola" });
+    assert.ok(!cola.validaciones.some((v) => v.id === rq.validacionId));
+    assert.equal((await ve(U.vv.token, "validacion.tomar", { id: rq.validacionId })).error, "validacion_sin_enviar");
+    // Incompleta: no se envía.
+    assert.equal((await ve(U.c1.token, "validacion.enviar", { id: rq.validacionId })).error, "envio_incompleto");
+    // Aceptada la oferta y completo todo, aún hay que enviar a validar antes de pedir el pago.
+    assert.equal((await ve(U.c1.token, "compras.responder", { id: o.compra.id, acepta: true })).status, 200);
+    assert.equal(db.tablas.validaciones.filter((v) => v.compra_id === o.compra.id).length, 1, "no se crea una segunda validación al aceptar");
+    await cumplirRequisitos(o.compra.id);
+    assert.equal((await ve(U.c1.token, "compras.solicitarPago", { id: o.compra.id, datos: PAGO() })).error, "validacion_sin_enviar");
+    // Solo quien gestiona el lead (o el supervisor) la envía.
+    assert.equal((await ve(U.c2.token, "validacion.enviar", { id: rq.validacionId })).status, 404);
+    const env = await ve(U.c1.token, "validacion.enviar", { id: rq.validacionId });
+    assert.equal(env.status, 200, JSON.stringify(env));
+    assert.ok(val().enviada_en);
+    assert.equal((await ve(U.c1.token, "validacion.enviar", { id: rq.validacionId })).error, "validacion_ya_enviada");
+    // Ahora sí está en la cola y se puede tomar.
+    assert.ok((await ve(U.vv.token, "validacion.list", { vista: "cola" })).validaciones.some((v) => v.id === rq.validacionId));
+    assert.equal((await ve(U.vv.token, "validacion.tomar", { id: rq.validacionId })).status, 200);
+    assert.equal((await ve(U.c1.token, "compras.solicitarPago", { id: o.compra.id, datos: PAGO() })).status, 200);
+  } finally {
+    fila("usuarios", U.vv.id).activo = false; // los demás flujos de este archivo no tienen Validadores
+    db.tablas.validaciones.forEach((v) => { if (!v.enviada_en) v.enviada_en = new Date().toISOString(); });
+  }
+});
+
+test("Enviar a validar: al registrar el contrato de consignación la validación queda enviada", async () => {
+  const lead = await leadDe(U.c1.token, "consignacion");
+  const ok = await consignar(U.c1.token, lead.id);
+  assert.equal(ok.status, 200, JSON.stringify(ok));
+  const val = db.tablas.validaciones.find((v) => v.consignacion_id === ok.consignacion.id);
+  assert.ok(val && val.enviada_en, "queda enviada al registrar el contrato");
+});

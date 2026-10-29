@@ -94,6 +94,7 @@ function LeadFicha({ api, leadId, catalogos, onCerrar, onCambio, onEditar }) {
   const [motivo, setMotivo] = useState("");
   const [pidePerdida, setPidePerdida] = useState(false);
   const [siguiente, setSiguiente] = useState(false);
+  const [operacion, setOperacion] = useState(""); // oferta elegida en un lead de compra o consignación: "" | compra | consignacion
 
   const puedeAsignar = datos && datos.puedeEditar && catalogos.puedeAsignar;
   useEffect(() => {
@@ -165,8 +166,8 @@ function LeadFicha({ api, leadId, catalogos, onCerrar, onCambio, onEditar }) {
 
       {esVenta && <SeccionCotizaciones api={api} lead={lead} datos={datos} catalogos={catalogos} avisar={setMsg} onCambio={async () => { await recargar(); onCambio(); }} />}
       {esVenta && <SeccionTasacion api={api} lead={lead} datos={datos} catalogos={catalogos} avisar={setMsg} onCambio={async () => { await recargar(); onCambio(); }} />}
-      {tipoLead === "compra" && <SeccionCompra api={api} lead={lead} datos={datos} avisar={setMsg} onCambio={async () => { await recargar(); onCambio(); }} />}
-      {tipoLead === "consignacion" && <SeccionConsignacion api={api} lead={lead} datos={datos} avisar={setMsg} onCambio={async () => { await recargar(); onCambio(); }} />}
+      {tipoLead === "compra" && <SeccionCompra api={api} lead={lead} datos={datos} operacion={operacion} setOperacion={setOperacion} avisar={setMsg} onCambio={async () => { await recargar(); onCambio(); }} />}
+      {tipoLead === "consignacion" && <SeccionConsignacion api={api} lead={lead} datos={datos} operacion={operacion} setOperacion={setOperacion} avisar={setMsg} onCambio={async () => { await recargar(); onCambio(); }} />}
       {(puedeEditar || catalogos.veTodo) && (
         <SeccionInspeccion api={api} origen={{ tipo: "lead", id: lead.id }} cerrado={lead.etapa === "ganado" || lead.etapa === "perdido" || !puedeEditar}
           vehiculo={!esVenta ? ofrecido : pp.tiene && pp.patente ? { patente: pp.patente, marca: pp.marca, modelo: pp.modelo, anio: pp.anio, km: pp.km } : vehiculo ? { patente: vehiculo.patente, marca: vehiculo.marca, modelo: vehiculo.modelo, anio: vehiculo.anio, km: vehiculo.km } : {}} />
