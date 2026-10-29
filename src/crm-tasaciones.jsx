@@ -251,10 +251,11 @@ function TasacionDetalle({ api, id, renderEstimador, onCerrar, onCambio }) {
         {editable && falta && <p className="text-xs text-rose-600 mt-2">{falta}</p>}
       </Tarjeta>
 
-      {t.tipo === "directa" && <SeccionValidacion api={api} origen={{ tipo: "tasacion", id: t.id }} titulo="Validación de documentos de la compra" />}
-      <SeccionInspeccion api={api} origen={{ tipo: "tasacion", id: t.id }} vehiculo={t.vehiculo} cerrado={t.estado === "cancelada"} />
+      {/* Pedir inspecciones, cargar documentos y vincular inspecciones es del ejecutivo que gestiona el lead; el Tasador solo tasa. */}
+      {!datos.puedeRealizar && t.tipo === "directa" && <SeccionValidacion api={api} origen={{ tipo: "tasacion", id: t.id }} titulo="Validación de documentos de la compra" />}
+      {!datos.puedeRealizar && <SeccionInspeccion api={api} origen={{ tipo: "tasacion", id: t.id }} vehiculo={t.vehiculo} cerrado={t.estado === "cancelada"} />}
 
-      <Tarjeta titulo="Inspección">
+      {!datos.puedeRealizar && <Tarjeta titulo="Inspección">
         {editable ? <BuscadorInspecciones api={api} patente={f.vehiculo.patente} actual={f.inspeccion} onElegir={(i) => set("inspeccion", i)} />
           : f.inspeccion && f.inspeccion.key ? <p className="text-sm text-stone-700">Inspección del {f.inspeccion.fecha || "—"} · hecha por {f.inspeccion.inspector || "—"}</p> : <p className="text-sm text-stone-500">Sin inspección vinculada.</p>}
         {f.inspeccion && f.inspeccion.key && (
@@ -265,7 +266,7 @@ function TasacionDetalle({ api, id, renderEstimador, onCerrar, onCambio }) {
               : <div className="flex flex-wrap gap-2">{f.inspeccion.fotos.map((fid) => <MiniaturaInspeccion key={fid} fichaId={f.inspeccion.key.split("::").pop()} fotoId={fid} />)}</div>}
           </div>
         )}
-      </Tarjeta>
+      </Tarjeta>}
 
       <Tarjeta titulo={`Fotos (${total}/${MAX_FOTOS_TASACION})`}>
         <div className="flex flex-wrap gap-3">

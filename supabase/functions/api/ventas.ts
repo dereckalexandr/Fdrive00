@@ -1402,8 +1402,9 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       if (ctx.esAdmin) return false;
       if (v.tipo === "venta") { const l = v.lead_id ? await cargarLead(v.lead_id) : null; return !!l && puedeVer(l) && puedeTocar(l); }
       if (v.tipo === "vehiculo") return can("inventario.editar");
-      if (v.lead_id) { const l = await cargarLead(v.lead_id); if (l && puedeVer(l) && puedeTocar(l)) return true; }
-      return can("tasaciones.realizar");
+      // Cargar documentos es del ejecutivo que gestiona el lead; el Tasador solo tasa.
+      if (v.lead_id) { const l = await cargarLead(v.lead_id); return !!l && puedeVer(l) && puedeTocar(l); }
+      return false;
     }
     async function enriquecerVal(filas: any[]) {
       const docs = await docsDe(filas.map((v) => v.id));

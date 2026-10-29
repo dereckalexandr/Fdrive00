@@ -179,7 +179,8 @@ test("Otros orígenes: desde el inventario y desde una tasación", async () => {
   const l = await lead(U.e1.token);
   const pt = vehN();
   const tas = (await ve(U.e1.token, "tasaciones.pedir", { leadId: l.id, datos: { vehiculo: pt } })).tasacion;
-  const ins = await ve(U.t1.token, "inspecciones.pedir", { origen: "tasacion", tasacionId: tas.id, datos: datos({ vehiculo: pt }) });
+  assert.equal((await ve(U.t1.token, "inspecciones.pedir", { origen: "tasacion", tasacionId: tas.id, datos: datos({ vehiculo: pt }) })).status, 403, "el Tasador no pide inspecciones: es del ejecutivo que gestiona el lead");
+  const ins = await ve(U.e1.token, "inspecciones.pedir", { origen: "tasacion", tasacionId: tas.id, datos: datos({ vehiculo: pt }) });
   assert.equal(ins.status, 200, JSON.stringify(ins));
   assert.equal(ins.inspeccion.origen, "tasacion");
   assert.equal(ins.inspeccion.lead_id, l.id, "queda ligada al lead de la tasación");

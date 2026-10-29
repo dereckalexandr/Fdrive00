@@ -80,7 +80,7 @@ export const PERMISOS_POR_ROL = {
     "cotizaciones.crear", "agenda.usar", "comisiones.propias", "comisiones.local", "metas.gestionar", "tasacion_compra.usar", "tasaciones.pedir", "inspecciones.pedir",
   ],
   ejecutivo: ["leads.propios", "inventario.ver", "cotizaciones.crear", "agenda.usar", "comisiones.propias", "tasaciones.pedir", "inspecciones.pedir"],
-  tasador: ["tasacion_compra.usar", "tasaciones.usar", "inventario.ver", "tasaciones.realizar", "inspecciones.pedir"],
+  tasador: ["tasacion_compra.usar", "tasaciones.usar", "inventario.ver", "tasaciones.realizar"],
   inspector: ["inspecciones.usar", "tasaciones.usar", "inspecciones.realizar"],
   validador: ["validacion.usar", "validacion.realizar", "inventario.ver"],
   anunciante: ["anuncios.gestionar", "inventario.ver"],
