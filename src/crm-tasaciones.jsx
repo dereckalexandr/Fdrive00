@@ -149,7 +149,10 @@ function TasacionDetalle({ api, id, renderEstimador, onCerrar, onCambio }) {
   if (error && !datos) return <Modal titulo="Tasación" onCerrar={onCerrar}><Aviso>{error}</Aviso></Modal>;
   if (!f) return null;
   const t = datos.tasacion;
-  const editable = datos.puedeEditar;
+  // El Tasador edita su tasación en proceso; el Jefe Local y el administrador pueden corregir una ya realizada.
+  const soloTasador = datos.puedeEditar;
+  const corrigiendo = !!datos.puedeCorregir;
+  const editable = soloTasador || corrigiendo;
   const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
   const total = fotos.length + nuevas.length;
   const esRetoma = t.tipo === "parte_pago";
@@ -193,6 +196,10 @@ function TasacionDetalle({ api, id, renderEstimador, onCerrar, onCambio }) {
     setOcupado(false);
   };
   const guardar = () => correr(async () => { const b = await armarBorrador(); await api("tasaciones.guardar", { id: t.id, borrador: b }); await limpiarQuitadas(); }, "Borrador guardado ✓");
+  const corregir = async () => {
+    if (!window.confirm("¿Guardar la corrección de la tasación? El resultado corregido se avisa al ejecutivo del lead.")) return;
+    await correr(async () => { const b = await armarBorrador(); await api("tasaciones.corregir", { id: t.id, borrador: b }); }, "Tasación corregida ✓");
+  };
   const completar = async () => {
     if (!window.confirm("¿Completar la tasación? Ya no podrás editarla. El resultado se devuelve al ejecutivo del lead.")) return;
     await correr(async () => { const b = await armarBorrador(); await api("tasaciones.completar", { id: t.id, borrador: b }); await limpiarQuitadas(); }, "Tasación completada ✓");
@@ -256,7 +263,7 @@ function TasacionDetalle({ api, id, renderEstimador, onCerrar, onCambio }) {
       {!datos.puedeRealizar && <SeccionInspeccion api={api} origen={{ tipo: "tasacion", id: t.id }} vehiculo={t.vehiculo} cerrado={t.estado === "cancelada"} />}
 
       {!datos.puedeRealizar && <Tarjeta titulo="Inspección">
-        {editable ? <BuscadorInspecciones api={api} patente={f.vehiculo.patente} actual={f.inspeccion} onElegir={(i) => set("inspeccion", i)} />
+        {soloTasador ? <BuscadorInspecciones api={api} patente={f.vehiculo.patente} actual={f.inspeccion} onElegir={(i) => set("inspeccion", i)} />
           : f.inspeccion && f.inspeccion.key ? <p className="text-sm text-stone-700">Inspección del {f.inspeccion.fecha || "—"} · hecha por {f.inspeccion.inspector || "—"}</p> : <p className="text-sm text-stone-500">Sin inspección vinculada.</p>}
         {f.inspeccion && f.inspeccion.key && (
           <div className="mt-3">
@@ -270,17 +277,17 @@ function TasacionDetalle({ api, id, renderEstimador, onCerrar, onCambio }) {
 
       <Tarjeta titulo={`Fotos (${total}/${MAX_FOTOS_TASACION})`}>
         <div className="flex flex-wrap gap-3">
-          {fotos.map((fid) => <Miniatura key={fid} tasacionId={t.id} fotoId={fid} onQuitar={editable ? () => { setFotos(fotos.filter((x) => x !== fid)); setQuitadas([...quitadas, fid]); } : null} />)}
+          {fotos.map((fid) => <Miniatura key={fid} tasacionId={t.id} fotoId={fid} onQuitar={soloTasador ? () => { setFotos(fotos.filter((x) => x !== fid)); setQuitadas([...quitadas, fid]); } : null} />)}
           {nuevas.map((n) => (
             <div key={n.id} className="relative w-24 h-24 border border-amber-400"><img src={n.dataUrl} alt="" className="w-full h-full object-cover" />
               <button type="button" onClick={() => setNuevas(nuevas.filter((x) => x.id !== n.id))} className="absolute -top-2 -right-2 bg-rose-600 text-white w-5 h-5 text-xs rounded-full" aria-label="Quitar foto">✕</button></div>
           ))}
-          {editable && total < MAX_FOTOS_TASACION && (
+          {soloTasador && total < MAX_FOTOS_TASACION && (
             <label className="w-24 h-24 border-2 border-dashed border-stone-300 flex flex-col items-center justify-center text-stone-500 text-xs cursor-pointer hover:border-amber-500 text-center">
               <span className="text-xl">＋</span>Agregar foto<input type="file" accept="image/*" multiple className="hidden" onChange={agregarFotos} />
             </label>
           )}
-          {!editable && total === 0 && <p className="text-sm text-stone-500">Sin fotos.</p>}
+          {!soloTasador && total === 0 && <p className="text-sm text-stone-500">Sin fotos.</p>}
         </div>
       </Tarjeta>
 
@@ -289,9 +296,10 @@ function TasacionDetalle({ api, id, renderEstimador, onCerrar, onCambio }) {
       {t.estado === "completada" && <Aviso tipo="ok">Completada {fechaHora(t.completada_en)}. <ResultadoTasacion t={t} /></Aviso>}
 
       <div className="flex flex-wrap gap-2 items-center">
-        {editable && <button onClick={guardar} disabled={ocupado} className={BTN}>Guardar borrador</button>}
-        {editable && <button onClick={completar} disabled={ocupado || !!falta} className={BTN_AMBAR}>Completar tasación</button>}
-        {editable && <button onClick={() => correr(() => api("tasaciones.liberar", { id: t.id }), "Devuelta a la cola")} disabled={ocupado} className={BTN}>Devolver a la cola</button>}
+        {soloTasador && <button onClick={guardar} disabled={ocupado} className={BTN}>Guardar borrador</button>}
+        {soloTasador && <button onClick={completar} disabled={ocupado || !!falta} className={BTN_AMBAR}>Completar tasación</button>}
+        {corrigiendo && <button onClick={corregir} disabled={ocupado || !!falta} className={BTN_AMBAR}>Guardar corrección</button>}
+        {soloTasador && <button onClick={() => correr(() => api("tasaciones.liberar", { id: t.id }), "Devuelta a la cola")} disabled={ocupado} className={BTN}>Devolver a la cola</button>}
         {datos.puedeGestionar && (t.estado === "pendiente" || t.estado === "en_proceso") && <button onClick={() => setAsignando(!asignando)} className={BTN}>Asignar a otro Tasador…</button>}
         {(t.estado === "pendiente" || t.estado === "en_proceso") && <button onClick={() => setCancelando(!cancelando)} className={BTN}>Cancelar tasación…</button>}
       </div>

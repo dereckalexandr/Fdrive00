@@ -393,3 +393,28 @@ test("Si faltan las tablas de la entrega 4, el resto del módulo sigue funcionan
     assert.equal((await ve(U.t1.token, "tasaciones.list", { vista: "cola" })).error, "crm_not_installed");
   } finally { Object.assign(db.tablas, guardadas); }
 });
+
+test("Corregir una tasación ya realizada: solo el Jefe Local y el administrador; se validan las mismas reglas y se avisa al ejecutivo", async () => {
+  const l = await lead(U.e1.token);
+  const t = (await pedir(U.e1.token, l.id, { ...VEH, patente: "KLMN34" })).tasacion;
+  const corregir = (token, borrador, id = t.id) => ve(token, "tasaciones.corregir", { id, borrador });
+  // No se corrige una tasación que aún no está completada.
+  await ve(U.t1.token, "tasaciones.tomar", { id: t.id });
+  assert.equal((await corregir(U.jefe.token, { valorCompra: 1 })).error, "tasacion_estado_invalido");
+  const ok = await ve(U.t1.token, "tasaciones.completar", { id: t.id, borrador: { valorRetoma: 5000000, valorVenta: 6000000 } });
+  assert.equal(ok.status, 200, JSON.stringify(ok));
+  // El Tasador y el ejecutivo no la corrigen; el Jefe Local y el administrador sí.
+  assert.equal((await corregir(U.t1.token, { valorRetoma: 5100000, valorVenta: 6000000 })).status, 403);
+  assert.equal((await corregir(U.e1.token, { valorRetoma: 5100000, valorVenta: 6000000 })).status, 403);
+  assert.equal((await ve(U.t1.token, "tasaciones.get", { id: t.id })).puedeCorregir, false);
+  assert.equal((await ve(U.jefe.token, "tasaciones.get", { id: t.id })).puedeCorregir, true);
+  // Mismas reglas que al completar: la venta no puede quedar bajo la retoma.
+  assert.equal((await corregir(U.jefe.token, { valorRetoma: 7000000, valorVenta: 6000000 })).error, "valor_venta_menor");
+  const r = await corregir(U.jefe.token, { valorRetoma: 5200000, valorVenta: 6100000, observaciones: "Corregido por el Jefe Local" });
+  assert.equal(r.status, 200, JSON.stringify(r));
+  const fila0 = fila(t.id);
+  assert.deepEqual([fila0.estado, fila0.valor_retoma, fila0.valor_compra, fila0.valor_venta], ["completada", 5200000, 5200000, 6100000]);
+  assert.equal(fila0.observaciones, "Corregido por el Jefe Local");
+  assert.ok(db.tablas.bitacora.some((b) => b.accion === "tasacion.corregir" && b.entidad_id === t.id));
+  assert.equal((await corregir(admin, { valorRetoma: 5300000, valorVenta: 6100000 })).status, 200, "el administrador también");
+});

@@ -178,12 +178,12 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
    * El resultado vuelve al ejecutivo del lead (y a quien pidió la tasación). Si el Tasador decidió que el vehículo aplica para el otro tipo
    * (compra ↔ consignación), el lead cambia de tipo; sigue con el mismo ejecutivo si está habilitado para ese tipo y, si no, pasa a quien corresponda por el reparto.
    */
-  async function devolverResultadoAlEjecutivo(t: any, data: any) {
+  async function devolverResultadoAlEjecutivo(t: any, data: any, verbo = "completó") {
     try {
       const lead = await cargarLead(t.lead_id);
       if (!lead) return;
       const vh = data.vehiculo || {};
-      const lineas = [`${userName} completó la tasación ${folioTasacion(t.numero)}${vh.marca ? ` de ${vh.marca} ${vh.modelo || ""}` : ""}: ${resultadoTasacion(data)}`];
+      const lineas = [`${userName} ${verbo} la tasación ${folioTasacion(t.numero)}${vh.marca ? ` de ${vh.marca} ${vh.modelo || ""}` : ""}: ${resultadoTasacion(data)}`];
       const nuevoTipo = data.aplica_para === "compra" || data.aplica_para === "consignacion" ? data.aplica_para : null;
       let destinatarios: string[] = [t.solicitante_id, lead.asignado_a].filter(Boolean);
       if (nuevoTipo && lead.tipo !== nuevoTipo && ["compra", "consignacion"].includes(lead.tipo) && !ETAPAS_CERRADAS.includes(lead.etapa)) {
@@ -199,7 +199,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
           await audit(ctx.actor, "lead.cambiar_tipo", "lead", lead.id, { de: lead.tipo, a: nuevoTipo, por_tasacion: t.id, reasignado: !!cambio });
         }
       }
-      await avisarA(destinatarios, "Tasación completada", lineas);
+      await avisarA(destinatarios, verbo === "completó" ? "Tasación completada" : "Tasación corregida", lineas);
     } catch (e) { console.error("devolverResultadoAlEjecutivo:", String((e as any)?.message ?? e)); }
   }
 
@@ -760,7 +760,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       if (!t || !(await veTasacion(t))) return err("no_existe", 404);
       const detalle: any = (await enriquecer([t]))[0];
       if (detalle.inspeccion && detalle.inspeccion.key) detalle.inspeccion = { ...detalle.inspeccion, fotos: await fotosDeFicha(detalle.inspeccion.key) };
-      return json({ tasacion: detalle, puedeEditar: t.estado === "en_proceso" && (t.tasador_id === userId), vehiculoBloqueado: vehiculoDelCliente(t), puedeGestionar: esSupervisor, puedeRealizar: realiza });
+      return json({ tasacion: detalle, puedeEditar: t.estado === "en_proceso" && (t.tasador_id === userId), vehiculoBloqueado: vehiculoDelCliente(t), puedeCorregir: t.estado === "completada" && (ctx.esAdmin || esSupervisor), puedeGestionar: esSupervisor, puedeRealizar: realiza });
     }
 
     if (op === "tasaciones.tomar") {
@@ -852,6 +852,53 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
           if (!ya.error && (ya.data ?? []).length === 0) await crearValidacion({ tipo: "compra", local_id: t.local_id, tasacion_id: t.id, sujeto: sujetoDeVehiculo(data.vehiculo || {}, { vendedor: (t.contacto && t.contacto.nombre) || "" }) });
         }
       }
+      return json({ tasacion: (await enriquecer([data]))[0] });
+    }
+
+    /**
+     * El Jefe Local y el administrador pueden corregir una tasación ya realizada (precios, a qué aplica, observaciones). Se validan las mismas reglas
+     * que al completarla, el resultado vuelve al ejecutivo del lead y queda registrado qué cambió. Lo que el cliente declaró por el sitio web no se toca.
+     */
+    if (op === "tasaciones.corregir") {
+      if (!(ctx.esAdmin || esSupervisor)) return err("forbidden", 403);
+      const t = await cargarTasacion(String(body.id ?? ""));
+      if (!t || !(await veTasacion(t))) return err("no_existe", 404);
+      if (t.estado !== "completada") return err("tasacion_estado_invalido");
+      const b = validarBorradorTasacion(body.borrador);
+      if (!b.ok) return err(b.error!);
+      const patch: Record<string, any> = { ...b.value, actualizado_en: new Date().toISOString() };
+      if (vehiculoDelCliente(t)) delete patch.vehiculo;
+      if (patch.vehiculo) { patch.patente = patch.vehiculo.patente; }
+      const pick = (k: string) => (patch[k] !== undefined ? patch[k] : t[k]);
+      const fin = validarCompletarTasacion({ tipo: t.tipo, valor_compra: pick("valor_compra"), valor_venta: pick("valor_venta"), valor_consignacion: pick("valor_consignacion"), valor_retoma: pick("valor_retoma"), aplica_para: pick("aplica_para"), observaciones: pick("observaciones") });
+      if (!fin.ok) return err(fin.error!);
+      patch.valor_compra = fin.value.valor_compra;
+      patch.valor_venta = fin.value.valor_venta;
+      patch.valor_consignacion = fin.value.valor_consignacion;
+      patch.valor_retoma = fin.value.valor_retoma;
+      patch.aplica_para = fin.value.aplica_para;
+      const { data, error } = await sb.from("tasaciones").update(patch).eq("id", t.id).select().single();
+      if (error) return fallar(error);
+      const antes = { aplica_para: t.aplica_para, valor_compra: t.valor_compra, valor_consignacion: t.valor_consignacion, valor_venta: t.valor_venta, valor_retoma: t.valor_retoma };
+      const despues = { aplica_para: data.aplica_para, valor_compra: data.valor_compra, valor_consignacion: data.valor_consignacion, valor_venta: data.valor_venta, valor_retoma: data.valor_retoma };
+      if (t.lead_id) {
+        if (t.tipo === "parte_pago") {
+          const lead = await cargarLead(t.lead_id);
+          if (lead) {
+            const vh = data.vehiculo || {};
+            const pp = { ...(lead.parte_pago || {}), tiene: true, patente: vh.patente, marca: vh.marca, modelo: vh.modelo, anio: vh.anio, km: vh.km, valor: data.valor_compra, tasacion_id: data.id };
+            await sb.from("leads").update({ parte_pago: pp, actualizado_en: new Date().toISOString() }).eq("id", lead.id);
+          }
+          await evento(t.lead_id, "tasacion", `Tasación ${folioTasacion(t.numero)} corregida por ${userName}: se reconoce ${dinero(data.valor_compra)} por el vehículo (venta esperada ${dinero(data.valor_venta)}). Las cotizaciones deben usar este valor o uno menor.`);
+        } else {
+          // Si ya hay una oferta por sobre el nuevo máximo, se avisa en el historial: no se modifica sola.
+          const of = await sb.from("compras").select("numero, monto_oferta, estado").eq("tasacion_id", t.id);
+          const sobre = (of.data ?? []).filter((c: any) => COMPRA_ABIERTA.includes(c.estado) && Number(c.monto_oferta) > topeDeOferta(data));
+          await evento(t.lead_id, "tasacion", `Tasación ${folioTasacion(t.numero)} corregida por ${userName}: ${resultadoTasacion(data)}${sobre.length ? ` Atención: la oferta ${sobre.map((c: any) => folioCompra(c.numero)).join(", ")} supera el nuevo máximo.` : ""}`);
+          await devolverResultadoAlEjecutivo(t, data, "corrigió");
+        }
+      }
+      await audit(ctx.actor, "tasacion.corregir", "tasacion", t.id, { numero: t.numero, antes, despues, lead_id: t.lead_id });
       return json({ tasacion: (await enriquecer([data]))[0] });
     }
 
