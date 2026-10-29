@@ -140,7 +140,7 @@ const MENSAJES = {
   compra_incompleta: "Faltan datos del vendedor o documentos para concretar la compra. Revisa la lista de requisitos de la compra.",
   nombre_apellido_requerido: "Escribe el nombre y el apellido del vendedor.",
   direccion_requerida: "Escribe la dirección del vendedor.",
-  lead_no_editable: "La solicitud del cliente (vender o consignar su auto) no se puede editar.",
+  lead_no_editable: "La solicitud que el cliente envió por el sitio web no se puede editar.",
   lugar_requerido: "Elige dónde se hará la inspección.",
   lugar_invalido: "Ese lugar ya no está disponible. Elige otro.",
   local_sin_direccion: "Ese local no tiene dirección registrada: agrégala en Configuración → Locales o elige otra opción.",

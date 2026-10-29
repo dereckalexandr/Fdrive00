@@ -524,6 +524,15 @@ export function validarAviso(input) {
   return { ok: true, value: { texto } };
 }
 
+/**
+ * ¿Es la solicitud de un cliente que ofrece su auto (vender o consignar) y llegó sola por un canal, como el sitio web?
+ * Esos datos los declaró el cliente y no se editan; los leads de compra o consignación que el equipo crea a mano (tienen quien los creó) sí.
+ */
+export function solicitudDeCanal(lead) {
+  const l = lead || {};
+  return (l.tipo === "compra" || l.tipo === "consignacion") && !l.creado_por && l.fuente === "Sitio web";
+}
+
 /* ---------- Permisos del módulo ---------- */
 /** Quién puede modificar un lead: quien reasigna (supervisor) o su dueño con permiso de leads propios. Y debe estar habilitado para ventas, salvo el supervisor. */
 export function puedeEditarLead({ permisos, esAdmin, usuarioId, lead }) {

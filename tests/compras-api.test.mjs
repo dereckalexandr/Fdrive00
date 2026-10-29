@@ -772,11 +772,12 @@ test("Consignación: el comprobante existe con el contrato registrado y trae los
   assert.equal((await ve(U.c1.token, "consignaciones.comprobante", { id: ok.consignacion.id })).error, "consignacion_estado_invalido");
 });
 
-test("La solicitud del cliente para vender o consignar su auto no se edita desde la ficha del lead", async () => {
+test("La solicitud que llega sola por el sitio web no se edita; la que el equipo crea a mano sí", async () => {
   for (const tipo of ["compra", "consignacion"]) {
     const lead = await leadDe(U.c1.token, tipo);
+    assert.equal((await ve(U.c1.token, "leads.update", { id: lead.id, lead: { notas: "ajuste" } })).status, 200, "creado a mano: se edita");
+    Object.assign(fila("leads", lead.id), { creado_por: null, fuente: "Sitio web" });
     const r = await ve(U.c1.token, "leads.update", { id: lead.id, lead: { notas: "cambio" } });
-    assert.equal(r.error, "lead_no_editable", tipo);
-    assert.equal(r.status, 409);
+    assert.deepEqual([r.status, r.error], [409, "lead_no_editable"], tipo);
   }
 });

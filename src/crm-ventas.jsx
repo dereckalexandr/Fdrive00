@@ -11,7 +11,7 @@ import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { InputDinero } from "./campo-dinero.jsx";
 import {
   ETAPAS, ETAPAS_ACTIVAS, TIPOS_CONTACTO, TIPOS_TAREA, ESTADOS_FINANCIAMIENTO,
-  agruparTareas, claseTarea, textoVencimiento, leadsPorAtender, diasEnEtapa, colorDeAntiguedad, etapaNombre, soloDigitos, validarCliente, validarLead, validarTarea,
+  agruparTareas, claseTarea, textoVencimiento, leadsPorAtender, diasEnEtapa, colorDeAntiguedad, etapaNombre, soloDigitos, validarCliente, validarLead, validarTarea, solicitudDeCanal,
 } from "../supabase/functions/api/ventas-core.js";
 import { Inventario, Clientes } from "./crm-inventario.jsx";
 import { SeccionCotizaciones } from "./crm-cotizaciones.jsx";
@@ -107,6 +107,7 @@ function LeadFicha({ api, leadId, catalogos, onCerrar, onCambio, onEditar }) {
   const cerrado = lead.etapa === "ganado" || lead.etapa === "perdido";
   const tipoLead = lead.tipo || "venta";
   const esVenta = tipoLead === "venta";
+  const deCanal = solicitudDeCanal(lead);
   const ofrecido = lead.vehiculo_ofrecido || {};
 
   const accion = async (fn) => { setMsg(""); try { const r = await fn(); await recargar(); onCambio(); if (r && r.pedirProximaAccion) setSiguiente(true); } catch (e) { setMsg(mensajeError(e)); } };
@@ -131,7 +132,7 @@ function LeadFicha({ api, leadId, catalogos, onCerrar, onCambio, onEditar }) {
           <span className="text-xs text-stone-500">· Asignado a {asignado ? asignado.nombre : "nadie"}</span>
           {lead.fuente && <span className="text-xs text-stone-500">· Fuente: {lead.fuente}</span>}
           {datos.campania && <span className="text-xs text-stone-500">· Campaña: {datos.campania.nombre}</span>}
-          {puedeEditar && <button onClick={onEditar} disabled={!esVenta} title={esVenta ? "" : "La solicitud del cliente (vender o consignar su auto) no se edita"} className={`${BTN} ml-auto ${esVenta ? "" : "opacity-50 cursor-not-allowed"}`}>Editar datos</button>}
+          {puedeEditar && <button onClick={onEditar} disabled={deCanal} title={deCanal ? "La solicitud que el cliente envió por el sitio web no se edita" : ""} className={`${BTN} ml-auto ${deCanal ? "opacity-50 cursor-not-allowed" : ""}`}>Editar datos</button>}
         </div>
         {cliente && (
           <div className="flex flex-wrap gap-2 text-sm">
