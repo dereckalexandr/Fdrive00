@@ -1440,7 +1440,8 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
   /* ---------- validaciones (Validador: revisión de documentos) ---------- */
   if (op.startsWith("validacion.")) {
     const realiza = !ctx.esAdmin && can("validacion.realizar");
-    if (!realiza && !esSupervisor && !can("validacion.usar") && !can("leads.propios") && !can("inventario.editar") && !can("tasaciones.realizar")) return err("forbidden", 403);
+    // Quien ve el inventario (aunque no lo edite) puede mirar los documentos del vehículo; lo demás sigue pidiendo su permiso.
+    if (!realiza && !esSupervisor && !can("validacion.usar") && !can("leads.propios") && !can("inventario.ver") && !can("inventario.editar") && !can("tasaciones.realizar")) return err("forbidden", 403);
 
     async function validadoresDe(local: string) {
       const overrides = await ctx.rolePermOverrides();
@@ -1725,7 +1726,9 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
   if (op.startsWith("inspecciones.")) {
     const realiza = can("inspecciones.realizar");
     const puedePedir = can("inspecciones.pedir") || esSupervisor;
-    if (!realiza && !puedePedir) return err("forbidden", 403);
+    // Quien ve el inventario puede mirar las inspecciones de un vehículo (solo la lista de origen); no pide ni modifica.
+    const soloMiraInventario = op === "inspecciones.list" && (can("inventario.ver") || can("inventario.editar"));
+    if (!realiza && !puedePedir && !soloMiraInventario) return err("forbidden", 403);
 
     /** Personas activas del local que pueden realizar inspecciones. */
     async function inspectoresDe(local: string) {
@@ -1845,8 +1848,11 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
         if (!campo) return err("vista_invalida");
         const valor = String(body.leadId || body.tasacionId || body.vehiculoId);
         if (campo === "lead_id") { const l = await cargarLead(valor); if (!l || !puedeVer(l)) return err("no_existe", 404); }
-        else if (!(puedePedir || realiza || can("inventario.ver") || can("inventario.editar"))) return err("forbidden", 403);
-        filas = filas.filter((x) => x[campo] === valor).sort((a, b) => String(b.solicitada_en).localeCompare(String(a.solicitada_en)));
+        else if (campo === "tasacion_id" ? !(puedePedir || realiza) : !(puedePedir || realiza || can("inventario.ver") || can("inventario.editar"))) return err("forbidden", 403);
+        // Las del inventario también incluyen las que se pidieron desde el lead o la tasación del mismo vehículo (misma patente).
+        let patenteVeh = "";
+        if (campo === "vehiculo_id") patenteVeh = String(((await sb.from("vehiculos").select("patente").eq("id", valor).maybeSingle()).data || {}).patente ?? "");
+        filas = filas.filter((x) => x[campo] === valor || (patenteVeh && x.patente === patenteVeh)).sort((a, b) => String(b.solicitada_en).localeCompare(String(a.solicitada_en)));
       } else return err("vista_invalida");
       const hace60 = Date.now() - 60 * 86_400_000;
       filas = filas.filter((x) => !(x.estado === "cancelada" && Date.parse(x.actualizado_en) < hace60)).slice(0, 200);

@@ -10,7 +10,8 @@ import React, { useState, useEffect, useMemo } from "react";
 import { InputDinero } from "./campo-dinero.jsx";
 import { ESTADOS_VEHICULO, TRANSMISIONES, COMBUSTIBLES, validarVehiculo, validarCliente, textoVencimiento } from "../supabase/functions/api/ventas-core.js";
 import { compressImage, makePhotoId } from "./photos.js";
-import { SeccionValidacion } from "./crm-validaciones.jsx";
+import { SeccionValidacion, DocumentosVehiculoSoloLectura } from "./crm-validaciones.jsx";
+import { InspeccionesVehiculoSoloLectura } from "./crm-inspecciones.jsx";
 import { INPUT, BTN, BTN_PRIMARIO, clp, Aviso, Cargando, Campo, Modal, Tarjeta, useCarga, mensajeError, fechaCorta, BuscarPatente } from "./crm-ui.jsx";
 import { aplicarCampos } from "./datos-patente.js";
 
@@ -152,11 +153,24 @@ function FormVehiculo({ api, vehiculo, puedeCosto, onCerrar, onGuardado }) {
   );
 }
 
+/** Documentos del vehículo, inspección y fotos de la inspección: solo para mirar (lo ve todo el que ve el inventario). */
+function RevisionVehiculo({ api, vehiculo, onCerrar }) {
+  return (
+    <Modal titulo={`${vehiculo.marca} ${vehiculo.modelo} · ${vehiculo.patente}`} onCerrar={onCerrar} ancho="max-w-3xl">
+      <p className="text-xs text-stone-500">Solo para revisar: aquí no se puede editar ni subir nada.</p>
+      <Tarjeta titulo="Documentos del vehículo"><DocumentosVehiculoSoloLectura api={api} vehiculoId={vehiculo.id} /></Tarjeta>
+      <Tarjeta titulo="Inspección y fotos de la inspección"><InspeccionesVehiculoSoloLectura api={api} vehiculoId={vehiculo.id} /></Tarjeta>
+      <div><button onClick={onCerrar} className={BTN}>Cerrar</button></div>
+    </Modal>
+  );
+}
+
 export function Inventario({ api, onCambio }) {
   const { cargando, error, datos, recargar } = useCarga(() => api("inventario.list"), [api]);
   const [filtro, setFiltro] = useState("activos");
   const [q, setQ] = useState("");
   const [form, setForm] = useState(null); // null | "nuevo" | vehículo
+  const [revision, setRevision] = useState(null); // vehículo que se está revisando (solo vista)
   const [msg, setMsg] = useState("");
 
   const lista = useMemo(() => {
@@ -200,7 +214,7 @@ export function Inventario({ api, onCambio }) {
           <thead>
             <tr className="text-left text-xs uppercase tracking-wide text-stone-400 border-b border-stone-200">
               <th className="py-3 px-4">Vehículo</th><th className="py-3 px-4 text-right hidden md:table-cell">Km</th><th className="py-3 px-4 text-right">Precio</th>
-              {puedeEditar && <th className="py-3 px-4 text-right">Margen</th>}<th className="py-3 px-4">Estado</th>{puedeEditar && <th className="py-3 px-4">Acciones</th>}
+              {puedeEditar && <th className="py-3 px-4 text-right">Margen</th>}<th className="py-3 px-4">Estado</th><th className="py-3 px-4">{puedeEditar ? "Acciones" : "Revisión"}</th>
             </tr>
           </thead>
           <tbody>
@@ -230,17 +244,17 @@ export function Inventario({ api, onCambio }) {
                     </div>
                   ) : <span className={`text-xs px-2 py-1 ${COLOR_ESTADO[v.estado] || ""}`}>{estadoNombre(v.estado)}{v.estado === "reservado" && v.reserva_vence_en ? ` · ${textoVencimiento(v.reserva_vence_en)}` : ""}</span>}
                 </td>
-                {puedeEditar && (
-                  <td className="py-3 px-4"><div className="flex gap-2">
-                    <button onClick={() => setForm(v)} className={BTN}>Editar</button>
-                    <button onClick={() => archivar(v)} className={BTN}>Archivar</button>
-                  </div></td>
-                )}
+                <td className="py-3 px-4"><div className="flex flex-wrap gap-2">
+                  <button onClick={() => setRevision(v)} className={BTN}>Ver documentos e inspección</button>
+                  {puedeEditar && <button onClick={() => setForm(v)} className={BTN}>Editar</button>}
+                  {puedeEditar && <button onClick={() => archivar(v)} className={BTN}>Archivar</button>}
+                </div></td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      {revision && <RevisionVehiculo api={api} vehiculo={revision} onCerrar={() => setRevision(null)} />}
       {form && <FormVehiculo api={api} vehiculo={form === "nuevo" ? null : form} puedeCosto={puedeEditar} onCerrar={() => setForm(null)} onGuardado={async () => { setForm(null); await recargar(); onCambio && onCambio(); }} />}
     </>
   );

@@ -22,7 +22,7 @@ export const Estado = ({ id }) => <span className={`text-[11px] px-2 py-0.5 ${CO
 const nombreSujeto = (s) => (s && s.marca ? `${s.marca} ${s.modelo || ""} ${s.anio || ""} · ${s.patente}`.replace(/\s+/g, " ") : s && s.patente ? s.patente : "");
 
 /** Abre un archivo guardado (imagen o PDF) en otra pestaña. */
-async function abrirArchivo(valId, a) {
+export async function abrirArchivo(valId, a) {
   const w = window.open("", "_blank");
   try {
     const r = await window.storage.get(claveArchivo(a.v || valId, a.id), true);
@@ -212,6 +212,48 @@ export function ValidacionDetalle({ api, id, onCerrar, onCambio }) {
 /* =========================================================
    SECCIÓN EN LA FICHA DEL LEAD / VEHÍCULO / TASACIÓN
 ========================================================= */
+/** Los documentos de una validación, solo para mirarlos: estado de cada uno y sus archivos. Sin subir, quitar ni revisar. */
+function DocumentosSoloLectura({ api, id }) {
+  const { datos, error } = useCarga(() => api("validacion.get", { id }), [api, id]);
+  if (error && !datos) return <p className="text-sm text-stone-500">{error}</p>;
+  if (!datos) return <Cargando />;
+  const v = datos.validacion;
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-2 text-xs text-stone-500">
+        <span className="font-mono">{v.folio}</span><Estado id={v.estado} />
+        <span>{v.progreso.aprobados + v.progreso.noAplica} de {v.progreso.total} documentos validados</span>
+      </div>
+      {datos.docs.map((d) => (
+        <div key={d.id} className="border border-stone-200 bg-white p-3 text-sm">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-stone-900">{d.nombre}</span>
+            <span className={`text-[11px] px-2 py-0.5 ml-auto ${COLOR_DOC[d.estado] || ""}`}>{docNombre(d.estado)}</span>
+          </div>
+          {d.vence_en && <p className="text-xs text-stone-500 mt-1">Vence el {String(d.vence_en).slice(0, 10).split("-").reverse().join("-")}</p>}
+          {d.comentario && <p className="text-xs text-stone-500 mt-1">{d.comentario}</p>}
+          <div className="flex flex-wrap gap-2 mt-2">
+            {(d.archivos || []).map((a) => (
+              <button key={a.id} type="button" onClick={() => abrirArchivo(v.id, a)} className="inline-flex items-center gap-1 border border-stone-300 bg-stone-50 px-2 py-1 text-xs text-sky-700 hover:underline max-w-[220px] truncate">{a.tipo === "application/pdf" ? "📄" : "🖼"} {a.nombre}</button>
+            ))}
+            {(d.archivos || []).length === 0 && <span className="text-xs text-stone-400">Sin archivos</span>}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Documentos del vehículo (solo vista): la validación de documentos del vehículo en el inventario. */
+export function DocumentosVehiculoSoloLectura({ api, vehiculoId }) {
+  const { datos, error } = useCarga(() => api("validacion.list", { vista: "origen", vehiculoId }), [api, vehiculoId]);
+  if (error && !datos) return <p className="text-sm text-stone-500">No se pudieron cargar los documentos.</p>;
+  if (!datos) return <Cargando />;
+  const lista = datos.validaciones.filter((v) => v.tipo === "vehiculo");
+  if (lista.length === 0) return <p className="text-sm text-stone-500">Este vehículo aún no tiene documentos cargados.</p>;
+  return <div className="flex flex-col gap-4">{lista.map((v) => <DocumentosSoloLectura key={v.id} api={api} id={v.id} />)}</div>;
+}
+
 export function SeccionValidacion({ api, origen, titulo = "Validación de documentos", version = 0, onCambio = () => {} }) {
   const campo = origen.tipo === "lead" ? "leadId" : origen.tipo === "tasacion" ? "tasacionId" : origen.tipo === "cierre" ? "cierreId" : "vehiculoId";
   const { datos, error, recargar } = useCarga(() => api("validacion.list", { vista: "origen", [campo]: origen.id }), [api, origen.id, version]);

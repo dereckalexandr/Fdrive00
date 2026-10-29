@@ -133,7 +133,7 @@ export function FormPedirInspeccion({ api, origen, vehiculo, onCerrar, onPedida 
 /* =========================================================
    RESULTADO (lo que ve el equipo; nunca incluye datos del propietario)
 ========================================================= */
-function Resultado({ x }) {
+export function Resultado({ x }) {
   const r = x.resultado || {};
   if (x.estado !== "completada" || !r.veredicto) return null;
   return (
@@ -251,6 +251,31 @@ export function InspeccionDetalle({ api, id, onCerrar, onCambio, onRealizar, onV
 /* =========================================================
    SECCIÓN EN LA FICHA DEL LEAD / TASACIÓN / VEHÍCULO
 ========================================================= */
+/** Las inspecciones del vehículo, solo para mirarlas: resultado, observaciones y fotos del Inspector. Sin pedir ni modificar nada. */
+export function InspeccionesVehiculoSoloLectura({ api, vehiculoId }) {
+  const { datos, error } = useCarga(() => api("inspecciones.list", { vista: "origen", vehiculoId }), [api, vehiculoId]);
+  if (error && !datos) return <p className="text-sm text-stone-500">No se pudieron cargar las inspecciones.</p>;
+  if (!datos) return <Cargando />;
+  const lista = datos.inspecciones.filter((x) => x.estado !== "cancelada");
+  if (lista.length === 0) return <p className="text-sm text-stone-500">Este vehículo no tiene inspecciones.</p>;
+  return (
+    <div className="flex flex-col gap-3">
+      {lista.map((x) => (
+        <div key={x.id} className="flex flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <span className="font-mono text-xs text-stone-500">{x.folio}</span><span className="text-stone-900">{nombreVeh(x.vehiculo)}</span>
+            <Estado id={x.estado} /><Veredicto id={x.resultado && x.resultado.veredicto} />
+          </div>
+          <p className="text-xs text-stone-500">
+            {x.estado === "completada" ? `Realizada ${hace(x.completada_en)}${x.inspector ? ` por ${x.inspector}` : ""}` : `${cuando(x.agendada_para)} · ${x.direccion}`}
+          </p>
+          <Resultado x={x} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function SeccionInspeccion({ api, origen, vehiculo, cerrado = false, version = 0, onCambio = () => {}, onRealizar }) {
   const campo = origen.tipo === "lead" ? "leadId" : origen.tipo === "tasacion" ? "tasacionId" : "vehiculoId";
   const { datos, error, recargar } = useCarga(() => api("inspecciones.list", { vista: "origen", [campo]: origen.id }), [api, origen.id, version]);

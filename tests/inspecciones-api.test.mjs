@@ -451,3 +451,27 @@ test("Pedir o reprogramar una inspección eligiendo el lugar: local con su direc
   assert.equal((await crm(admin, "locales.update", { id: sur.id, nombre: "Sucursal Sur", direccion: "Calle Sur 10, Santiago", activo: false })).status, 200);
   assert.deepEqual((await ve(U.e1.token, "inspecciones.lugares")).lugares.map((x) => x.nombre), ["Casa matriz"]);
 });
+
+test("Inventario en solo vista: quien ve el inventario revisa las inspecciones del vehículo (también las pedidas desde el lead) y las lee, sin poder modificarlas", async () => {
+  await crear("an", "Ana Anunciante", "15.000.000-9", ["anunciante"], L1);
+  const pt = vehN();
+  const v = (await ve(U.jefe.token, "inventario.save", { datos: { patente: pt.patente, marca: "Kia", modelo: "Rio", anio: 2020, km: 30000, precioLista: 9000000, costo: 7000000 } })).vehiculo;
+  assert.ok(v);
+  // Una inspección pedida desde un lead con la misma patente del vehículo del inventario.
+  const l = await lead(U.e1.token);
+  const ok = await pedir(U.e1.token, l.id, datos({ vehiculo: pt }));
+  assert.equal(ok.status, 200, JSON.stringify(ok));
+  for (const quien of [U.an, U.e2, U.t1]) {
+    const r = await ve(quien.token, "inspecciones.list", { vista: "origen", vehiculoId: v.id });
+    assert.equal(r.status, 200, `${quien.nombre}: ${JSON.stringify(r)}`);
+    assert.ok(r.inspecciones.some((x) => x.id === ok.inspeccion.id), `${quien.nombre} ve la inspección del vehículo`);
+  }
+  // Puede leer las fotos de la inspección y los archivos de los documentos del vehículo; quien no ve el inventario, no.
+  assert.equal((await kv(U.an.token, "get", "ifoto::ficha1::foto1")).status, 200);
+  assert.equal((await kv(U.an.token, "get", "dval::val1::arch1")).status, 200);
+  assert.equal((await kv(U.i2.token, "get", "dval::val1::arch1")).status, 403);
+  // Solo vista: no escribe ni borra.
+  assert.equal((await kv(U.an.token, "set", "ifoto::ficha1::foto1", { value: "x" })).status, 403);
+  assert.equal((await kv(U.an.token, "set", "dval::val1::arch1", { value: "x" })).status, 403);
+  assert.equal((await ve(U.an.token, "inspecciones.cancelar", { id: ok.inspeccion.id, motivo: "No debería poder" })).status, 403);
+});

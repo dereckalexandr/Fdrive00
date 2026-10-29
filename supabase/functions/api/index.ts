@@ -174,7 +174,7 @@ function canKv(s: Session, op: string, key: string): boolean {
   // Fotos del resultado de una inspección (ifoto::<ficha>::<foto>): las sube y borra quien inspecciona; las ven quienes piden inspecciones o miran los leads.
   if (s.role === "user" && key.startsWith("ifoto::")) {
     const p = s.perms ?? [];
-    if (op === "get") return p.includes("inspecciones.realizar") || p.includes("inspecciones.pedir") || p.includes("leads.propios") || p.includes("leads.local") || p.includes("leads.asignar") || p.includes("tasaciones.realizar");
+    if (op === "get") return p.includes("inspecciones.realizar") || p.includes("inspecciones.pedir") || p.includes("leads.propios") || p.includes("leads.local") || p.includes("leads.asignar") || p.includes("tasaciones.realizar") || p.includes("inventario.ver") || p.includes("inventario.editar");
     return p.includes("inspecciones.realizar");
   }
   // Documentos de una validación (dval::<validación>::<archivo>): el servidor decide quién los registra en cada documento;
@@ -182,7 +182,7 @@ function canKv(s: Session, op: string, key: string): boolean {
   if (s.role === "user" && key.startsWith("dval::")) {
     const p = s.perms ?? [];
     const sube = p.includes("validacion.realizar") || p.includes("leads.propios") || p.includes("leads.asignar") || p.includes("inventario.editar") || p.includes("tasaciones.realizar");
-    if (op === "get") return sube || p.includes("validacion.usar") || p.includes("leads.local");
+    if (op === "get") return sube || p.includes("validacion.usar") || p.includes("leads.local") || p.includes("inventario.ver") || p.includes("inventario.editar");
     return sube;
   }
   if (op === "get" || op === "set") return ownPrefixes(s).some((p) => key.startsWith(p));
