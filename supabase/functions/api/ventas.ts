@@ -2652,6 +2652,8 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     const lead = await cargarLead(String(body.id ?? ""));
     if (!lead || !puedeVer(lead)) return err("no_existe", 404);
     if (!puedeTocar(lead)) return err("forbidden", 403);
+    // Lo que el cliente declara al ofrecer su auto (vender o consignar) no se modifica: se trabaja en la tasación, los requisitos y el contrato.
+    if (lead.tipo === "compra" || lead.tipo === "consignacion") return err("lead_no_editable", 409);
     const v = validarLead(body.lead);
     if (!v.ok) return err(v.error!);
     if (v.value.vehiculo_id) {

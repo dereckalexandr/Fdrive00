@@ -131,7 +131,7 @@ function LeadFicha({ api, leadId, catalogos, onCerrar, onCambio, onEditar }) {
           <span className="text-xs text-stone-500">· Asignado a {asignado ? asignado.nombre : "nadie"}</span>
           {lead.fuente && <span className="text-xs text-stone-500">· Fuente: {lead.fuente}</span>}
           {datos.campania && <span className="text-xs text-stone-500">· Campaña: {datos.campania.nombre}</span>}
-          {puedeEditar && <button onClick={onEditar} className={`${BTN} ml-auto`}>Editar datos</button>}
+          {puedeEditar && <button onClick={onEditar} disabled={!esVenta} title={esVenta ? "" : "La solicitud del cliente (vender o consignar su auto) no se edita"} className={`${BTN} ml-auto ${esVenta ? "" : "opacity-50 cursor-not-allowed"}`}>Editar datos</button>}
         </div>
         {cliente && (
           <div className="flex flex-wrap gap-2 text-sm">
