@@ -2574,7 +2574,7 @@ function AppRoutes() {
           <div className="max-w-6xl mx-auto px-6 py-6 flex items-center justify-between gap-4">
             <div>
               <p className="text-xs uppercase tracking-widest text-stone-400 mb-1">{me.nombre}{me.local ? ` · ${me.local.nombre}` : ""}</p>
-              <h1 className="font-serif text-2xl md:text-3xl">Ventas</h1>
+              <h1 className="font-serif text-2xl md:text-3xl">Mi dashboard</h1>
             </div>
             <button onClick={() => setScreen("estacion")} className="border border-stone-700 px-3 py-1.5 text-sm text-stone-300 hover:bg-stone-800">Volver</button>
           </div>
@@ -2659,7 +2659,7 @@ function AppRoutes() {
           <div className="max-w-5xl mx-auto px-6 py-6 flex items-center justify-between gap-4">
             <div>
               <p className="text-xs uppercase tracking-widest text-stone-400 mb-1">{me.nombre}</p>
-              <h1 className="font-serif text-2xl md:text-3xl">Tasación de compra</h1>
+              <h1 className="font-serif text-2xl md:text-3xl">Estimador</h1>
             </div>
             <button onClick={() => setScreen("estacion")} className="border border-stone-700 px-3 py-1.5 text-sm text-stone-300 hover:bg-stone-800">Volver</button>
           </div>

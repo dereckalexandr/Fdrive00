@@ -112,9 +112,9 @@ const MODULOS_ACTIVOS = [
   { id: "validacion", titulo: "Validaciones", texto: "Cola de revisión de documentos de ventas, vehículos y compras: aprobar, observar o rechazar cada documento.", permisos: ["validacion.realizar", "validacion.usar"] },
   { id: "anuncios", titulo: "Avisos", texto: "Cola de vehículos por publicar, avisos por portal y red social, alertas de avisos desactualizados y consultas por aviso.", permisos: ["anuncios.gestionar"] },
   { id: "marketing", titulo: "Marketing y RRSS", texto: "Calendario de contenido, campañas con presupuesto, material por vehículo y resultados por fuente y campaña.", permisos: ["marketing.gestionar"] },
-  { id: "ventas", titulo: "Ventas", texto: "Leads, embudo en columnas, agenda, inventario y clientes.", permisos: ["leads.propios", "leads.local", "leads.asignar", "inventario.ver", "inventario.editar"] },
-  { id: "inspector", titulo: "Inspecciones y tasaciones", texto: "Checklist de inspección, valorizaciones, fotos y PDF.", permisos: ["inspecciones.usar", "tasaciones.usar"] },
-  { id: "compra", titulo: "Tasación de compra", texto: "Precio de compra sugerido según los avisos de Chileautos.", permisos: ["tasacion_compra.usar"] },
+  { id: "ventas", titulo: "Mi dashboard", texto: "Leads, embudo en columnas, agenda, inventario y clientes.", permisos: ["leads.propios", "leads.local", "leads.asignar", "inventario.ver", "inventario.editar"] },
+  { id: "inspector", titulo: "Inspecciones y valorizaciones", texto: "Checklist de inspección, valorizaciones, fotos y PDF.", permisos: ["inspecciones.usar", "tasaciones.usar"] },
+  { id: "compra", titulo: "Estimador", texto: "Precio de compra sugerido según los avisos de Chileautos.", permisos: ["tasacion_compra.usar"] },
 ];
 
 const ACENTOS = {
