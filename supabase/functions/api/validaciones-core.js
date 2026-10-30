@@ -38,11 +38,11 @@ const texto = (v, max) => String(v ?? "").trim().replace(/\s+/g, " ").slice(0, m
 /* ---------- Listas de documentos ---------- */
 const D = (clave, nombre, grupo, requerido = true) => ({ clave, nombre, grupo, requerido });
 export const DOCS_VEHICULO = [
-  D("padron", "Padrón / certificado de anotaciones vigentes (CAV)", "vehiculo"),
+  D("multas", "Certificado de multas", "vehiculo"),
+  D("informe_legal", "Informe legal de Autofact", "vehiculo"),
   D("permiso_circulacion", "Permiso de circulación al día", "vehiculo"),
   D("revision_tecnica", "Revisión técnica vigente", "vehiculo"),
   D("soap", "SOAP vigente", "vehiculo"),
-  D("multas_prendas", "Certificado de multas, prendas y limitaciones", "vehiculo"),
 ];
 
 /* ---------- Compra de vehículos: documentos y datos obligatorios ---------- */
@@ -253,8 +253,7 @@ export function docsReutilizables(docsOrigen, validacionOrigenId) {
   const out = {};
   for (const d of docsOrigen || []) {
     if (d.grupo === "vehiculo" && d.estado === "aprobado") {
-      // En una compra, «Multas» hace de «certificado de multas, prendas y limitaciones» del vehículo.
-      out[d.clave === "multas" ? "multas_prendas" : d.clave] = { estado: "aprobado", comentario: d.comentario || null, revisado_por: d.revisado_por || null, revisado_en: d.revisado_en || null, archivos: (d.archivos || []).map((a) => ({ ...a, v: a.v || validacionOrigenId })) };
+      out[d.clave] = { estado: "aprobado", comentario: d.comentario || null, revisado_por: d.revisado_por || null, revisado_en: d.revisado_en || null, archivos: (d.archivos || []).map((a) => ({ ...a, v: a.v || validacionOrigenId })) };
     }
   }
   return out;

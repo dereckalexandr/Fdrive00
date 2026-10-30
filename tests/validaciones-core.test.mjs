@@ -63,10 +63,10 @@ test("Progreso y reutilización de documentos del vehículo", () => {
   const p = progreso([doc("a", "aprobado"), doc("b", "observado"), doc("c", "rechazado"), doc("d", "no_aplica"), doc("e", "pendiente"), doc("f", "pendiente", { archivos: [{ id: "x" }] })]);
   assert.deepEqual(p, { total: 6, aprobados: 1, observados: 1, rechazados: 1, porRevisar: 2, noAplica: 1, sinArchivo: 1 });
   const r = docsReutilizables([
-    doc("padron", "aprobado", { archivos: [{ id: "a1" }], revisado_por: "Vera" }), doc("soap", "observado"), doc("cedula", "aprobado", { grupo: "cliente" }),
+    doc("multas", "aprobado", { archivos: [{ id: "a1" }], revisado_por: "Vera" }), doc("soap", "observado"), doc("cedula", "aprobado", { grupo: "cliente" }),
   ], "val1");
-  assert.deepEqual(Object.keys(r), ["padron"]);
-  assert.equal(r.padron.archivos[0].v, "val1");
+  assert.deepEqual(Object.keys(r), ["multas"]);
+  assert.equal(r.multas.archivos[0].v, "val1");
   assert.equal(docsReutilizables([doc("p", "aprobado", { archivos: [{ id: "a", v: "origen" }] })], "otra").p.archivos[0].v, "origen");
 });
 

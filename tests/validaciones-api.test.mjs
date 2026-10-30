@@ -84,13 +84,13 @@ test("Documentos que se piden según el tipo de validación", async () => {
   const vv = db.tablas.validaciones.find((x) => x.vehiculo_id === v.id && x.tipo === "vehiculo");
   assert.ok(vv, "se crea sola al ingresar el vehículo");
   assert.equal(vv.estado, "pendiente");
-  assert.deepEqual(docsFila(vv.id).map((d) => d.clave), ["padron", "permiso_circulacion", "revision_tecnica", "soap", "multas_prendas"]);
+  assert.deepEqual(docsFila(vv.id).map((d) => d.clave), ["multas", "informe_legal", "permiso_circulacion", "revision_tecnica", "soap"]);
 
   const x = await leadReservado(U.e1.token);
   const c = await cerrar(U.e1.token, x.lead.id, DATOS({ montoFinanciado: 3000000, financiera: "Autofin", comisionFinanciera: 200000 }));
   assert.equal(c.status, 200, JSON.stringify(c));
   const claves = docsFila(c.validacion.id).map((d) => d.clave);
-  for (const k of ["padron", "cedula_cliente", "domicilio", "comprobante_pago", "renta", "antecedentes_credito"]) assert.ok(claves.includes(k), k);
+  for (const k of ["multas", "informe_legal", "cedula_cliente", "domicilio", "comprobante_pago", "renta", "antecedentes_credito"]) assert.ok(claves.includes(k), k);
   assert.ok(!claves.includes("docs_parte_pago"), "sin parte de pago");
   U.cierreFin = c.cierre;
   U.valFin = c.validacion;
@@ -146,7 +146,7 @@ test("Cola del Validador: solo su local; el primero la toma; el supervisor ve to
 
 test("Revisar un documento: aprobar exige archivo; observar y rechazar exigen un motivo", async () => {
   const docs = docsFila(U.valFin.id);
-  const padron = docs.find((d) => d.clave === "padron");
+  const padron = docs.find((d) => d.clave === "multas");
   assert.equal((await ve(U.v1.token, "validacion.revisar", { id: U.valFin.id, docId: padron.id, estado: "aprobado" })).error, "doc_sin_archivo");
   assert.equal((await ve(U.v1.token, "validacion.revisar", { id: U.valFin.id, docId: padron.id, estado: "observado" })).error, "comentario_requerido");
   assert.equal((await ve(U.v1.token, "validacion.revisar", { id: U.valFin.id, docId: padron.id, estado: "magia", comentario: "x" })).error, "estado_doc_invalido");
@@ -220,7 +220,7 @@ test("Documentos del vehículo ya aprobados se reutilizan en la validación de l
   const x = await leadReservado(U.e1.token, veh);
   const c = await cerrar(U.e1.token, x.lead.id, DATOS());
   const docs = docsFila(c.validacion.id);
-  for (const k of ["padron", "permiso_circulacion", "revision_tecnica", "soap", "multas_prendas"]) {
+  for (const k of ["multas", "informe_legal", "permiso_circulacion", "revision_tecnica", "soap"]) {
     const d = docs.find((y) => y.clave === k);
     assert.equal(d.estado, "aprobado", `${k} ya estaba aprobado`);
     assert.equal(d.archivos[0].v, vVeh.id, "el archivo sigue guardado en la validación original");
@@ -230,7 +230,7 @@ test("Documentos del vehículo ya aprobados se reutilizan en la validación de l
   // Un archivo reutilizado no se puede quitar desde la nueva validación.
   U.cierreReut = c.cierre; U.valReut = c.validacion;
   await ve(U.v2.token, "validacion.tomar", { id: c.validacion.id });
-  const pad = docs.find((d) => d.clave === "padron");
+  const pad = docs.find((d) => d.clave === "multas");
   assert.equal((await ve(U.jefe.token, "validacion.quitar", { id: c.validacion.id, docId: pad.id, archivoId: pad.archivos[0].id })).error, "doc_cerrado");
 });
 
