@@ -11,12 +11,19 @@ export const ESTADOS_VISIBLES = ["disponible", "reservado"];
 /** ¿Se muestra este vehículo en el sitio? Disponibles y reservados (estos con la etiqueta «Reservado»), activos y con precio. */
 export const visibleEnCatalogo = (v) => !!v && v.activo !== false && ESTADOS_VISIBLES.includes(v.estado) && Number(v.precio_lista) > 0;
 
+/** Bono de financiamiento: lo que se descuenta del precio de lista al financiar (0 si no hay precio con financiamiento válido). */
+export const bonoFinanciamiento = (v) => {
+  const lista = Number(v && v.precio_lista); const fin = Number(v && v.precio_financiamiento);
+  return lista > 0 && fin > 0 && fin < lista ? lista - fin : 0;
+};
+
 /** Datos del vehículo que ven los visitantes. */
 export function vehiculoPublico(v) {
+  const bono = bonoFinanciamiento(v);
   return {
     id: v.id, marca: v.marca, modelo: v.modelo, version: v.version || null, anio: v.anio, km: Number(v.km) || 0,
     color: v.color || null, transmision: v.transmision || null, combustible: v.combustible || null,
-    precio: Number(v.precio_lista), reservado: v.estado === "reservado",
+    precio: Number(v.precio_lista), precioFinanciamiento: bono > 0 ? Number(v.precio_financiamiento) : null, bonoFinanciamiento: bono, reservado: v.estado === "reservado",
     fotos: Array.isArray(v.fotos) ? v.fotos.filter((f) => /^[A-Za-z0-9]{6,40}$/.test(String(f))).slice(0, 12) : [],
     localId: v.local_id || null,
   };

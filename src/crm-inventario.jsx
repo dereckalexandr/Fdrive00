@@ -41,12 +41,12 @@ export function Miniatura({ vehiculoId, fotoId, grande = false, onQuitar, tam: t
   );
 }
 
-const VACIO = { id: null, patente: "", marca: "", modelo: "", version: "", anio: "", km: "", color: "", transmision: "", combustible: "", precioLista: "", costo: "", estado: "disponible", notas: "" };
+const VACIO = { id: null, patente: "", marca: "", modelo: "", version: "", anio: "", km: "", color: "", transmision: "", combustible: "", precioLista: "", precioFinanciamiento: "", costo: "", estado: "disponible", notas: "" };
 
 function FormVehiculo({ api, vehiculo, puedeCosto, onCerrar, onGuardado }) {
   const [f, setF] = useState(() => (vehiculo ? {
     id: vehiculo.id, patente: vehiculo.patente, marca: vehiculo.marca, modelo: vehiculo.modelo, version: vehiculo.version || "", anio: vehiculo.anio, km: vehiculo.km,
-    color: vehiculo.color || "", transmision: vehiculo.transmision || "", combustible: vehiculo.combustible || "", precioLista: vehiculo.precio_lista ?? "",
+    color: vehiculo.color || "", transmision: vehiculo.transmision || "", combustible: vehiculo.combustible || "", precioLista: vehiculo.precio_lista ?? "", precioFinanciamiento: vehiculo.precio_financiamiento ?? "",
     costo: vehiculo.costo ?? "", estado: vehiculo.estado, notas: vehiculo.notas || "",
   } : VACIO));
   const [fotos, setFotos] = useState(vehiculo ? [...(vehiculo.fotos || [])] : []); // ids ya guardados
@@ -118,6 +118,7 @@ function FormVehiculo({ api, vehiculo, puedeCosto, onCerrar, onGuardado }) {
           <select value={f.combustible} onChange={(e) => set("combustible", e.target.value)} className={INPUT}><option value="">—</option>{COMBUSTIBLES.map((t) => <option key={t}>{t}</option>)}</select>
         </Campo>
         <Campo etiqueta="Precio de lista ($)"><InputDinero value={f.precioLista} onChange={(e) => set("precioLista", e.target.value)} className={INPUT} /></Campo>
+        <Campo etiqueta="Precio con financiamiento ($)" ayuda={Number(f.precioLista) > Number(f.precioFinanciamiento) && Number(f.precioFinanciamiento) > 0 ? `El sitio web informa un bono financiamiento de ${clp(Number(f.precioLista) - Number(f.precioFinanciamiento))}.` : "Opcional. Debe ser menor que el de lista; la diferencia se informa en el sitio web como bono financiamiento."}><InputDinero value={f.precioFinanciamiento} onChange={(e) => set("precioFinanciamiento", e.target.value)} className={INPUT} /></Campo>
         {puedeCosto && <Campo etiqueta="Costo ($)" ayuda="Solo lo ven quienes editan el inventario."><InputDinero value={f.costo} onChange={(e) => set("costo", e.target.value)} className={INPUT} /></Campo>}
       </div>
       <Campo etiqueta="Notas"><textarea rows={2} value={f.notas} onChange={(e) => set("notas", e.target.value)} className={INPUT} /></Campo>

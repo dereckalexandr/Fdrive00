@@ -264,6 +264,7 @@ function Tarjeta({ v, ir }) {
         <h3 className="font-serif text-lg text-stone-900 leading-tight">{nombreVeh(v)}</h3>
         <p className="text-sm text-stone-600">{v.anio} · {km(v.km)}{v.transmision ? ` · ${v.transmision}` : ""}</p>
         <p className="text-xl font-bold tabular-nums text-stone-900 mt-2">{clp(v.precio)}</p>
+        {v.bonoFinanciamiento > 0 && <p className="text-sm text-emerald-800"><span className="font-semibold tabular-nums">{clp(v.precioFinanciamiento)}</span> con financiamiento · <span className="font-medium">Bono financiamiento {clp(v.bonoFinanciamiento)}</span></p>}
       </div>
     </a>
   );
@@ -353,6 +354,12 @@ function Detalle({ id, ir, locales }) {
           <div>
             <h1 className="font-serif text-2xl md:text-3xl text-stone-900 leading-tight">{nombreVeh(v)} {v.anio}</h1>
             <p className="font-bold tabular-nums text-3xl text-stone-900 mt-2">{clp(v.precio)}</p>
+            {v.bonoFinanciamiento > 0 && (
+              <div className="mt-2 border border-emerald-200 bg-emerald-50 rounded-xl px-4 py-3 text-sm text-emerald-900">
+                <p><span className="font-bold tabular-nums text-xl">{clp(v.precioFinanciamiento)}</span> con financiamiento</p>
+                <p className="font-medium">Bono financiamiento: {clp(v.bonoFinanciamiento)} de descuento sobre el precio de lista</p>
+              </div>
+            )}
             {v.reservado && <p className="text-sm text-stone-600 mt-1">Este vehículo está reservado. Puedes consultar por si la venta no se concreta.</p>}
           </div>
           <div className="flex flex-col gap-2">

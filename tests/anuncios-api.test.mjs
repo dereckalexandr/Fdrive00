@@ -238,3 +238,16 @@ test("La cuenta maestra ve todo pero no publica", async () => {
   assert.equal((await ve(admin, "anuncios.resumen", { localId: L1 })).status, 200);
   assert.equal((await ve(admin, "anuncios.baja", { id: U.a1.id })).status, 403);
 });
+
+test("Precio con financiamiento: se guarda con el vehículo, nunca supera al de lista y el sitio web informa el bono", async () => {
+  const base = { patente: "FINA11", marca: "Toyota", modelo: "Yaris", anio: 2020, km: 40000, precioLista: 10000000, costo: 8500000, transmision: "Automática" };
+  const malo = await ve(U.jefe.token, "inventario.save", { datos: { ...base, precioFinanciamiento: 10500000 } });
+  assert.equal(malo.error, "financiamiento_mayor_que_lista");
+  assert.equal((await ve(U.jefe.token, "inventario.save", { datos: { ...base, precioLista: "", precioFinanciamiento: 5000000 } })).error, "financiamiento_sin_lista");
+  assert.equal((await ve(U.jefe.token, "inventario.save", { datos: { ...base, precioFinanciamiento: "abc" } })).error, "precio_invalido");
+  const ok = await ve(U.jefe.token, "inventario.save", { datos: { ...base, precioFinanciamiento: 9500000 } });
+  assert.equal(ok.status, 200, JSON.stringify(ok));
+  assert.equal(ok.vehiculo.precio_financiamiento, 9500000);
+  const sin = await ve(U.jefe.token, "inventario.save", { id: ok.vehiculo.id, datos: { ...base, precioFinanciamiento: "" } });
+  assert.equal(sin.vehiculo.precio_financiamiento, null, "vacío = sin precio con financiamiento");
+});

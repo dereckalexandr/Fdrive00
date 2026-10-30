@@ -119,7 +119,7 @@ export async function publicOp(ctx: CtxPublico, body: any): Promise<Response> {
   /* ---------- catálogo ---------- */
   if (op === "catalogo") {
     const [vq, lq, cfg] = await Promise.all([
-      sb.from("vehiculos").select("id, marca, modelo, version, anio, km, color, transmision, combustible, precio_lista, estado, activo, fotos, local_id, creado_en").eq("activo", true).in("estado", ESTADOS_VISIBLES).order("creado_en", { ascending: false }),
+      sb.from("vehiculos").select("id, marca, modelo, version, anio, km, color, transmision, combustible, precio_lista, precio_financiamiento, estado, activo, fotos, local_id, creado_en").eq("activo", true).in("estado", ESTADOS_VISIBLES).order("creado_en", { ascending: false }),
       sb.from("locales").select("id, nombre, direccion, activo"),
       config(),
     ]);

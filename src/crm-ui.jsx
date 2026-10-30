@@ -86,6 +86,8 @@ const MENSAJES = {
   vehiculo_en_uso: "El vehículo ya se está usando (reservado o vendido): no se puede revertir.",
   publicacion_bajo_piso: "El precio de publicación no puede ser menor que el piso.",
   precio_invalido: "Revisa los precios: deben ser montos enteros mayores a 0.",
+  financiamiento_sin_lista: "Para indicar un precio con financiamiento, primero escribe el precio de lista.",
+  financiamiento_mayor_que_lista: "El precio con financiamiento no puede ser mayor que el precio de lista.",
   plazo_invalido: "Revisa el plazo (en días).",
   consignacion_en_curso: "Este lead ya tiene una consignación en curso.",
   consignacion_estado_invalido: "Esa acción ya no corresponde al estado de la consignación.",

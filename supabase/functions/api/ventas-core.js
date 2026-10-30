@@ -92,7 +92,11 @@ export function validarVehiculo(input) {
   if (km === null || Number.isNaN(km)) return { ok: false, error: "km_invalido" };
   const precio = entero(i.precioLista, 0, 2_000_000_000);
   const costo = entero(i.costo, 0, 2_000_000_000);
-  if (Number.isNaN(precio) || Number.isNaN(costo)) return { ok: false, error: "precio_invalido" };
+  const financiamiento = entero(i.precioFinanciamiento, 0, 2_000_000_000);
+  if (Number.isNaN(precio) || Number.isNaN(costo) || Number.isNaN(financiamiento)) return { ok: false, error: "precio_invalido" };
+  // El precio con financiamiento es opcional y nunca supera al de lista: la diferencia es el «bono financiamiento».
+  if (financiamiento && !precio) return { ok: false, error: "financiamiento_sin_lista" };
+  if (financiamiento && financiamiento > precio) return { ok: false, error: "financiamiento_mayor_que_lista" };
   const estado = i.estado || "disponible";
   if (!ESTADOS_VEHICULO.some((e) => e.id === estado)) return { ok: false, error: "estado_invalido" };
   const transmision = texto(i.transmision, 20);
@@ -104,7 +108,7 @@ export function validarVehiculo(input) {
     ok: true,
     value: {
       patente, marca, modelo, version: texto(i.version, 60) || null, anio, km, color: texto(i.color, 30) || null,
-      transmision: transmision || null, combustible: combustible || null, precio_lista: precio, costo, estado,
+      transmision: transmision || null, combustible: combustible || null, precio_lista: precio, precio_financiamiento: financiamiento || null, costo, estado,
       notas: texto(i.notas, 500) || null, fotos,
     },
   };

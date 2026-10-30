@@ -188,3 +188,15 @@ test("Renovar (cambiar mi auto por otro): exige el vehículo deseado y todos los
   assert.equal(e({ mantenciones: "" }), "mantenciones_invalidas");
   assert.equal(e({ precioEsperado: "" }), "precio_esperado_invalido");
 });
+
+test("Bono financiamiento: la diferencia entre el precio de lista y el precio con financiamiento, solo si es válida", () => {
+  const p = vehiculoPublico({ ...VEH, precio_financiamiento: 11980000 });
+  assert.equal(p.precio, 12480000);
+  assert.equal(p.precioFinanciamiento, 11980000);
+  assert.equal(p.bonoFinanciamiento, 500000);
+  for (const mal of [null, undefined, 0, 12480000, 13000000]) {
+    const q = vehiculoPublico({ ...VEH, precio_financiamiento: mal });
+    assert.equal(q.bonoFinanciamiento, 0, String(mal));
+    assert.equal(q.precioFinanciamiento, null, String(mal));
+  }
+});
