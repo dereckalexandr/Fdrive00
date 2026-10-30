@@ -29,6 +29,18 @@ const aInputLocal = (iso) => { const d = new Date(iso); const p = (n) => String(
 const deInputLocal = (v) => { const t = new Date(v); return Number.isNaN(t.getTime()) ? "" : t.toISOString(); };
 const mananaALas10 = () => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(10, 0, 0, 0); return aInputLocal(d.toISOString()); };
 
+/** Abre una imagen (data URL) en otra pestaña. Los navegadores bloquean los enlaces directos a data:, así que se pasa por un blob. */
+export async function abrirImagen(dataUrl) {
+  const w = window.open("", "_blank");
+  try {
+    const url = URL.createObjectURL(await (await fetch(dataUrl)).blob());
+    if (w) w.location.href = url; else window.open(url, "_blank");
+  } catch (e) {
+    if (w) w.close();
+    window.alert("No se pudo abrir la imagen.");
+  }
+}
+
 export function Miniatura({ fichaId, fotoId, onQuitar }) {
   const [src, setSrc] = useState(cacheFotos.get(fotoId) || "");
   useEffect(() => {
@@ -39,7 +51,7 @@ export function Miniatura({ fichaId, fotoId, onQuitar }) {
   }, [fichaId, fotoId, src]);
   return (
     <div className="relative w-24 h-24 bg-stone-200 border border-stone-300 shrink-0">
-      {src ? <a href={src} target="_blank" rel="noreferrer"><img src={src} alt="" className="w-full h-full object-cover" /></a> : <span className="absolute inset-0 flex items-center justify-center text-[10px] text-stone-400">…</span>}
+      {src ? <a href={src} onClick={(e) => { e.preventDefault(); abrirImagen(src); }}><img src={src} alt="" className="w-full h-full object-cover" /></a> : <span className="absolute inset-0 flex items-center justify-center text-[10px] text-stone-400">…</span>}
       {onQuitar && <button type="button" onClick={onQuitar} className="absolute -top-2 -right-2 bg-rose-600 text-white w-5 h-5 text-xs rounded-full" aria-label="Quitar foto">✕</button>}
     </div>
   );

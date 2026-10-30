@@ -15,7 +15,7 @@ import { mesChile } from "../supabase/functions/api/ventas-core.js";
 import { tasacionNombre, aplicaParaNombre, validarVehiculoTasacion, validarTasacionDirecta, MAX_FOTOS_TASACION, topeDeOferta } from "../supabase/functions/api/tasaciones-core.js";
 import { compressImage, makePhotoId } from "./photos.js";
 import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, useCarga, mensajeError, CamposVehiculo, aVehiculoForm, VEH_VACIO, apiPorDefecto } from "./crm-ui.jsx";
-import { SeccionInspeccion, Miniatura as MiniaturaInspeccion } from "./crm-inspecciones.jsx";
+import { SeccionInspeccion, Miniatura as MiniaturaInspeccion, abrirImagen } from "./crm-inspecciones.jsx";
 import { SeccionValidacion } from "./crm-validaciones.jsx";
 
 const COLOR = { pendiente: "bg-amber-100 text-amber-800", en_proceso: "bg-sky-100 text-sky-800", completada: "bg-emerald-100 text-emerald-800", cancelada: "bg-stone-200 text-stone-600" };
@@ -34,7 +34,7 @@ function Miniatura({ tasacionId, fotoId, onQuitar }) {
   }, [tasacionId, fotoId, src]);
   return (
     <div className="relative w-24 h-24 bg-stone-200 border border-stone-300 shrink-0">
-      {src ? <a href={src} target="_blank" rel="noreferrer"><img src={src} alt="" className="w-full h-full object-cover" /></a> : <span className="absolute inset-0 flex items-center justify-center text-[10px] text-stone-400">…</span>}
+      {src ? <a href={src} onClick={(e) => { e.preventDefault(); abrirImagen(src); }}><img src={src} alt="" className="w-full h-full object-cover" /></a> : <span className="absolute inset-0 flex items-center justify-center text-[10px] text-stone-400">…</span>}
       {onQuitar && <button type="button" onClick={onQuitar} className="absolute -top-2 -right-2 bg-rose-600 text-white w-5 h-5 text-xs rounded-full" aria-label="Quitar foto">✕</button>}
     </div>
   );
