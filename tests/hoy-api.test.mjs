@@ -8,6 +8,13 @@ const CLAVE = "Prueba12345";
 const U = {};
 let admin; let L1; let L2; let n = 0;
 const enH = (h) => new Date(Date.now() + h * 3_600_000).toISOString();
+// Un momento de «más tarde, hoy» según el día de Chile: a mitad de camino entre ahora y la medianoche de Chile (con +0,2 h la prueba fallaba cerca de la medianoche).
+const masTardeHoy = () => {
+  const ahora = new Date();
+  const hms = new Intl.DateTimeFormat("en-GB", { timeZone: "America/Santiago", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).format(ahora).split(":").map(Number);
+  const restante = 86_400_000 - ((hms[0] * 60 + hms[1]) * 60 + hms[2]) * 1000;
+  return new Date(ahora.getTime() + restante / 2).toISOString();
+};
 
 async function crear(clave, nombre, rut, roles, localId, extra) {
   const r = await crm(admin, "usuarios.create", { datos: { nombre, rut, roles, localId, extra }, clave: CLAVE });
@@ -65,9 +72,9 @@ test("Próxima acción: vencida, de hoy, programada y sin acción", async () => 
   const b = await lead(U.e1.token); await hecho(b);
   const c = await lead(U.e1.token); await hecho(c);
   const d = await lead(U.e1.token); await hecho(d);
-  const tarea = (l, horas, titulo) => ve(U.e1.token, "tareas.create", { leadId: l.id, titulo, tipo: "llamada", venceEn: enH(horas) });
+  const tarea = (l, horas, titulo) => ve(U.e1.token, "tareas.create", { leadId: l.id, titulo, tipo: "llamada", venceEn: horas === "hoy" ? masTardeHoy() : enH(horas) });
   await tarea(a, -5, "Llamar de nuevo");
-  await tarea(b, 0.2, "Enviar cotización");
+  await tarea(b, "hoy", "Enviar cotización");
   await tarea(c, 72, "Seguimiento");
   const lista = await hoy(U.e1.token);
   assert.equal(grupoDe(lista, a.id), "vencida");
