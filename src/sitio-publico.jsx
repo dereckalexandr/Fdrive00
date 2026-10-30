@@ -35,6 +35,8 @@ async function llamar(op, extra = {}) {
 const textoError = (e) => MENSAJES_WEB[e && e.message] || (e && e.message === "sin_conexion" ? "No pudimos conectarnos. Revisa tu internet e inténtalo de nuevo." : "No pudimos procesar tu solicitud. Inténtalo de nuevo o escríbenos por WhatsApp.");
 
 const clp = (n) => `$${Math.round(Number(n)).toLocaleString("es-CL")}`;
+/** El precio que se destaca: el de financiamiento si el vehículo lo tiene; si no, el de lista. */
+const precioDestacado = (v) => (v.bonoFinanciamiento > 0 ? v.precioFinanciamiento : v.precio);
 const km = (n) => `${Number(n).toLocaleString("es-CL")} km`;
 const nombreVeh = (v) => [v.marca, v.modelo, v.version].filter(Boolean).join(" ");
 
@@ -263,8 +265,13 @@ function Tarjeta({ v, ir }) {
       <div className="p-4 flex flex-col gap-1">
         <h3 className="font-serif text-lg text-stone-900 leading-tight">{nombreVeh(v)}</h3>
         <p className="text-sm text-stone-600">{v.anio} · {km(v.km)}{v.transmision ? ` · ${v.transmision}` : ""}</p>
-        <p className="text-xl font-bold tabular-nums text-stone-900 mt-2">{clp(v.precio)}</p>
-        {v.bonoFinanciamiento > 0 && <p className="text-sm text-emerald-800"><span className="font-semibold tabular-nums">{clp(v.precioFinanciamiento)}</span> con financiamiento · <span className="font-medium">Bono financiamiento {clp(v.bonoFinanciamiento)}</span></p>}
+        {v.bonoFinanciamiento > 0 ? (
+          <div className="mt-2">
+            <p className="text-xl font-bold tabular-nums text-stone-900">{clp(v.precioFinanciamiento)} <span className="text-sm font-medium text-emerald-800">con financiamiento</span></p>
+            <p className="text-sm text-stone-600">Precio de lista <span className="tabular-nums">{clp(v.precio)}</span></p>
+            <p className="text-sm font-medium text-emerald-800">Bono financiamiento {clp(v.bonoFinanciamiento)}</p>
+          </div>
+        ) : <p className="text-xl font-bold tabular-nums text-stone-900 mt-2">{clp(v.precio)}</p>}
       </div>
     </a>
   );
@@ -279,9 +286,9 @@ function Catalogo({ datos, ir }) {
   const marcas = useMemo(() => Array.from(new Set(datos.vehiculos.map((v) => v.marca))).sort(), [datos]);
   const lista = useMemo(() => {
     const t = q.trim().toLowerCase();
-    const l = datos.vehiculos.filter((v) => (!marca || v.marca === marca) && (!trans || v.transmision === trans) && (!tope || v.precio <= Number(tope)) && (!t || `${v.marca} ${v.modelo} ${v.version || ""} ${v.anio}`.toLowerCase().includes(t)));
-    if (orden === "precio_asc") l.sort((a, b) => a.precio - b.precio);
-    if (orden === "precio_desc") l.sort((a, b) => b.precio - a.precio);
+    const l = datos.vehiculos.filter((v) => (!marca || v.marca === marca) && (!trans || v.transmision === trans) && (!tope || precioDestacado(v) <= Number(tope)) && (!t || `${v.marca} ${v.modelo} ${v.version || ""} ${v.anio}`.toLowerCase().includes(t)));
+    if (orden === "precio_asc") l.sort((a, b) => precioDestacado(a) - precioDestacado(b));
+    if (orden === "precio_desc") l.sort((a, b) => precioDestacado(b) - precioDestacado(a));
     if (orden === "anio") l.sort((a, b) => b.anio - a.anio);
     if (orden === "km") l.sort((a, b) => a.km - b.km);
     return l;
@@ -336,7 +343,7 @@ function Detalle({ id, ir, locales }) {
     </div>
   );
   const { vehiculo: v, local, empresa } = estado.datos;
-  const wa = empresa && empresa.whatsapp ? `https://wa.me/${empresa.whatsapp}?text=${encodeURIComponent(`Hola, me interesa el ${nombreVeh(v)} ${v.anio} (${clp(v.precio)}) que vi en la web.`)}` : "";
+  const wa = empresa && empresa.whatsapp ? `https://wa.me/${empresa.whatsapp}?text=${encodeURIComponent(`Hola, me interesa el ${nombreVeh(v)} ${v.anio} (${clp(precioDestacado(v))}) que vi en la web.`)}` : "";
   const datosTecnicos = [["Año", v.anio], ["Kilometraje", km(v.km)], ["Transmisión", v.transmision], ["Combustible", v.combustible], ["Color", v.color]].filter(([, x]) => x);
   return (
     <div className="max-w-6xl mx-auto px-4 md:px-6 py-6 flex flex-col gap-6">
@@ -353,13 +360,13 @@ function Detalle({ id, ir, locales }) {
         <div className="lg:col-span-2 flex flex-col gap-4">
           <div>
             <h1 className="font-serif text-2xl md:text-3xl text-stone-900 leading-tight">{nombreVeh(v)} {v.anio}</h1>
-            <p className="font-bold tabular-nums text-3xl text-stone-900 mt-2">{clp(v.precio)}</p>
-            {v.bonoFinanciamiento > 0 && (
-              <div className="mt-2 border border-emerald-200 bg-emerald-50 rounded-xl px-4 py-3 text-sm text-emerald-900">
-                <p><span className="font-bold tabular-nums text-xl">{clp(v.precioFinanciamiento)}</span> con financiamiento</p>
-                <p className="font-medium">Bono financiamiento: {clp(v.bonoFinanciamiento)} de descuento sobre el precio de lista</p>
+            {v.bonoFinanciamiento > 0 ? (
+              <div className="mt-2">
+                <p className="font-bold tabular-nums text-3xl text-stone-900">{clp(v.precioFinanciamiento)} <span className="text-base font-medium text-emerald-800">con financiamiento</span></p>
+                <p className="text-sm text-stone-600 mt-1">Precio de lista <span className="tabular-nums">{clp(v.precio)}</span></p>
+                <p className="inline-block mt-2 border border-emerald-200 bg-emerald-50 rounded-lg px-3 py-1.5 text-sm font-medium text-emerald-900">Bono financiamiento: {clp(v.bonoFinanciamiento)}</p>
               </div>
-            )}
+            ) : <p className="font-bold tabular-nums text-3xl text-stone-900 mt-2">{clp(v.precio)}</p>}
             {v.reservado && <p className="text-sm text-stone-600 mt-1">Este vehículo está reservado. Puedes consultar por si la venta no se concreta.</p>}
           </div>
           <div className="flex flex-col gap-2">
