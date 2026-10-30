@@ -296,7 +296,9 @@ export function cuotaEstimada(monto, plazoMeses, tasaMensualPct) {
 export function calcularCotizacion({ precioLista, descuento, parteDePago, financiamiento }) {
   const lista = Number(precioLista) || 0;
   const desc = Number(descuento) || 0;
-  const precioFinal = lista - desc;
+  // Si el cliente financia, se le aplica el bono financiamiento del vehículo (lista − precio con financiamiento).
+  const bono = financiamiento && financiamiento.quiere ? Number(financiamiento.bono_financiamiento) || 0 : 0;
+  const precioFinal = lista - bono - desc;
   const parte = parteDePago && parteDePago.tiene ? Number(parteDePago.valor) || 0 : 0;
   const quiere = !!(financiamiento && financiamiento.quiere);
   const pie = quiere ? Number(financiamiento.pie) || 0 : 0;
@@ -304,7 +306,7 @@ export function calcularCotizacion({ precioLista, descuento, parteDePago, financ
   const montoFinanciar = quiere ? Math.max(0, saldo - pie) : 0;
   const cuota = quiere ? cuotaEstimada(montoFinanciar, financiamiento.plazo_meses ?? financiamiento.plazoMeses, financiamiento.tasa_mensual_pct ?? financiamiento.tasaMensualPct) : 0;
   return {
-    precioFinal, descuentoPct: lista > 0 ? Math.round((desc / lista) * 1000) / 10 : 0, parte, pie, saldo, montoFinanciar, cuota,
+    precioFinal, bono, descuentoPct: lista > 0 ? Math.round((desc / lista) * 1000) / 10 : 0, parte, pie, saldo, montoFinanciar, cuota,
     excede: parte + pie > precioFinal,
   };
 }
@@ -313,12 +315,15 @@ export function calcularCotizacion({ precioLista, descuento, parteDePago, financ
  * Valida los datos que la persona ingresa en una cotización. El precio de lista NO viene de la pantalla:
  * lo fija el servidor desde el inventario (`precioLista` del vehículo).
  */
-export function validarCotizacion(input, precioLista) {
+export function validarCotizacion(input, precioLista, precioFinanciamiento = null) {
   const i = input || {};
   const lista = Number(precioLista);
   if (!Number.isFinite(lista) || lista <= 0) return { ok: false, error: "vehiculo_sin_precio" };
+  // Bono financiamiento: solo si el cliente financia y el vehículo tiene un precio con financiamiento menor al de lista.
+  const pf = Number(precioFinanciamiento);
+  const bono = i.financiamiento && i.financiamiento.quiere && pf > 0 && pf < lista ? lista - pf : 0;
   const descuento = entero(i.descuento ?? 0, 0, 2_000_000_000);
-  if (descuento === null || Number.isNaN(descuento) || descuento > lista) return { ok: false, error: "descuento_invalido" };
+  if (descuento === null || Number.isNaN(descuento) || descuento > lista - bono) return { ok: false, error: "descuento_invalido" };
   const pp = validarParteDePago(i.parteDePago);
   if (!pp.ok) return pp;
   let fin = { quiere: false };
@@ -329,7 +334,7 @@ export function validarCotizacion(input, precioLista) {
     const tasa = i.financiamiento.tasaMensualPct ?? i.financiamiento.tasa_mensual_pct;
     const tasaN = tasa === "" || tasa === undefined || tasa === null ? 0 : Number(tasa);
     if (Number.isNaN(plazo) || !Number.isFinite(tasaN) || tasaN < 0 || tasaN > 10) return { ok: false, error: "financiamiento_invalido" };
-    fin = { ...f.value, plazo_meses: plazo, tasa_mensual_pct: tasaN };
+    fin = { ...f.value, plazo_meses: plazo, tasa_mensual_pct: tasaN, ...(bono > 0 ? { bono_financiamiento: bono } : {}) };
   }
   const calc = calcularCotizacion({ precioLista: lista, descuento, parteDePago: pp.value, financiamiento: fin });
   if (calc.excede) return { ok: false, error: "pago_excede_precio" };

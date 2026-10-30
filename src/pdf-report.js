@@ -431,6 +431,7 @@ export function buildCotizacionPdf(c, { fmt }) {
   const calc = calcularCotizacion({ precioLista: c.precio_lista, descuento: c.descuento, parteDePago: c.parte_pago, financiamiento: c.financiamiento });
   pdf.sectionBar("Precio");
   pdf.totalLine("Precio de lista", fmt(c.precio_lista));
+  if (calc.bono > 0) pdf.totalLine("Bono financiamiento", `− ${fmt(calc.bono)}`);
   if (Number(c.descuento) > 0) pdf.totalLine(`Descuento (${calc.descuentoPct.toLocaleString("es-CL")}%)`, `− ${fmt(c.descuento)}`);
   pdf.totalLine("Precio final", fmt(calc.precioFinal), { big: true });
 

@@ -105,3 +105,11 @@ test("Resumen del local", () => {
   assert.deepEqual(r.porPortal, { yapo: 2 });
   assert.equal(r.total, 4);
 });
+
+test("Texto del aviso: con precio de financiamiento informa ambos precios y el bono", () => {
+  const d = sugerirAviso({ ...VEH, precio_lista: 10000000, precio_financiamiento: 9500000 }).descripcion;
+  assert.ok(d.includes("• Precio con financiamiento: $9.500.000"));
+  assert.ok(d.includes("• Precio de lista: $10.000.000"));
+  assert.ok(d.includes("• Bono financiamiento: $500.000"));
+  assert.doesNotMatch(sugerirAviso({ ...VEH, precio_lista: 10000000, precio_financiamiento: 11000000 }).descripcion, /Bono/);
+});

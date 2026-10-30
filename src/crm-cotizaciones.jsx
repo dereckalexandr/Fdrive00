@@ -69,13 +69,14 @@ function FormCotizacion({ api, lead, cotizacion, catalogos, tope, onCerrar, onGu
   const opciones = inv ? inv.vehiculos.filter((v) => v.estado === "disponible" || v.id === vehiculoId) : [];
   const veh = opciones.find((v) => v.id === vehiculoId);
   const datos = { descuento, parteDePago: tienePP ? { tiene: true, ...pp } : { tiene: false }, financiamiento: quiereFin ? { quiere: true, ...fin } : { quiere: false }, notas };
-  const calc = veh ? calcularCotizacion({ precioLista: veh.precio_lista, descuento, parteDePago: datos.parteDePago, financiamiento: { ...datos.financiamiento, plazo_meses: fin.plazoMeses, tasa_mensual_pct: fin.tasaMensualPct } }) : null;
+  const bonoFin = veh && quiereFin && Number(veh.precio_financiamiento) > 0 && Number(veh.precio_financiamiento) < Number(veh.precio_lista) ? Number(veh.precio_lista) - Number(veh.precio_financiamiento) : 0;
+  const calc = veh ? calcularCotizacion({ precioLista: veh.precio_lista, descuento, parteDePago: datos.parteDePago, financiamiento: { ...datos.financiamiento, plazo_meses: fin.plazoMeses, tasa_mensual_pct: fin.tasaMensualPct, bono_financiamiento: bonoFin } }) : null;
   const requiereAprobacion = Number(descuento) > 0 && !catalogos.puedeAsignar;
 
   const guardar = async () => {
     setError("");
     if (!veh) { setError("Elige el vehículo que se cotiza."); return; }
-    const v = validarCotizacion(datos, veh.precio_lista);
+    const v = validarCotizacion(datos, veh.precio_lista, veh.precio_financiamiento);
     if (!v.ok) { setError(mensajeError({ message: v.error })); return; }
     if (tope && tienePP && Number(pp.valor) > tope) { setError(mensajeError({ message: "parte_pago_excede_tasacion" })); return; }
     setGuardando(true);
@@ -99,6 +100,7 @@ function FormCotizacion({ api, lead, cotizacion, catalogos, tope, onCerrar, onGu
             <InputDinero value={descuento} onChange={(e) => setDescuento(e.target.value)} className={INPUT} placeholder="0" />
           </Campo>
         </div>
+        {bonoFin > 0 && <p className="text-xs text-emerald-800 mt-2">Como el cliente financia, se aplica el bono financiamiento de {clp(bonoFin)} (precio con financiamiento {clp(veh.precio_financiamiento)}).</p>}
         {requiereAprobacion && <div className="mt-3"><Aviso tipo="info">Todo descuento lo aprueba el Jefe Local. Podrás guardar la cotización, pero <strong>no podrás entregar el PDF ni reservar</strong> hasta que lo apruebe.</Aviso></div>}
         {Number(descuento) > 0 && catalogos.puedeAsignar && <p className="text-xs text-stone-500 mt-2">Como supervisor, este descuento queda aprobado a tu nombre y registrado en la bitácora.</p>}
       </Tarjeta>
@@ -248,7 +250,7 @@ export function SeccionCotizaciones({ api, lead, datos, catalogos, onCambio, avi
               <span className="ml-auto font-mono text-stone-900">{clp(c.precio_final)}</span>
             </div>
             <p className="text-xs text-stone-500 mt-1">
-              Lista {clp(c.precio_lista)}{c.descuento > 0 ? ` · descuento ${clp(c.descuento)} (${calc.descuentoPct.toLocaleString("es-CL")}%)` : ""}
+              Lista {clp(c.precio_lista)}{calc.bono > 0 ? ` · bono financiamiento ${clp(calc.bono)}` : ""}{c.descuento > 0 ? ` · descuento ${clp(c.descuento)} (${calc.descuentoPct.toLocaleString("es-CL")}%)` : ""}
               {calc.parte > 0 ? ` · parte de pago ${clp(calc.parte)}` : ""}{calc.pie > 0 ? ` · pie ${clp(calc.pie)}` : ""}{calc.cuota > 0 ? ` · cuota ≈ ${clp(calc.cuota)}` : ""}
               {c.vigencia_hasta ? ` · válida hasta ${fechaDia(c.vigencia_hasta)}` : ""}
             </p>
@@ -316,6 +318,7 @@ export function Aprobaciones({ api, version, abrirLead, onCambio }) {
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <div><p className="text-[11px] uppercase text-stone-400">Precio de lista</p><p className="font-mono">{clp(c.precio_lista)}</p></div>
+              {calc.bono > 0 && <div><p className="text-[11px] uppercase text-stone-400">Bono financiamiento</p><p className="font-mono text-emerald-700">{clp(calc.bono)}</p></div>}
               <div><p className="text-[11px] uppercase text-stone-400">Descuento</p><p className="font-mono text-amber-700">{clp(c.descuento)} ({calc.descuentoPct.toLocaleString("es-CL")}%)</p></div>
               <div><p className="text-[11px] uppercase text-stone-400">Precio final</p><p className="font-mono">{clp(c.precio_final)}</p></div>
               <div><p className="text-[11px] uppercase text-stone-400">Margen</p>

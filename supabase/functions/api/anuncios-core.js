@@ -43,7 +43,12 @@ export function sugerirAviso(v) {
   if (v.transmision) lineas.push(`• Transmisión: ${v.transmision}`);
   if (v.combustible) lineas.push(`• Combustible: ${v.combustible}`);
   if (v.color) lineas.push(`• Color: ${v.color}`);
-  if (v.precio_lista) lineas.push(`• Precio: ${dinero(v.precio_lista)}`);
+  if (v.precio_lista) {
+    const fin = Number(v.precio_financiamiento);
+    if (fin > 0 && fin < Number(v.precio_lista)) {
+      lineas.push(`• Precio con financiamiento: ${dinero(fin)}`, `• Precio de lista: ${dinero(v.precio_lista)}`, `• Bono financiamiento: ${dinero(Number(v.precio_lista) - fin)}`);
+    } else lineas.push(`• Precio: ${dinero(v.precio_lista)}`);
+  }
   lineas.push("", "Documentos al día. Consulta por financiamiento y recibe tu vehículo en parte de pago. Agenda tu visita.");
   return { titulo, descripcion: lineas.join("\n") };
 }

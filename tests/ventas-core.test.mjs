@@ -410,3 +410,18 @@ test("Aviso del supervisor: texto entre 3 y 300 caracteres", () => {
   assert.equal(validarAviso({ texto: "x".repeat(301) }).error, "aviso_invalido");
   assert.equal(validarAviso(null).error, "aviso_invalido");
 });
+
+test("Bono financiamiento en la cotización: solo si el cliente financia, y el descuento se calcula sobre lo que queda", () => {
+  const fin = { quiere: true, pie: 1000000, banco: "Santander", plazoMeses: 48, tasaMensualPct: 1.2 };
+  const con = validarCotizacion({ descuento: 100000, parteDePago: { tiene: false }, financiamiento: fin }, 10000000, 9500000);
+  assert.equal(con.ok, true, JSON.stringify(con));
+  assert.equal(con.value.financiamiento.bono_financiamiento, 500000);
+  assert.equal(con.value.precio_lista, 10000000);
+  assert.equal(con.value.precio_final, 9400000, "lista − bono − descuento");
+  const sin = validarCotizacion({ descuento: 100000, parteDePago: { tiene: false }, financiamiento: { quiere: false } }, 10000000, 9500000);
+  assert.equal(sin.value.precio_final, 9900000, "sin financiar no hay bono");
+  assert.equal(sin.value.financiamiento.bono_financiamiento, undefined);
+  for (const pf of [null, 0, 10000000, 11000000]) assert.equal(validarCotizacion({ parteDePago: { tiene: false }, financiamiento: fin }, 10000000, pf).value.precio_final, 10000000, String(pf));
+  assert.equal(validarCotizacion({ descuento: 9600000, parteDePago: { tiene: false }, financiamiento: fin }, 10000000, 9500000).error, "descuento_invalido", "el descuento no supera lo que queda tras el bono");
+  assert.equal(calcularCotizacion({ precioLista: 10000000, descuento: 0, parteDePago: {}, financiamiento: { quiere: false, bono_financiamiento: 500000 } }).precioFinal, 10000000);
+});

@@ -3082,7 +3082,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     if (veh.estado !== "disponible" && !(previa && previa.vehiculo_id === veh.id)) return err("vehiculo_no_disponible");
 
     // El precio de lista es siempre el actual del inventario; si cambió y hay descuento, se vuelve a pedir aprobación.
-    const v = validarCotizacion(body.datos, veh.precio_lista);
+    const v = validarCotizacion(body.datos, veh.precio_lista, veh.precio_financiamiento);
     if (!v.ok) return err(v.error!);
     const pisoCot = verificarPisoConsignado(veh, v.value.precio_final);
     if (!pisoCot.ok) return err(pisoCot.error!);
