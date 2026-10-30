@@ -278,7 +278,7 @@ const fechaLarga = (iso) => {
  * @param record  datos guardados de la inspección
  * @param opts    { sections: CHECKLIST_SECTIONS, inspectorNombre }
  */
-export function buildInspeccionPdf(record, { sections, inspectorNombre = "" }) {
+export function buildInspeccionPdf(record, { sections, inspectorNombre = "", sinPropietario = false }) {
   const pdf = new PdfDoc(`Informe de inspección · ${[record.marca, record.modelo].filter(Boolean).join(" ")} ${record.inscripcion || ""}`.trim());
   pdf.title("Informe de inspección", `${fechaLarga(record.fecha)}${inspectorNombre ? ` · Inspector: ${inspectorNombre}` : ""}`);
 
@@ -291,8 +291,10 @@ export function buildInspeccionPdf(record, { sections, inspectorNombre = "" }) {
     ["COLOR", record.color],
   ]);
 
-  pdf.sectionBar("Datos del propietario");
-  pdf.fields([["NOMBRE", record.propietarioNombre], ["R.U.N.", record.propietarioRun]]);
+  if (!sinPropietario) {
+    pdf.sectionBar("Datos del propietario");
+    pdf.fields([["NOMBRE", record.propietarioNombre], ["R.U.N.", record.propietarioRun]]);
+  }
 
   const cols = [{ title: "Ítem", w: 215 }, { title: "Estado", w: 80 }, { title: "Observación", w: CONTENT_W - 295 }];
   for (const section of sections) {
@@ -310,13 +312,13 @@ export function buildInspeccionPdf(record, { sections, inspectorNombre = "" }) {
  * Informe de tasación.
  * @param opts { sections: TASACION_SECTIONS, getItems(section), fmt(n) -> "$1.000", inspectorNombre }
  */
-export function buildTasacionPdf(record, { sections, getItems, fmt, inspectorNombre = "" }) {
+export function buildTasacionPdf(record, { sections, getItems, fmt, inspectorNombre = "", sinPropietario = false }) {
   const pdf = new PdfDoc(`Informe de tasación · ${record.vehiculo || ""} ${record.patente || ""}`.trim());
   pdf.title("Informe de tasación", `${fechaLarga(record.fecha)}${inspectorNombre ? ` · Inspector: ${inspectorNombre}` : ""}`);
 
   pdf.sectionBar("Datos de la tasación");
   pdf.fields([
-    ["PROPIETARIO", record.propietario], ["VEHÍCULO", record.vehiculo],
+    ...(sinPropietario ? [] : [["PROPIETARIO", record.propietario]]), ["VEHÍCULO", record.vehiculo],
     ["PATENTE", record.patente], ["AÑO", record.anio],
     ["KILOMETRAJE", record.kilometraje], ["ESTADO GENERAL", record.estadoGeneral],
   ]);

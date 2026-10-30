@@ -1865,6 +1865,31 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       return json({ inspeccion: (await enriquecer([x]))[0], puedeGestionar: esSupervisor, puedeRealizar: realiza, esMia: !ctx.esAdmin && x.inspector_id === userId, esSolicitante: !ctx.esAdmin && x.solicitante_id === userId });
     }
 
+    // Los datos para armar los PDF de una inspección ya realizada (y de su valorización, si el Inspector la hizo desde ella).
+    // Quien ve la inspección los recibe SIN los datos del propietario ni el archivo del CAV: eso queda solo en la ficha del Inspector.
+    if (op === "inspecciones.informes") {
+      const x = await cargarInspeccion(String(body.id ?? ""));
+      if (!x || !(await veInspeccion(x))) return err("no_existe", 404);
+      if (x.estado !== "completada" || !x.inspeccion_key) return err("inspeccion_sin_ficha", 409);
+      const g = await sb.from("kv_store").select("value").eq("key", x.inspeccion_key).maybeSingle();
+      if (g.error) return fallar(g.error);
+      if (!g.data) return err("inspeccion_sin_ficha", 409);
+      let ficha: any = {};
+      try { ficha = JSON.parse(g.data.value); } catch { return err("inspeccion_sin_ficha", 409); }
+      const { cavFileData, cavFileName, propietarioNombre, propietarioRun, fotosEquipo, ...inspeccion } = ficha;
+      let valorizacion: any = null;
+      if (x.inspector_id) {
+        const q = await sb.from("kv_store").select("key, value").like("key", `tasacion::${x.inspector_id}::%`).ilike("value", `%"inspeccionId":"${x.inspeccion_key}"%`).limit(10);
+        if (q.error) return fallar(q.error);
+        const halladas = (q.data ?? []).map((f: any) => { try { return JSON.parse(f.value); } catch { return null; } })
+          .filter((d: any) => d && d.inspeccionId === x.inspeccion_key)
+          .sort((a: any, b: any) => String(b.guardadoEl || b.fecha || "").localeCompare(String(a.guardadoEl || a.fecha || "")));
+        if (halladas[0]) { const { propietario, ...v } = halladas[0]; valorizacion = v; }
+      }
+      const [insp] = x.inspector_id ? await porIds("usuarios", [x.inspector_id]) : [null];
+      return json({ inspeccion, valorizacion, inspector: insp ? insp.nombre : "" });
+    }
+
     // Quiénes pueden tener fichas e inspecciones en el almacén: el supervisor ve las de su local; la cuenta maestra, las de todos los locales.
     if (op === "inspecciones.fichas_equipo") {
       if (!esSupervisor) return err("forbidden", 403);

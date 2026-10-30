@@ -475,3 +475,40 @@ test("Inventario en solo vista: quien ve el inventario revisa las inspecciones d
   assert.equal((await kv(U.an.token, "set", "dval::val1::arch1", { value: "x" })).status, 403);
   assert.equal((await ve(U.an.token, "inspecciones.cancelar", { id: ok.inspeccion.id, motivo: "No debería poder" })).status, 403);
 });
+
+test("Informes en PDF: quien ve la inspección realizada recibe su ficha y su valorización sin datos del propietario ni el CAV", async () => {
+  const l = await lead(U.e1.token);
+  const veh = vehN();
+  const ped = await pedir(U.e1.token, l.id, datos({ vehiculo: veh }));
+  assert.equal(ped.status, 200, JSON.stringify(ped));
+  const id = ped.inspeccion.id;
+  assert.equal((await ve(U.e1.token, "inspecciones.informes", { id })).error, "inspeccion_sin_ficha", "aún no está realizada");
+  assert.equal((await ve(U.i1.token, "inspecciones.tomar", { id })).status, 200);
+  const key = claveFicha(U.i1);
+  const ficha = { inscripcion: veh.patente, marca: "Toyota", modelo: "Yaris", anio: "2018", fecha: "2026-06-10", inspectorNombre: "Ivo Inspector", propietarioNombre: "Juan Pérez Soto", propietarioRun: "11.222.333-4", cavFileData: "data:application/pdf;base64,AAAA", cavFileName: "cav.pdf", fotosEquipo: ["f1"], checklist: { motor_ruidos: { estado: "Regular", observacion: "Ruido leve" } } };
+  assert.equal((await kv(U.i1.token, "set", key, { value: JSON.stringify(ficha) })).status, 200);
+  assert.equal((await registrar(U.i1, key, { solicitudId: id, vehiculo: veh })).status, 200);
+
+  // Sin valorización hecha desde esa inspección.
+  const sin = await ve(U.e1.token, "inspecciones.informes", { id });
+  assert.equal(sin.status, 200, JSON.stringify(sin));
+  assert.equal(sin.valorizacion, null);
+  assert.equal(sin.inspeccion.checklist.motor_ruidos.estado, "Regular");
+  assert.equal(sin.inspector, "Ivo Inspector");
+
+  // El Inspector valoriza desde esa inspección (otra valorización suya, de otro vehículo, no se mezcla).
+  const tas = (k, o) => kv(U.i1.token, "set", `tasacion::${U.i1.id}::${k}`, { value: JSON.stringify({ propietario: "Juan Pérez Soto", vehiculo: "Toyota Yaris", patente: veh.patente, fecha: "2026-06-11", valorComercial: 9000000, checklist: {}, ...o }) });
+  assert.equal((await tas("t1", { inspeccionId: key })).status, 200);
+  assert.equal((await tas("t2", { inspeccionId: "inspeccion::otro::x", valorComercial: 1 })).status, 200);
+  const con = await ve(U.e1.token, "inspecciones.informes", { id });
+  assert.equal(con.valorizacion.valorComercial, 9000000);
+  assert.equal(con.valorizacion.inspeccionId, key);
+  for (const prohibido of ["Juan", "11.222", "cavFileData", "base64", "propietario"]) assert.ok(!JSON.stringify(con).includes(prohibido), `no debe aparecer «${prohibido}»`);
+
+  // Quién puede pedirlos: quien ve el lead, el Inspector y el supervisor; no otro ejecutivo ni otro local.
+  assert.equal((await ve(U.jefe.token, "inspecciones.informes", { id })).status, 200);
+  assert.equal((await ve(U.i1.token, "inspecciones.informes", { id })).status, 200);
+  assert.equal((await ve(U.e2.token, "inspecciones.informes", { id })).status, 404, "otro ejecutivo");
+  assert.equal((await ve(U.jefeSur.token, "inspecciones.informes", { id })).status, 404, "otro local");
+  assert.equal((await ve(U.mkt.token, "inspecciones.informes", { id })).status, 403);
+});

@@ -128,6 +128,7 @@ const MENSAJES = {
   inspeccion_en_curso: "Ese vehículo (patente) ya tiene una inspección pedida o agendada.",
   inspeccion_ya_tomada: "Otro Inspector ya tomó esa inspección.",
   inspeccion_estado_invalido: "Esa acción ya no corresponde al estado actual de la inspección.",
+  inspeccion_sin_ficha: "La ficha de esta inspección aún no está disponible.",
   inspeccion_invalida: "La ficha de la inspección no es válida.",
   estado_doc_invalido: "Elige qué hacer con el documento: aprobar, observar, rechazar o marcar que no aplica.",
   comentario_requerido: "Escribe el motivo (mínimo 3 letras).",

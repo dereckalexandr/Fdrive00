@@ -12,6 +12,8 @@
 import React, { useState, useEffect } from "react";
 import { mesChile } from "../supabase/functions/api/ventas-core.js";
 import { validarSolicitudInspeccion, resolverLugar, inspeccionNombre, origenNombre, VEREDICTOS, diaChile } from "../supabase/functions/api/inspecciones-core.js";
+import { buildInspeccionPdf, buildTasacionPdf, pdfFileName } from "./pdf-report.js";
+import { CHECKLIST_SECTIONS, TASACION_SECTIONS, getTasacionSectionItems } from "./checklists.js";
 import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, useCarga, mensajeError, CamposVehiculo, aVehiculoForm, apiPorDefecto } from "./crm-ui.jsx";
 
 const COLOR = { pendiente: "bg-amber-100 text-amber-800", en_proceso: "bg-sky-100 text-sky-800", completada: "bg-emerald-100 text-emerald-800", cancelada: "bg-stone-200 text-stone-600" };
@@ -39,6 +41,44 @@ export async function abrirImagen(dataUrl) {
     if (w) w.close();
     window.alert("No se pudo abrir la imagen.");
   }
+}
+
+function descargarPdf(bytes, nombre) {
+  const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+  const a = document.createElement("a");
+  a.href = url; a.download = nombre;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
+/** Descargar el PDF de una inspección realizada y el de su valorización (si el Inspector la hizo). Sin datos del propietario. */
+export function DescargasInforme({ api, x }) {
+  const [ocupado, setOcupado] = useState("");
+  const [aviso, setAviso] = useState("");
+  const [hayValor, setHayValor] = useState(null); // null = aún no se sabe
+  if (x.estado !== "completada" || !x.tieneFicha) return null;
+  const bajar = async (cual) => {
+    setAviso(""); setOcupado(cual);
+    try {
+      const r = await api("inspecciones.informes", { id: x.id });
+      setHayValor(!!r.valorizacion);
+      if (cual === "inspeccion") {
+        descargarPdf(buildInspeccionPdf(r.inspeccion, { sections: CHECKLIST_SECTIONS, inspectorNombre: r.inspeccion.inspectorNombre || r.inspector, sinPropietario: true }), pdfFileName("Inspeccion", r.inspeccion));
+      } else if (!r.valorizacion) {
+        setAviso("El Inspector no hizo la valorización de este vehículo.");
+      } else {
+        descargarPdf(buildTasacionPdf(r.valorizacion, { sections: TASACION_SECTIONS, getItems: getTasacionSectionItems, fmt: clp, inspectorNombre: r.valorizacion.inspectorNombre || r.inspector, sinPropietario: true }), pdfFileName("Valorizacion", { ...r.valorizacion, inscripcion: r.valorizacion.patente }));
+      }
+    } catch (e) { setAviso(mensajeError(e)); }
+    setOcupado("");
+  };
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <button type="button" disabled={!!ocupado} onClick={() => bajar("inspeccion")} className={BTN}>{ocupado === "inspeccion" ? "Generando…" : "Descargar PDF de la inspección"}</button>
+      <button type="button" disabled={!!ocupado || hayValor === false} title={hayValor === false ? "El Inspector no hizo la valorización" : ""} onClick={() => bajar("valorizacion")} className={BTN}>{ocupado === "valorizacion" ? "Generando…" : "Descargar PDF de la valorización"}</button>
+      {aviso && <span className="text-xs text-rose-700">{aviso}</span>}
+    </div>
+  );
 }
 
 export function Miniatura({ fichaId, fotoId, onQuitar }) {
@@ -220,6 +260,7 @@ export function InspeccionDetalle({ api, id, onCerrar, onCambio, onRealizar, onV
         {x.estado === "cancelada" && x.motivo_cancelacion && <div className="md:col-span-2"><p className="text-xs uppercase tracking-wide text-stone-400">Cancelada</p><p className="text-stone-700">{x.motivo_cancelacion}</p></div>}
       </div>
       <Resultado x={x} />
+      <DescargasInforme api={api} x={x} />
       {msg.texto && <Aviso tipo={msg.tipo}>{msg.texto}</Aviso>}
 
       <div className="flex flex-wrap gap-2">
@@ -316,7 +357,7 @@ export function SeccionInspeccion({ api, origen, vehiculo, cerrado = false, vers
             {x.estado === "completada" ? `Realizada ${hace(x.completada_en)} por ${x.inspector}` : `${cuando(x.agendada_para)} · ${x.direccion}${x.inspector ? ` · Inspector: ${x.inspector}` : " · esperando que un Inspector la tome"}`}
             {x.fotos.length ? ` · ${x.fotos.length} foto(s)` : ""}
           </p>
-          <div className="mt-2"><button onClick={() => setDetalle(x.id)} className={BTN}>{x.estado === "completada" ? "Ver resultado" : "Ver detalle"}</button></div>
+          <div className="mt-2 flex flex-wrap items-center gap-2"><button onClick={() => setDetalle(x.id)} className={BTN}>{x.estado === "completada" ? "Ver resultado" : "Ver detalle"}</button><DescargasInforme api={api} x={x} /></div>
         </div>
       ))}
       {pidiendo && <FormPedirInspeccion api={api} origen={origen} vehiculo={vehiculo} onCerrar={() => setPidiendo(false)} onPedida={async () => { setPidiendo(false); await cambio(); }} />}
