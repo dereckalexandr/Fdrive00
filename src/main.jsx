@@ -24,13 +24,14 @@ if (hasSupabaseConfig()) {
 //   - «/plataforma»: el CRM del personal.
 //   - cualquier otra dirección: el sitio web público con el catálogo de vehículos.
 //   - un sitio aparte, solo para consultar inspecciones por patente (sin inventario ni contacto): se abre desde una dirección cuyo
-//     nombre empieza con «inspecciones» o en un proyecto construido con VITE_SITIO=inspecciones.
+//     nombre empieza con «inspecciones», la ruta «/inspecciones» o un proyecto construido con VITE_SITIO=inspecciones.
 const App = lazy(() => import("./App.jsx"));
 const SitioPublico = lazy(() => import("./sitio-publico.jsx"));
 const SitioInspecciones = lazy(() => import("./sitio-inspecciones.jsx"));
 
 function esSitioInspecciones() {
-  return import.meta.env.VITE_SITIO === "inspecciones" || /^inspecciones/i.test(window.location.hostname);
+  const ruta = window.location.pathname.replace(/\/+$/, "");
+  return import.meta.env.VITE_SITIO === "inspecciones" || /^inspecciones/i.test(window.location.hostname) || ruta === "/inspecciones" || ruta.startsWith("/inspecciones/");
 }
 
 function esPlataforma() {
