@@ -1904,6 +1904,47 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       return json({ inspectores });
     }
 
+    // El supervisor (Jefe Local de su local, o la cuenta maestra) elimina una ficha del Inspector: una inspección o una valorización,
+    // con sus fotos. No se puede deshacer. Queda en la bitácora con quién la eliminó.
+    if (op === "inspecciones.ficha_eliminar") {
+      if (!esSupervisor) return err("forbidden", 403);
+      const clave = String(body.key ?? "");
+      const m = /^(inspeccion|tasacion)::([0-9a-f-]{36})::([A-Za-z0-9_-]{1,80})$/i.exec(clave);
+      if (!m) return err("clave_invalida");
+      const [, tipoFicha, duenoId, fichaId] = m;
+      const dueno = await sb.from("usuarios").select("local_id, nombre").eq("id", duenoId).maybeSingle();
+      if (dueno.error) return fallar(dueno.error);
+      if (!dueno.data || (!ctx.esAdmin && dueno.data.local_id !== localId)) return err("no_existe", 404);
+      const g = await sb.from("kv_store").select("value").eq("key", clave).maybeSingle();
+      if (g.error) return fallar(g.error);
+      if (!g.data) return err("no_existe", 404);
+      let ficha: any = {};
+      try { ficha = JSON.parse(g.data.value); } catch { /* ficha ilegible: igual se elimina */ }
+      const borrar = async (k: string) => { const d = await sb.from("kv_store").delete().eq("key", k); if (d.error) throw d.error; };
+      let folio: string | null = null;
+      if (tipoFicha === "inspeccion") {
+        // Sus fotos y, si estaba registrada como solicitud o inspección espontánea, ese registro (sin la ficha ya no tiene qué mostrar).
+        const fotos = new Set<string>([...(Array.isArray(ficha.fotosEquipo) ? ficha.fotosEquipo : [])].map(String));
+        const f = await sb.from("kv_store").select("key").like("key", `ifoto::${fichaId}::%`);
+        for (const x of f.data ?? []) fotos.add(String(x.key).split("::").pop() as string);
+        for (const id of fotos) if (/^[A-Za-z0-9_-]{1,60}$/.test(id)) await borrar(`ifoto::${fichaId}::${id}`);
+        const h = await sb.from("inspecciones").select("*").eq("inspeccion_key", clave).maybeSingle();
+        if (h.data) {
+          const d = await sb.from("inspecciones").delete().eq("id", h.data.id);
+          if (d.error) return fallar(d.error);
+          folio = folioInspeccion(h.data.numero);
+          await anotar(h.data, `${userName} eliminó la ficha de la inspección ${folio}`);
+        }
+      } else {
+        const ids = new Set<string>();
+        for (const st of Object.values(ficha.checklist ?? {}) as any[]) for (const id of (st && Array.isArray(st.fotos) ? st.fotos : [])) ids.add(String(id));
+        for (const id of ids) if (/^[A-Za-z0-9_-]{1,60}$/.test(id)) await borrar(`foto::${duenoId}::${id}`);
+      }
+      await borrar(clave);
+      await audit(ctx.actor, tipoFicha === "inspeccion" ? "inspeccion.eliminar_ficha" : "valorizacion.eliminar", tipoFicha === "inspeccion" ? "inspeccion" : "valorizacion", clave, { inspector: dueno.data.nombre, patente: ficha.inscripcion ?? ficha.patente ?? null, folio });
+      return json({ ok: true });
+    }
+
     // El supervisor corrige los PRECIOS de una valorización del Inspector (valor comercial y valores del checklist). Nada más de la ficha cambia.
     if (op === "inspecciones.valorizacion_ajustar") {
       if (!esSupervisor) return err("forbidden", 403);

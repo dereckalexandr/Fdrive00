@@ -2141,6 +2141,18 @@ function FichasEquipo() {
       setAbierto({ ...fila, data: { ...data, inspectorId: fila.inspectorId } });
     } catch (e) { setMsg("No se pudo abrir la ficha."); }
   };
+  const eliminar = async (f) => {
+    const que = f.tipo === "inspeccion" ? "esta inspección" : "esta tasación del Inspector";
+    const quien = [f.data.marca, f.data.modelo, f.data.vehiculo].filter(Boolean).join(" ") + " " + (f.data.inscripcion || f.data.patente || "");
+    if (!window.confirm("¿Eliminar " + que + " (" + quien.trim() + ")? Se borran la ficha y sus fotos y no se puede deshacer.")) return;
+    setMsg("");
+    try {
+      await window.auth.ventas("inspecciones.ficha_eliminar", { key: f.key });
+      setEstado((x) => ({ ...x, inspecciones: x.inspecciones.filter((v) => v.key !== f.key), valorizaciones: x.valorizaciones.filter((v) => v.key !== f.key) }));
+      setAbierto(null);
+      setMsg("Eliminada. Quedó registrado con tu nombre.");
+    } catch (e) { setMsg(mensajeCrm(e)); }
+  };
   const pdf = () => {
     try {
       const d = abierto.data;
@@ -2160,6 +2172,7 @@ function FichasEquipo() {
           <button onClick={() => setAbierto(null)} className="text-sm text-stone-500 hover:underline py-1.5">← Volver a las fichas</button>
           <ActionLink onClick={pdf}>Descargar PDF{abierto.tipo === "inspeccion" ? " (con el CAV)" : ""}</ActionLink>
           <span className="text-xs text-stone-500">Realizada por {d.inspectorNombre || abierto.inspectorNombre}{abierto.tipo === "inspeccion" ? " · solo lectura" : ""}</span>
+          <button onClick={() => eliminar(abierto)} className="text-sm text-rose-700 hover:underline py-1.5 ml-auto">{abierto.tipo === "inspeccion" ? "Eliminar la inspección" : "Eliminar la tasación"}</button>
         </div>
         {msg && <p className={`text-sm ${/^Precios actualizados/.test(msg) ? "text-emerald-700" : "text-stone-500"}`}>{msg}</p>}
         {abierto.tipo === "inspeccion" ? (
@@ -2205,7 +2218,7 @@ function FichasEquipo() {
             <thead>
               <tr className="text-left text-xs uppercase tracking-wide text-stone-400 border-b border-stone-200">
                 <th className="py-2 pr-2">Fecha</th><th className="py-2 pr-2">Inspector</th><th className="py-2 pr-2">Vehículo</th><th className="py-2 pr-2">Patente</th>
-                <th className="py-2 pr-2">Propietario</th>{vista === "valorizaciones" && <th className="py-2 pr-2 text-right">Valor comercial</th>}<th className="py-2 pr-2 w-10"></th>
+                <th className="py-2 pr-2">Propietario</th>{vista === "valorizaciones" && <th className="py-2 pr-2 text-right">Valor comercial</th>}<th className="py-2 pr-2 w-24"></th>
               </tr>
             </thead>
             <tbody>
@@ -2217,7 +2230,7 @@ function FichasEquipo() {
                   <td className="py-2 pr-2 text-stone-600 font-mono">{(vista === "inspecciones" ? f.data.inscripcion : f.data.patente) || "—"}</td>
                   <td className="py-2 pr-2 text-stone-700">{(vista === "inspecciones" ? [f.data.propietarioNombre, f.data.propietarioRun].filter(Boolean).join(" · ") : f.data.propietario) || "—"}</td>
                   {vista === "valorizaciones" && <td className="py-2 pr-2 text-right font-mono text-stone-900">{clp(f.data.valorComercial)}</td>}
-                  <td className="py-2 pr-2 text-right"><button onClick={() => abrir(f)} className="text-xs text-amber-700 hover:underline">Ver</button></td>
+                  <td className="py-2 pr-2 text-right whitespace-nowrap"><button onClick={() => abrir(f)} className="text-xs text-amber-700 hover:underline">Ver</button><button onClick={() => eliminar(f)} className="text-xs text-rose-700 hover:underline ml-3">Eliminar</button></td>
                 </tr>
               ))}
             </tbody>

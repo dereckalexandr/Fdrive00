@@ -512,3 +512,42 @@ test("Informes en PDF: quien ve la inspección realizada recibe su ficha y su va
   assert.equal((await ve(U.jefeSur.token, "inspecciones.informes", { id })).status, 404, "otro local");
   assert.equal((await ve(U.mkt.token, "inspecciones.informes", { id })).status, 403);
 });
+
+test("Eliminar fichas del Inspector: solo el Jefe Local de su local (o la cuenta maestra); borra la ficha, sus fotos y el registro, y queda en la bitácora", async () => {
+  // Una valorización con una foto.
+  const kt = `tasacion::${U.i1.id}::vdel`;
+  assert.equal((await kv(U.i1.token, "set", kt, { value: JSON.stringify({ patente: "ABCD12", valorComercial: 5, checklist: { techo: { estado: "Rayado", valor: 1, fotos: ["fdel1"] } } }) })).status, 200);
+  assert.equal((await kv(U.i1.token, "set", `foto::${U.i1.id}::fdel1`, { value: "data:image/jpeg;base64,AAA" })).status, 200);
+  // Una inspección pedida desde un lead, ya realizada y con una foto.
+  const l = await lead(U.e1.token);
+  const veh = vehN();
+  const ped = await pedir(U.e1.token, l.id, datos({ vehiculo: veh }));
+  assert.equal((await ve(U.i1.token, "inspecciones.tomar", { id: ped.inspeccion.id })).status, 200);
+  const ki = claveFicha(U.i1);
+  const fid = ki.split("::").pop();
+  assert.equal((await kv(U.i1.token, "set", ki, { value: JSON.stringify({ inscripcion: veh.patente, fotosEquipo: ["fi1"], checklist: {} }) })).status, 200);
+  assert.equal((await kv(U.i1.token, "set", `ifoto::${fid}::fi1`, { value: "data:image/jpeg;base64,BBB" })).status, 200);
+  assert.equal((await registrar(U.i1, ki, { solicitudId: ped.inspeccion.id, vehiculo: veh, fotos: ["fi1"] })).status, 200);
+
+  const borrar = (token, key) => ve(token, "inspecciones.ficha_eliminar", { key });
+  for (const quien of [U.e1, U.i1, U.t1]) assert.equal((await borrar(quien.token, kt)).status, 403, "solo supervisores");
+  assert.equal((await borrar(U.jefeSur.token, kt)).status, 404, "Jefe de otro local");
+  assert.equal((await borrar(U.jefe.token, "inspeccion::x::y")).error, "clave_invalida");
+  assert.equal((await borrar(U.jefe.token, `tasacion::${U.i1.id}::noexiste`)).status, 404);
+
+  assert.equal((await borrar(U.jefe.token, kt)).status, 200);
+  assert.equal((await kv(U.i1.token, "get", kt)).value ?? null, null, "la valorización ya no está");
+  assert.equal((await kv(U.i1.token, "get", `foto::${U.i1.id}::fdel1`)).value ?? null, null, "ni su foto");
+
+  assert.equal((await borrar(U.jefe.token, ki)).status, 200);
+  assert.equal((await kv(U.i1.token, "get", ki)).value ?? null, null);
+  assert.equal((await kv(U.i1.token, "get", `ifoto::${fid}::fi1`)).value ?? null, null, "ni la foto de la inspección");
+  assert.equal(db.tablas.inspecciones.some((x) => x.id === ped.inspeccion.id), false, "ni su registro");
+  assert.ok(db.tablas.lead_eventos.some((e) => /Julia Jefa eliminó la ficha de la inspección INS-/.test(e.detalle)), "queda anotado en el lead");
+  assert.ok(db.tablas.bitacora.some((b) => b.accion === "inspeccion.eliminar_ficha") && db.tablas.bitacora.some((b) => b.accion === "valorizacion.eliminar"));
+
+  // La cuenta maestra también puede.
+  const k2 = `tasacion::${U.i1.id}::vdel2`;
+  assert.equal((await kv(U.i1.token, "set", k2, { value: JSON.stringify({ patente: "ABCD12", checklist: {} }) })).status, 200);
+  assert.equal((await borrar(admin, k2)).status, 200);
+});
