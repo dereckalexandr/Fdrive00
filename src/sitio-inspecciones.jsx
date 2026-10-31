@@ -101,6 +101,7 @@ function ResultadoInspeccion({ datos, acceso }) {
       {x.fotos.length > 0 && (
         <div>
           <h3 className="font-serif text-lg text-stone-900 mb-2">Imágenes de la inspección</h3>
+          {x.fotosDe && <p className="text-xs text-stone-500 mb-2">La inspección más reciente no tiene imágenes: estas son de la inspección {x.fotosDe.folio} del {fechaLarga(x.fotosDe.fecha)}.</p>}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">{x.fotos.map((f) => <FotoInspeccion key={f} acceso={acceso} fotoId={f} />)}</div>
         </div>
       )}

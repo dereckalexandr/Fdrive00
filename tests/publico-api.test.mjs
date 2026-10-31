@@ -445,6 +445,16 @@ test("Consulta pública de inspecciones: por patente, con informe, CAV y fotos; 
   db.tablas.inspecciones.find((x) => x.id === ped.inspeccion.id).completada_en = new Date(Date.now() - 86_400_000).toISOString();
   db.tablas.inspecciones.push({ ...db.tablas.inspecciones.find((x) => x.id === ped.inspeccion.id), id: randomUUID(), numero: 9999, completada_en: new Date().toISOString(), inspeccion_key: key });
   assert.equal((await pub("inspeccion.buscar", { patente })).inspeccion.folio, "INS-009999");
+
+  // Si la más reciente no trae fotos, se muestran las de la última que sí las tenga, indicando de cuál son.
+  db.tablas.inspecciones.find((x) => x.numero === 9999).fotos = [];
+  const sinFotos = await pub("inspeccion.buscar", { patente });
+  assert.equal(sinFotos.inspeccion.folio, "INS-009999");
+  assert.deepEqual(sinFotos.inspeccion.fotos, ["fotoa1"]);
+  assert.equal(sinFotos.inspeccion.fotosDe.folio.startsWith("INS-"), true);
+  assert.notEqual(sinFotos.inspeccion.fotosDe.folio, "INS-009999");
+  assert.equal((await pub("inspeccion.foto", { acceso: sinFotos.acceso, fotoId: "fotoa1" })).value, "data:image/jpeg;base64,BBBB");
+  assert.equal((await pub("inspeccion.foto", { acceso: sinFotos.acceso, fotoId: "otra" })).status, 404);
 });
 
 test("Consulta pública de inspecciones: con clave de Turnstile se exige el captcha, y la búsqueda tiene límite por IP", async () => {

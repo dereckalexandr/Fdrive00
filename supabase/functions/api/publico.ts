@@ -11,6 +11,7 @@ import { sugerirAviso } from "./anuncios-core.js";
 import { enviarAviso, enSegundoPlano, correoActivo } from "./correo.ts";
 import { consultarPatente } from "./patentes.ts";
 import { LIMITE_WEB_IP_HORA, normalizarPatente, patenteValida } from "./patentes-core.js";
+import { folioInspeccion } from "./inspecciones-core.js";
 import { inspeccionPublica, fichaParaInforme, PUBLICO_CON_PROPIETARIO, LIMITE_BUSQUEDA_IP_HORA, LIMITE_LECTURA_IP_HORA, VIGENCIA_ACCESO_MS } from "./inspeccion-publica-core.js";
 import {
   visibleEnCatalogo, vehiculoPublico, validarSolicitudWeb, cuotaReferencial, tipoLeadDe, resumenSolicitud, nombreTrasSolicitud, FUENTE_WEB,
@@ -57,19 +58,19 @@ async function claveAcceso() {
   const secreto = Deno.env.get("SESSION_SECRET") ?? "";
   return crypto.subtle.importKey("raw", enc.encode(`inspeccion-publica::${secreto}`), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
 }
-async function firmarAcceso(inspeccionId: string) {
-  const cuerpo = b64(enc.encode(JSON.stringify({ i: inspeccionId, e: Date.now() + VIGENCIA_ACCESO_MS })));
+async function firmarAcceso(inspeccionId: string, fotosDe?: string) {
+  const cuerpo = b64(enc.encode(JSON.stringify({ i: inspeccionId, ...(fotosDe && fotosDe !== inspeccionId ? { f: fotosDe } : {}), e: Date.now() + VIGENCIA_ACCESO_MS })));
   const firma = new Uint8Array(await crypto.subtle.sign("HMAC", await claveAcceso(), enc.encode(cuerpo)));
   return `${cuerpo}.${b64(firma)}`;
 }
-async function leerAcceso(token: unknown): Promise<string | null> {
+async function leerAcceso(token: unknown): Promise<{ id: string; fotosDe: string } | null> {
   if (typeof token !== "string" || !Deno.env.get("SESSION_SECRET")) return null;
   const [cuerpo, firma] = token.split(".");
   if (!cuerpo || !firma) return null;
   try {
     if (!(await crypto.subtle.verify("HMAC", await claveAcceso(), unb64(firma), enc.encode(cuerpo)))) return null;
     const d = JSON.parse(new TextDecoder().decode(unb64(cuerpo)));
-    return typeof d.i === "string" && Number(d.e) > Date.now() ? d.i : null;
+    return typeof d.i === "string" && Number(d.e) > Date.now() ? { id: d.i, fotosDe: typeof d.f === "string" ? d.f : d.i } : null;
   } catch { return null; }
 }
 /** Captcha de Cloudflare Turnstile: se exige solo si el servidor tiene su clave secreta (TURNSTILE_SECRET_KEY). */
@@ -213,27 +214,37 @@ export async function publicOp(ctx: CtxPublico, body: any): Promise<Response> {
     if (q.error) return fallo(q.error);
     const fila = (q.data ?? []).filter((x: any) => x.inspeccion_key).sort((a: any, b: any) => String(b.completada_en).localeCompare(String(a.completada_en)))[0];
     if (!fila) return err("sin_inspeccion", 404);
+    // Si la más reciente no trae fotos, se muestran las de la última inspección de esa patente que sí las tenga (indicando de cuál son).
+    const conFotos = (x: any) => Array.isArray(x.fotos) && x.fotos.length > 0;
+    const deFotos = conFotos(fila) ? fila : (q.data ?? []).filter((x: any) => x.inspeccion_key && conFotos(x)).sort((a: any, b: any) => String(b.completada_en).localeCompare(String(a.completada_en)))[0] ?? null;
     const [g, u] = await Promise.all([
       sb.from("kv_store").select("value").eq("key", fila.inspeccion_key).maybeSingle(),
       fila.inspector_id ? sb.from("usuarios").select("nombre").eq("id", fila.inspector_id).maybeSingle() : Promise.resolve({ data: null }),
     ]);
     let ficha: any = {};
     try { ficha = JSON.parse(g.data ? g.data.value : "{}"); } catch { /* ficha ilegible: se informa el resumen */ }
-    return json({ inspeccion: inspeccionPublica(fila, ficha, u.data ? u.data.nombre : ""), acceso: await firmarAcceso(fila.id) });
+    const publica = inspeccionPublica(fila, ficha, u.data ? u.data.nombre : "");
+    if (deFotos && deFotos.id !== fila.id) {
+      publica.fotos = inspeccionPublica(deFotos, {}, "").fotos;
+      publica.fotosDe = { folio: folioInspeccion(deFotos.numero), fecha: deFotos.completada_en };
+    }
+    return json({ inspeccion: publica, acceso: await firmarAcceso(fila.id, deFotos ? deFotos.id : undefined) });
   }
 
   if (op === "inspeccion.informe" || op === "inspeccion.cav" || op === "inspeccion.foto") {
     if (superaLimite(lecturasPorIp, ctx.ip, LIMITE_LECTURA_IP_HORA)) return err("demasiadas_solicitudes", 429);
-    const id = await leerAcceso(body.acceso);
-    if (!id) return err("acceso_vencido", 403);
-    const q = await sb.from("inspecciones").select("*").eq("id", id).maybeSingle();
+    const acc = await leerAcceso(body.acceso);
+    if (!acc) return err("acceso_vencido", 403);
+    const q = await sb.from("inspecciones").select("*").eq("id", acc.id).maybeSingle();
     if (q.error) return fallo(q.error);
     const fila = q.data;
     if (!fila || fila.estado !== "completada" || !fila.inspeccion_key) return err("sin_inspeccion", 404);
     if (op === "inspeccion.foto") {
+      const origen = acc.fotosDe === acc.id ? fila : (await sb.from("inspecciones").select("*").eq("id", acc.fotosDe).maybeSingle()).data;
+      if (!origen || origen.estado !== "completada" || !origen.inspeccion_key || origen.patente !== fila.patente) return err("no_existe", 404);
       const fotoId = String(body.fotoId ?? "");
-      if (!(fila.fotos ?? []).includes(fotoId)) return err("no_existe", 404);
-      const fichaId = String(fila.inspeccion_key).split("::").pop();
+      if (!(origen.fotos ?? []).includes(fotoId)) return err("no_existe", 404);
+      const fichaId = String(origen.inspeccion_key).split("::").pop();
       const r = await sb.from("kv_store").select("value").eq("key", `ifoto::${fichaId}::${fotoId}`).maybeSingle();
       if (r.error) throw r.error;
       return json({ value: r.data ? r.data.value : null });
