@@ -394,3 +394,74 @@ test("Operación desconocida y datos del sitio en la configuración", async () =
   assert.equal(r.empresa.whatsapp, "56987654321");
   assert.equal(r.empresa.nombre, "Autos del Sur");
 });
+
+test("Consulta pública de inspecciones: por patente, con informe, CAV y fotos; con acceso firmado y captcha si hay clave", async () => {
+  await crear("insp", "Ivo Inspector", "12.000.000-4", ["inspector"], L1);
+  const lead = (await ve(U.e1.token, "leads.create", { cliente: { nombre: "Cliente Insp", telefono: "955500001" }, lead: {} })).lead;
+  const patente = "KLMN34";
+  const veh = { patente, marca: "Toyota", modelo: "Yaris", anio: 2018, km: 78000 };
+  const ped = await ve(U.e1.token, "inspecciones.pedir", { origen: "lead", leadId: lead.id, datos: { vehiculo: veh, direccion: "Av. Vitacura 1234", fechaHora: new Date(Date.now() + 30 * 3_600_000).toISOString() } });
+  assert.equal(ped.status, 200, JSON.stringify(ped));
+
+  // Aún sin realizar: no hay nada que mostrar.
+  assert.equal((await pub("inspeccion.buscar", { patente })).error, "sin_inspeccion");
+  assert.equal((await pub("inspeccion.buscar", { patente: "12" })).error, "patente_invalida");
+
+  assert.equal((await ve(U.insp.token, "inspecciones.tomar", { id: ped.inspeccion.id })).status, 200);
+  const key = `inspeccion::${U.insp.id}::${Date.now()}`;
+  const ficha = { inscripcion: patente, marca: "Toyota", modelo: "Yaris", anio: "2018", fecha: "2026-06-10", inspectorNombre: "Ivo Inspector", propietarioNombre: "Juan Pérez Soto", propietarioRun: "11.222.333-4", cavFileData: "data:application/pdf;base64,AAAA", cavFileName: "cav.pdf", fotosEquipo: ["fotoa1"], checklist: { motor_ruidos: { estado: "Regular", observacion: "Ruido leve" } } };
+  assert.equal((await api({ action: "kv", token: U.insp.token, op: "set", key, value: JSON.stringify(ficha) })).status, 200);
+  assert.equal((await api({ action: "kv", token: U.insp.token, op: "set", key: `ifoto::${key.split("::").pop()}::fotoa1`, value: "data:image/jpeg;base64,BBBB" })).status, 200);
+  const reg = await ve(U.insp.token, "inspecciones.registrar", { key, vehiculo: veh, solicitudId: ped.inspeccion.id, fecha: "2026-06-10", fotos: ["fotoa1"], resumen: { buenos: 40, regulares: 1, malos: 0, noAplica: 5, sinRevisar: 0, destacados: [], observaciones: "Buen estado" } });
+  assert.equal(reg.status, 200, JSON.stringify(reg));
+
+  const b = await pub("inspeccion.buscar", { patente: "klmn-34" });
+  assert.equal(b.status, 200, JSON.stringify(b));
+  assert.equal(b.inspeccion.vehiculo.marca, "Toyota");
+  assert.equal(b.inspeccion.resultado.veredicto, "con_observaciones");
+  assert.deepEqual(b.inspeccion.fotos, ["fotoa1"]);
+  assert.equal(b.inspeccion.tieneCav, true);
+  assert.ok(!/lead|cliente|solicitante|Cliente Insp|Eva/.test(JSON.stringify(b)), "nada del lead ni de quien la pidió");
+
+  const inf = await pub("inspeccion.informe", { acceso: b.acceso });
+  assert.equal(inf.status, 200);
+  assert.equal(inf.ficha.checklist.motor_ruidos.estado, "Regular");
+  assert.equal(inf.ficha.propietarioNombre, "Juan Pérez Soto", "el informe público lleva al propietario (decisión del negocio)");
+  assert.ok(!JSON.stringify(inf).includes("base64"), "el CAV se pide aparte");
+  assert.equal((await pub("inspeccion.cav", { acceso: b.acceso })).value, "data:application/pdf;base64,AAAA");
+  assert.equal((await pub("inspeccion.foto", { acceso: b.acceso, fotoId: "fotoa1" })).value, "data:image/jpeg;base64,BBBB");
+  assert.equal((await pub("inspeccion.foto", { acceso: b.acceso, fotoId: "otra" })).status, 404, "solo las fotos de esa inspección");
+
+  // Sin acceso, con un acceso alterado o vencido: nada.
+  assert.equal((await pub("inspeccion.informe", {})).error, "acceso_vencido");
+  assert.equal((await pub("inspeccion.informe", { acceso: b.acceso.slice(0, -3) + "abc" })).error, "acceso_vencido");
+  const vencido = b.acceso.split(".");
+  const cuerpo = JSON.parse(Buffer.from(vencido[0].replace(/-/g, "+").replace(/_/g, "/"), "base64").toString());
+  cuerpo.e = Date.now() - 1000;
+  const alterado = `${Buffer.from(JSON.stringify(cuerpo)).toString("base64url")}.${vencido[1]}`;
+  assert.equal((await pub("inspeccion.informe", { acceso: alterado })).error, "acceso_vencido");
+
+  // Una inspección más reciente de la misma patente reemplaza a la anterior.
+  db.tablas.inspecciones.find((x) => x.id === ped.inspeccion.id).completada_en = new Date(Date.now() - 86_400_000).toISOString();
+  db.tablas.inspecciones.push({ ...db.tablas.inspecciones.find((x) => x.id === ped.inspeccion.id), id: randomUUID(), numero: 9999, completada_en: new Date().toISOString(), inspeccion_key: key });
+  assert.equal((await pub("inspeccion.buscar", { patente })).inspeccion.folio, "INS-009999");
+});
+
+test("Consulta pública de inspecciones: con clave de Turnstile se exige el captcha, y la búsqueda tiene límite por IP", async () => {
+  const { entorno } = await import("./helpers/api-env.mjs");
+  const e = entorno;
+  e.TURNSTILE_SECRET_KEY = "secreto_prueba"; e.TURNSTILE_SITE_KEY = "clave_sitio";
+  const fetchOriginal = globalThis.fetch;
+  globalThis.fetch = async (url, init) => (String(url).includes("turnstile") ? { json: async () => ({ success: String(init.body).includes("response=bueno1234567") }) } : fetchOriginal(url, init));
+  try {
+    assert.equal((await pub("inspeccion.config")).captcha, "clave_sitio");
+    assert.equal((await pub("inspeccion.buscar", { patente: "KLMN34" })).error, "captcha_invalido");
+    assert.equal((await pub("inspeccion.buscar", { patente: "KLMN34", captcha: "malo123456789" })).error, "captcha_invalido");
+    assert.equal((await pub("inspeccion.buscar", { patente: "KLMN34", captcha: "bueno1234567" })).status, 200);
+  } finally { globalThis.fetch = fetchOriginal; delete e.TURNSTILE_SECRET_KEY; delete e.TURNSTILE_SITE_KEY; }
+  assert.equal((await pub("inspeccion.config")).captcha, null, "sin clave secreta no se pide captcha");
+  nuevaIp();
+  let ultimo = 0;
+  for (let i = 0; i < 25; i++) { ultimo = (await pub("inspeccion.buscar", { patente: "ZZZZ99" })).status; if (ultimo === 429) break; }
+  assert.equal(ultimo, 429, "pasado el límite por hora, se frena");
+});

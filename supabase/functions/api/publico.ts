@@ -10,7 +10,8 @@ import { validarVehiculoTasacion, folioTasacion as folioTas } from "./tasaciones
 import { sugerirAviso } from "./anuncios-core.js";
 import { enviarAviso, enSegundoPlano, correoActivo } from "./correo.ts";
 import { consultarPatente } from "./patentes.ts";
-import { LIMITE_WEB_IP_HORA } from "./patentes-core.js";
+import { LIMITE_WEB_IP_HORA, normalizarPatente, patenteValida } from "./patentes-core.js";
+import { inspeccionPublica, fichaParaInforme, PUBLICO_CON_PROPIETARIO, LIMITE_BUSQUEDA_IP_HORA, LIMITE_LECTURA_IP_HORA, VIGENCIA_ACCESO_MS } from "./inspeccion-publica-core.js";
 import {
   visibleEnCatalogo, vehiculoPublico, validarSolicitudWeb, cuotaReferencial, tipoLeadDe, resumenSolicitud, nombreTrasSolicitud, FUENTE_WEB,
   LIMITE_IP_HORA, LIMITE_TELEFONO_HORA, LIMITE_LOCAL_HORA, ESTADOS_VISIBLES,
@@ -36,6 +37,52 @@ function superaLimiteIp(ip: string) {
 }
 
 const UNA_HORA = 3_600_000;
+
+// Consulta pública de inspecciones: búsquedas y lecturas por IP y hora (por instancia de la función: es un freno, no una garantía).
+const busquedasPorIp = new Map<string, { n: number; reset: number }>();
+const lecturasPorIp = new Map<string, { n: number; reset: number }>();
+function superaLimite(mapa: Map<string, { n: number; reset: number }>, ip: string, max: number) {
+  const ahora = Date.now();
+  const a = mapa.get(ip);
+  if (!a || a.reset < ahora) { mapa.set(ip, { n: 1, reset: ahora + UNA_HORA }); return false; }
+  a.n++;
+  return a.n > max;
+}
+
+/* Acceso a una inspección encontrada: un código firmado y de corta vida (así el captcha se pide una sola vez por búsqueda). */
+const enc = new TextEncoder();
+const b64 = (u: Uint8Array) => btoa(String.fromCharCode(...u)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const unb64 = (s: string) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+async function claveAcceso() {
+  const secreto = Deno.env.get("SESSION_SECRET") ?? "";
+  return crypto.subtle.importKey("raw", enc.encode(`inspeccion-publica::${secreto}`), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
+}
+async function firmarAcceso(inspeccionId: string) {
+  const cuerpo = b64(enc.encode(JSON.stringify({ i: inspeccionId, e: Date.now() + VIGENCIA_ACCESO_MS })));
+  const firma = new Uint8Array(await crypto.subtle.sign("HMAC", await claveAcceso(), enc.encode(cuerpo)));
+  return `${cuerpo}.${b64(firma)}`;
+}
+async function leerAcceso(token: unknown): Promise<string | null> {
+  if (typeof token !== "string" || !Deno.env.get("SESSION_SECRET")) return null;
+  const [cuerpo, firma] = token.split(".");
+  if (!cuerpo || !firma) return null;
+  try {
+    if (!(await crypto.subtle.verify("HMAC", await claveAcceso(), unb64(firma), enc.encode(cuerpo)))) return null;
+    const d = JSON.parse(new TextDecoder().decode(unb64(cuerpo)));
+    return typeof d.i === "string" && Number(d.e) > Date.now() ? d.i : null;
+  } catch { return null; }
+}
+/** Captcha de Cloudflare Turnstile: se exige solo si el servidor tiene su clave secreta (TURNSTILE_SECRET_KEY). */
+async function captchaValido(token: unknown, ip: string) {
+  const secreto = Deno.env.get("TURNSTILE_SECRET_KEY");
+  if (!secreto) return true;
+  if (typeof token !== "string" || token.length < 10 || token.length > 4096) return false;
+  try {
+    const r = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ secret: secreto, response: token, remoteip: ip }) });
+    const d = await r.json();
+    return !!d && d.success === true;
+  } catch { return false; }
+}
 
 // Consultas de patente por dirección IP y hora (por instancia de la función: es un freno, no una garantía).
 const patentesPorIp = new Map<string, { n: number; reset: number }>();
@@ -152,6 +199,55 @@ export async function publicOp(ctx: CtxPublico, body: any): Promise<Response> {
     if (!r.ok) return err(r.error, r.status);
     const v: any = r.vehiculo;
     return json({ vehiculo: { patente: v.patente, marca: v.marca, modeloCompleto: v.modeloCompleto, anio: v.anio ?? null } });
+  }
+
+  /* ---------- consulta pública de inspecciones por patente ---------- */
+  if (op === "inspeccion.config") return json({ captcha: Deno.env.get("TURNSTILE_SECRET_KEY") ? (Deno.env.get("TURNSTILE_SITE_KEY") ?? null) : null });
+
+  if (op === "inspeccion.buscar") {
+    if (superaLimite(busquedasPorIp, ctx.ip, LIMITE_BUSQUEDA_IP_HORA)) return err("demasiadas_solicitudes", 429);
+    const patente = normalizarPatente(body.patente);
+    if (!patenteValida(patente)) return err("patente_invalida");
+    if (!(await captchaValido(body.captcha, ctx.ip))) return err("captcha_invalido", 403);
+    const q = await sb.from("inspecciones").select("*").eq("patente", patente).eq("estado", "completada");
+    if (q.error) return fallo(q.error);
+    const fila = (q.data ?? []).filter((x: any) => x.inspeccion_key).sort((a: any, b: any) => String(b.completada_en).localeCompare(String(a.completada_en)))[0];
+    if (!fila) return err("sin_inspeccion", 404);
+    const [g, u] = await Promise.all([
+      sb.from("kv_store").select("value").eq("key", fila.inspeccion_key).maybeSingle(),
+      fila.inspector_id ? sb.from("usuarios").select("nombre").eq("id", fila.inspector_id).maybeSingle() : Promise.resolve({ data: null }),
+    ]);
+    let ficha: any = {};
+    try { ficha = JSON.parse(g.data ? g.data.value : "{}"); } catch { /* ficha ilegible: se informa el resumen */ }
+    return json({ inspeccion: inspeccionPublica(fila, ficha, u.data ? u.data.nombre : ""), acceso: await firmarAcceso(fila.id) });
+  }
+
+  if (op === "inspeccion.informe" || op === "inspeccion.cav" || op === "inspeccion.foto") {
+    if (superaLimite(lecturasPorIp, ctx.ip, LIMITE_LECTURA_IP_HORA)) return err("demasiadas_solicitudes", 429);
+    const id = await leerAcceso(body.acceso);
+    if (!id) return err("acceso_vencido", 403);
+    const q = await sb.from("inspecciones").select("*").eq("id", id).maybeSingle();
+    if (q.error) return fallo(q.error);
+    const fila = q.data;
+    if (!fila || fila.estado !== "completada" || !fila.inspeccion_key) return err("sin_inspeccion", 404);
+    if (op === "inspeccion.foto") {
+      const fotoId = String(body.fotoId ?? "");
+      if (!(fila.fotos ?? []).includes(fotoId)) return err("no_existe", 404);
+      const fichaId = String(fila.inspeccion_key).split("::").pop();
+      const r = await sb.from("kv_store").select("value").eq("key", `ifoto::${fichaId}::${fotoId}`).maybeSingle();
+      if (r.error) throw r.error;
+      return json({ value: r.data ? r.data.value : null });
+    }
+    const g = await sb.from("kv_store").select("value").eq("key", fila.inspeccion_key).maybeSingle();
+    if (g.error) throw g.error;
+    let ficha: any = null;
+    try { ficha = g.data ? JSON.parse(g.data.value) : null; } catch { ficha = null; }
+    if (!ficha) return err("sin_inspeccion", 404);
+    if (op === "inspeccion.cav") {
+      if (!PUBLICO_CON_PROPIETARIO || !ficha.cavFileData) return err("no_existe", 404);
+      return json({ value: ficha.cavFileData, nombre: ficha.cavFileName || "cav.pdf" });
+    }
+    return json({ ficha: fichaParaInforme(ficha) });
   }
 
   /* ---------- una foto (solo de un vehículo visible) ---------- */
