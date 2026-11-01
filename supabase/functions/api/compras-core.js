@@ -149,7 +149,7 @@ export function vehiculoDeCompra(compra, tasacion) {
   const v = (tasacion && tasacion.vehiculo) || compra.vehiculo || {};
   return {
     patente: normalizarPatente(v.patente || compra.patente), marca: v.marca, modelo: v.modelo, version: v.version || null, anio: v.anio, km: Number(v.km) || 0,
-    color: v.color || null, transmision: v.transmision || null, combustible: v.combustible || null,
+    color: v.color || null, numero_motor: v.numeroMotor || null, transmision: v.transmision || null, combustible: v.combustible || null,
     precio_lista: tasacion && Number(tasacion.valor_venta) > 0 ? Number(tasacion.valor_venta) : null,
     costo: Number(compra.monto_final), estado: "preparacion", origen: "compra",
   };
@@ -205,7 +205,7 @@ export function vehiculoDeConsignacion(c) {
   const v = c.vehiculo || {};
   return {
     patente: normalizarPatente(v.patente || c.patente), marca: v.marca, modelo: v.modelo, version: v.version || null, anio: v.anio, km: Number(v.km) || 0,
-    color: v.color || null, transmision: v.transmision || null, combustible: v.combustible || null,
+    color: v.color || null, numero_motor: v.numeroMotor || null, transmision: v.transmision || null, combustible: v.combustible || null,
     precio_lista: Number(c.precio_publicacion), costo: Number(c.precio_piso), precio_piso: Number(c.precio_piso), estado: "disponible", origen: "consignacion",
   };
 }

@@ -43,7 +43,7 @@ test("Consulta por patente: devuelve marca, modelo, año y tipo; la clave sale s
   boostr.respuestas.GPDD74 = OK("GPDD74", { owner: { fullname: "JUAN PEREZ", documentNumber: "12.345.678-5" } });
   const r = await ve(U.t1.token, "vehiculos.patente", { patente: "gp-dd74" });
   assert.equal(r.status, 200, JSON.stringify(r));
-  assert.deepEqual(r.vehiculo, { patente: "GPDD74", marca: "Subaru", modeloCompleto: "NEW WRX S AWD CVT 2.0T", anio: 2014, tipo: "AUTOMOVIL" });
+  assert.deepEqual(r.vehiculo, { patente: "GPDD74", marca: "Subaru", modeloCompleto: "NEW WRX S AWD CVT 2.0T", anio: 2014, tipo: "AUTOMOVIL", numeroMotor: "H983322" });
   assert.equal(r.origen, "boostr");
   assert.equal(boostr.llamadas.length, 1);
   assert.equal(boostr.llamadas[0].clave, "clave_prueba");

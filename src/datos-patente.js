@@ -20,8 +20,12 @@ export function camposDesdePatente(v) {
   if (v.color) out.color = titulo(v.color);
   if (v.transmision) out.transmision = v.transmision;
   if (v.combustible) out.combustible = v.combustible;
+  if (v.numeroMotor) out.numeroMotor = v.numeroMotor;
   return out;
 }
+
+/** Kilómetros que Boostr conoce del vehículo (los de su última revisión técnica): solo sirven de referencia, no se escriben en el formulario. */
+export const kmDeReferencia = (v) => (v && Number(v.kmRevisionTecnica) > 0 ? Number(v.kmRevisionTecnica) : null);
 
 /** Aplica los datos al formulario: con `pisar` reemplaza lo que ya había (la persona pidió buscar); si no, solo completa los campos vacíos. */
 export function aplicarCampos(actual, campos, { pisar = false } = {}) {
@@ -35,4 +39,4 @@ export function aplicarCampos(actual, campos, { pisar = false } = {}) {
   return { valores: sig, llenados };
 }
 
-export const NOMBRE_CAMPO = { marca: "marca", modelo: "modelo", version: "versión", anio: "año", color: "color", transmision: "transmisión", combustible: "combustible" };
+export const NOMBRE_CAMPO = { marca: "marca", modelo: "modelo", version: "versión", anio: "año", color: "color", transmision: "transmisión", combustible: "combustible", numeroMotor: "número de motor" };

@@ -33,7 +33,13 @@ test("Combustible y transmisión: se llevan a las opciones del CRM", () => {
 test("Respuesta de Boostr (plan gratuito): marca, modelo, año y tipo", () => {
   const r = normalizarRespuestaBoostr({ status: "success", data: { plate: "GPDD74", dv: "8", make: "SUBARU", model: "NEW WRX S AWD CVT 2.0T", year: 2014, type: "AUTOMOVIL", engine: "H983322" } }, "GPDD74");
   assert.equal(r.ok, true);
-  assert.deepEqual(r.vehiculo, { patente: "GPDD74", marca: "Subaru", modeloCompleto: "NEW WRX S AWD CVT 2.0T", anio: 2014, tipo: "AUTOMOVIL" });
+  assert.deepEqual(r.vehiculo, { patente: "GPDD74", marca: "Subaru", modeloCompleto: "NEW WRX S AWD CVT 2.0T", anio: 2014, tipo: "AUTOMOVIL", numeroMotor: "H983322" });
+});
+
+test("Respuesta de Boostr: el número de motor se guarda sin espacios y en mayúsculas", () => {
+  const r = normalizarRespuestaBoostr({ status: "success", data: { make: "SUZUKI", model: "BALENO", year: 2023, engine: " k15bn 1359521 ", kilometers: 22031 } }, "SWHR85");
+  assert.equal(r.vehiculo.numeroMotor, "K15BN1359521");
+  assert.equal(r.vehiculo.kmRevisionTecnica, 22031);
 });
 
 test("Respuesta de Boostr: nunca pasan los datos del dueño ni el chasis", () => {

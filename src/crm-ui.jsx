@@ -5,7 +5,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { TRANSMISIONES, COMBUSTIBLES } from "../supabase/functions/api/ventas-core.js";
 import { InputDinero } from "./campo-dinero.jsx";
 import { BANCOS_CHILE, TIPOS_CUENTA } from "../supabase/functions/api/validaciones-core.js";
-import { camposDesdePatente, aplicarCampos, NOMBRE_CAMPO } from "./datos-patente.js";
+import { camposDesdePatente, aplicarCampos, kmDeReferencia, NOMBRE_CAMPO } from "./datos-patente.js";
 
 export const INPUT = "border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-amber-500 w-full";
 export const BTN = "px-3 py-1.5 text-sm font-medium border border-stone-300 bg-white text-stone-700 hover:bg-stone-50 disabled:opacity-50";
@@ -349,7 +349,9 @@ export function BuscarPatente({ patente, onDatos, api = apiPorDefecto, className
     try {
       const r = await api("vehiculos.patente", { patente: String(patente).toUpperCase().replace(/[^A-Z0-9]/g, "") });
       const llenados = onDatos(camposDesdePatente(r.vehiculo)) || [];
-      setEstado({ buscando: false, msg: { ok: true, texto: llenados.length ? `Se completaron: ${llenados.map((k) => NOMBRE_CAMPO[k] || k).join(", ")}. Revísalos antes de seguir.` : "Los datos de la patente coinciden con lo que ya escribiste." } });
+      const km = kmDeReferencia(r.vehiculo);
+      const aviso = km ? ` Referencia: la última revisión técnica registró ${km.toLocaleString("es-CL")} km (revisa el kilometraje real).` : "";
+      setEstado({ buscando: false, msg: { ok: true, texto: (llenados.length ? `Se completaron: ${llenados.map((k) => NOMBRE_CAMPO[k] || k).join(", ")}. Revísalos antes de seguir.` : "Los datos de la patente coinciden con lo que ya escribiste.") + aviso } });
     } catch (e) { setEstado({ buscando: false, msg: { ok: false, texto: mensajeError(e) } }); }
   };
   return (
@@ -360,7 +362,7 @@ export function BuscarPatente({ patente, onDatos, api = apiPorDefecto, className
   );
 }
 
-export const VEH_VACIO = { patente: "", marca: "", modelo: "", version: "", anio: "", km: "", color: "", transmision: "", combustible: "" };
+export const VEH_VACIO = { patente: "", marca: "", modelo: "", version: "", anio: "", km: "", color: "", numeroMotor: "", transmision: "", combustible: "" };
 
 export function CamposVehiculo({ v, set, bloqueado = false }) {
   return (
@@ -375,6 +377,7 @@ export function CamposVehiculo({ v, set, bloqueado = false }) {
       <Campo etiqueta="Año"><input type="number" value={v.anio} disabled={bloqueado} onChange={(e) => set({ ...v, anio: e.target.value })} className={INPUT} /></Campo>
       <Campo etiqueta="Kilometraje"><input type="number" min="0" value={v.km} disabled={bloqueado} onChange={(e) => set({ ...v, km: e.target.value })} className={INPUT} /></Campo>
       <Campo etiqueta="Color (opcional)"><input value={v.color || ""} disabled={bloqueado} onChange={(e) => set({ ...v, color: e.target.value })} className={INPUT} /></Campo>
+      <Campo etiqueta="Número de motor (opcional)"><input value={v.numeroMotor || ""} disabled={bloqueado} onChange={(e) => set({ ...v, numeroMotor: e.target.value.toUpperCase() })} className={`${INPUT} font-mono`} /></Campo>
       <Campo etiqueta="Transmisión">
         <select value={v.transmision || ""} disabled={bloqueado} onChange={(e) => set({ ...v, transmision: e.target.value })} className={INPUT}><option value="">—</option>{TRANSMISIONES.map((t) => <option key={t}>{t}</option>)}</select>
       </Campo>

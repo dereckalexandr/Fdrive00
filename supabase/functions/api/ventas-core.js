@@ -108,6 +108,7 @@ export function validarVehiculo(input) {
     ok: true,
     value: {
       patente, marca, modelo, version: texto(i.version, 60) || null, anio, km, color: texto(i.color, 30) || null,
+      numero_motor: texto(i.numeroMotor, 30).toUpperCase().replace(/\s+/g, "") || null,
       transmision: transmision || null, combustible: combustible || null, precio_lista: precio, precio_financiamiento: financiamiento || null, costo, estado,
       notas: texto(i.notas, 500) || null, fotos,
     },

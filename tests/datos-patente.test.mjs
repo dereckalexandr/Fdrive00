@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { camposDesdePatente, aplicarCampos } from "../src/datos-patente.js";
+import { camposDesdePatente, aplicarCampos, kmDeReferencia } from "../src/datos-patente.js";
 
 test("Del modelo con versión pegada al modelo comercial y su versión", () => {
   const a = camposDesdePatente({ marca: "Subaru", modeloCompleto: "NEW WRX S AWD CVT 2.0T", anio: 2014 });
@@ -48,4 +48,13 @@ test("Aplicar datos: informa qué campos cambiaron; sin «pisar» respeta lo ya 
   assert.deepEqual(b.llenados.sort(), ["anio", "marca", "modelo", "version"]);
   const c = aplicarCampos(b.valores, campos, { pisar: true });
   assert.deepEqual(c.llenados, [], "si ya coincide, no se informa nada");
+});
+
+test("Número de motor: llega a los campos; los kilómetros solo como referencia, nunca como campo", () => {
+  const v = { marca: "Suzuki", modeloCompleto: "BALENO", anio: 2023, numeroMotor: "K15BN1359521", kmRevisionTecnica: 22031 };
+  const c = camposDesdePatente(v);
+  assert.equal(c.numeroMotor, "K15BN1359521");
+  assert.ok(!("km" in c) && !("kmRevisionTecnica" in c));
+  assert.equal(kmDeReferencia(v), 22031);
+  assert.equal(kmDeReferencia({ marca: "Kia" }), null);
 });

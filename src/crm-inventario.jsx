@@ -41,12 +41,12 @@ export function Miniatura({ vehiculoId, fotoId, grande = false, onQuitar, tam: t
   );
 }
 
-const VACIO = { id: null, patente: "", marca: "", modelo: "", version: "", anio: "", km: "", color: "", transmision: "", combustible: "", precioLista: "", precioFinanciamiento: "", costo: "", estado: "disponible", notas: "" };
+const VACIO = { id: null, patente: "", marca: "", modelo: "", version: "", anio: "", km: "", color: "", numeroMotor: "", transmision: "", combustible: "", precioLista: "", precioFinanciamiento: "", costo: "", estado: "disponible", notas: "" };
 
 function FormVehiculo({ api, vehiculo, puedeCosto, onCerrar, onGuardado }) {
   const [f, setF] = useState(() => (vehiculo ? {
     id: vehiculo.id, patente: vehiculo.patente, marca: vehiculo.marca, modelo: vehiculo.modelo, version: vehiculo.version || "", anio: vehiculo.anio, km: vehiculo.km,
-    color: vehiculo.color || "", transmision: vehiculo.transmision || "", combustible: vehiculo.combustible || "", precioLista: vehiculo.precio_lista ?? "", precioFinanciamiento: vehiculo.precio_financiamiento ?? "",
+    color: vehiculo.color || "", numeroMotor: vehiculo.numero_motor || "", transmision: vehiculo.transmision || "", combustible: vehiculo.combustible || "", precioLista: vehiculo.precio_lista ?? "", precioFinanciamiento: vehiculo.precio_financiamiento ?? "",
     costo: vehiculo.costo ?? "", estado: vehiculo.estado, notas: vehiculo.notas || "",
   } : VACIO));
   const [fotos, setFotos] = useState(vehiculo ? [...(vehiculo.fotos || [])] : []); // ids ya guardados
@@ -108,6 +108,7 @@ function FormVehiculo({ api, vehiculo, puedeCosto, onCerrar, onGuardado }) {
         <Campo etiqueta="Año"><input type="number" value={f.anio} onChange={(e) => set("anio", e.target.value)} className={INPUT} /></Campo>
         <Campo etiqueta="Kilometraje"><input type="number" min="0" value={f.km} onChange={(e) => set("km", e.target.value)} className={INPUT} /></Campo>
         <Campo etiqueta="Color"><input value={f.color} onChange={(e) => set("color", e.target.value)} className={INPUT} /></Campo>
+        <Campo etiqueta="Número de motor"><input value={f.numeroMotor} onChange={(e) => set("numeroMotor", e.target.value.toUpperCase())} className={`${INPUT} font-mono`} /></Campo>
         <Campo etiqueta="Estado">
           <select value={f.estado} disabled={f.estado === "reservado"} onChange={(e) => set("estado", e.target.value)} className={INPUT}>{ESTADOS_VEHICULO.filter((e) => e.id !== "reservado" || f.estado === "reservado").map((e) => <option key={e.id} value={e.id}>{e.nombre}</option>)}</select>
         </Campo>

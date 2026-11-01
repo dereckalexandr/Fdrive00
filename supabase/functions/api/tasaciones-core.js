@@ -46,7 +46,7 @@ export function validarVehiculoTasacion(input) {
   if (i.prenda !== undefined && i.prenda !== null && i.prenda !== "") { if (!["si", "no"].includes(i.prenda)) return { ok: false, error: "prenda_invalida" }; extra.prenda = i.prenda; }
   if (i.mantenciones !== undefined && i.mantenciones !== null && i.mantenciones !== "") { if (!["si", "no"].includes(i.mantenciones)) return { ok: false, error: "mantenciones_invalidas" }; extra.mantenciones = i.mantenciones; }
   if (i.precioEsperado !== undefined && i.precioEsperado !== null && i.precioEsperado !== "") { const pe = entero(i.precioEsperado, 1, 2_000_000_000); if (pe === null || Number.isNaN(pe)) return { ok: false, error: "precio_esperado_invalido" }; extra.precioEsperado = pe; }
-  return { ok: true, value: { patente, marca, modelo, version: texto(i.version, 60) || null, anio, km, color: texto(i.color, 30) || null, transmision: transmision || null, combustible: combustible || null, ...extra } };
+  return { ok: true, value: { patente, marca, modelo, version: texto(i.version, 60) || null, anio, km, color: texto(i.color, 30) || null, numeroMotor: texto(i.numeroMotor, 30).toUpperCase().replace(/\s+/g, "") || null, transmision: transmision || null, combustible: combustible || null, ...extra } };
 }
 
 /** Solicitud de un ejecutivo: el vehículo y una nota para el Tasador. */

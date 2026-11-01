@@ -67,11 +67,13 @@ export function normalizarRespuestaBoostr(json, patente) {
   const color = texto(d.color, 30);
   const version = texto(d.version, 80);
   const km = Number.parseInt(d.kilometers, 10);
+  const motor = texto(d.engine, 30).toUpperCase().replace(/\s+/g, "");
   if (combustible) v.combustible = combustible;
   if (transmision) v.transmision = transmision;
   if (color) v.color = color;
   if (version) v.version = version;
   if (Number.isFinite(km) && km > 0) v.kmRevisionTecnica = km;
+  if (motor) v.numeroMotor = motor;
   return { ok: true, vehiculo: v };
 }
 
