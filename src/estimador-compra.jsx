@@ -63,14 +63,15 @@ export default function TasacionCompra({ inicial, onResultado, apiPatente } = {}
   const kmNum = parseKm(km);
   const patenteOk = isPatenteValida(patente);
   const filtros = calcularFiltros({ anio, km: kmNum, margenAnio });
-  const urlBusqueda = patenteOk ? buildChileautosUrl({ marca, modelo, anio, km: kmNum, margenAnio, transmision, combustible }) : null;
+  const datosOk = !!(marca.trim() && modelo.trim() && parseKm(anio));
+  const urlBusqueda = datosOk ? buildChileautosUrl({ marca, modelo, anio, km: kmNum, margenAnio, transmision, combustible }) : null;
   const { busqueda: modeloBusqueda, omitido: modeloOmitido } = detalleModeloChileautos(modelo);
   const { busqueda: marcaBusqueda, omitido: marcaOmitida } = detalleMarcaChileautos(marca);
   const transLabel = (TRANSMISIONES.find((t) => t.value === transmision) || {}).label;
   const combLabel = (COMBUSTIBLES.find((c) => c.value === combustible) || {}).label;
 
   const faltantes = [];
-  if (!patenteOk) faltantes.push(patente ? "patente válida (ej. TTHY51)" : "patente");
+  if (patente && !patenteOk) faltantes.push("patente válida (ej. TTHY51)");
   if (!kmNum) faltantes.push("kilometraje");
   if (!marca.trim()) faltantes.push("marca");
   if (!modelo.trim()) faltantes.push("modelo");
@@ -120,10 +121,9 @@ export default function TasacionCompra({ inicial, onResultado, apiPatente } = {}
     setPegadoPatente("");
     setMarca(titleCase(d.marca)); setModelo(titleCase(d.modelo)); setAnio(String(d.anio));
     const avisos = [];
-    if (d.patente && d.patente !== patente) avisos.push(patente
-      ? `La patente de la ficha (${d.patente}) no coincide con la que ingresaste (${patente}). Revisa que sea el vehículo correcto.`
-      : `La ficha trae la patente ${d.patente}, pero no se completó sola: escríbela tú en el campo Patente.`);
-    setMsgPatente({ mal: false, texto: "Se completaron marca, modelo y año.", avisos });
+    if (d.patente && !patente) setPatente(d.patente);
+    else if (d.patente && d.patente !== patente) avisos.push(`La patente de la ficha (${d.patente}) no coincide con la que ingresaste (${patente}). Revisa que sea el vehículo correcto.`);
+    setMsgPatente({ mal: false, texto: `Se completaron marca, modelo y año${d.patente && !patente ? " y la patente" : ""}.`, avisos });
   };
   const limpiar = () => { setPegadoPatente(""); setMsgPatente(null); setPatente(""); setKm(""); setMarca(""); setModelo(""); setAnio(""); setVersion(""); setTransmision(""); setCombustible(""); setMargenBruto(MARGEN_BRUTO_DEFECTO); setPegado(""); };
 
