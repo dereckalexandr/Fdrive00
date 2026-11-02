@@ -10,6 +10,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { VEREDICTOS } from "../supabase/functions/api/inspecciones-core.js";
 import { llamar, textoError } from "./publico-api.js";
+import Calculadora from "./calculadora-sueldo-ui.jsx";
 
 const BTN = "px-5 py-3 text-sm bg-amber-500 text-stone-900 font-semibold rounded-lg shadow-suave hover:bg-amber-400 disabled:opacity-50 transition-colors";
 const BTN_2 = "px-5 py-3 text-sm border border-stone-300 bg-white text-stone-800 font-medium rounded-lg hover:bg-stone-50 transition-colors";
@@ -162,18 +163,35 @@ function Consulta() {
 }
 
 
+/** Secciones del sitio. Se eligen con la parte «#» de la dirección (por ejemplo «#calculadora»), así sirve en cualquier dominio. */
+const SECCIONES = [["inspecciones", "Inspecciones"], ["calculadora", "Calculadora"]];
+const seccionActual = () => (window.location.hash.replace("#", "").toLowerCase() === "calculadora" ? "calculadora" : "inspecciones");
+
 export default function SitioInspecciones() {
+  const [seccion, setSeccion] = useState(seccionActual);
+  useEffect(() => {
+    const cambio = () => setSeccion(seccionActual());
+    window.addEventListener("hashchange", cambio);
+    return () => window.removeEventListener("hashchange", cambio);
+  }, []);
   return (
     <div className="min-h-screen bg-stone-50 text-stone-900 flex flex-col">
       <header className="bg-stone-900 text-stone-100">
-        <div className="max-w-3xl mx-auto px-4 md:px-6 py-4 flex items-center gap-2.5 font-serif text-xl md:text-2xl">
-          <span className="w-9 h-9 rounded-xl bg-amber-500 text-stone-900 text-sm font-bold flex items-center justify-center">DF</span>
-          Drive Futuro · Inspecciones
+        <div className="max-w-5xl mx-auto px-4 md:px-6 py-4 flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
+          <div className="flex items-center gap-2.5 font-serif text-xl md:text-2xl">
+            <span className="w-9 h-9 rounded-xl bg-amber-500 text-stone-900 text-sm font-bold flex items-center justify-center">DF</span>
+            Drive Futuro
+          </div>
+          <nav className="flex gap-1 text-sm" aria-label="Secciones">
+            {SECCIONES.map(([id, nombre]) => (
+              <a key={id} href={id === "inspecciones" ? "#" : `#${id}`} aria-current={seccion === id ? "page" : undefined} className={`px-3 py-1.5 rounded-lg transition-colors ${seccion === id ? "bg-stone-700 text-white" : "text-stone-300 hover:text-white"}`}>{nombre}</a>
+            ))}
+          </nav>
         </div>
       </header>
-      <main className="flex-1"><Consulta /></main>
+      <main className="flex-1">{seccion === "calculadora" ? <Calculadora /> : <Consulta />}</main>
       <footer className="bg-stone-900 text-stone-400 text-xs">
-        <div className="max-w-3xl mx-auto px-4 md:px-6 py-6">Consulta de inspecciones de vehículos por patente.</div>
+        <div className="max-w-5xl mx-auto px-4 md:px-6 py-6">{seccion === "calculadora" ? "Calculadora de sueldo líquido e imponible: simulación referencial, no reemplaza la liquidación del empleador." : "Consulta de inspecciones de vehículos por patente."}</div>
       </footer>
     </div>
   );
