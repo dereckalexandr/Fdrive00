@@ -125,7 +125,41 @@ export default function TasacionCompra({ inicial, onResultado, apiPatente } = {}
     else if (d.patente && d.patente !== patente) avisos.push(`La patente de la ficha (${d.patente}) no coincide con la que ingresaste (${patente}). Revisa que sea el vehículo correcto.`);
     setMsgPatente({ mal: false, texto: `Se completaron marca, modelo y año${d.patente && !patente ? " y la patente" : ""}.`, avisos });
   };
-  const limpiar = () => { setPegadoPatente(""); setMsgPatente(null); setPatente(""); setKm(""); setMarca(""); setModelo(""); setAnio(""); setVersion(""); setTransmision(""); setCombustible(""); setMargenBruto(MARGEN_BRUTO_DEFECTO); setPegado(""); };
+  const [msgAvisos, setMsgAvisos] = useState(null);
+  const leerPortapapeles = async () => {
+    try { return await navigator.clipboard.readText(); } catch (e) { return null; }
+  };
+  const pegarPatente = async () => {
+    const t = await leerPortapapeles();
+    if (t === null) { setMsgPatente({ mal: true, texto: "El navegador no dejó leer el portapapeles. Pega con Ctrl+V en el cuadro de abajo.", avisos: [] }); return; }
+    if (!t.trim()) { setMsgPatente({ mal: true, texto: "El portapapeles está vacío. Pulsa primero el favorito en patentechile.com (o copia el texto de la ficha).", avisos: [] }); return; }
+    aplicarDatosPatente(t);
+  };
+  const aplicarAvisos = (t) => {
+    setPegado(t);
+    setMsgAvisos(null);
+  };
+  const pegarAvisos = async () => {
+    const t = await leerPortapapeles();
+    if (t === null) { setMsgAvisos({ mal: true, texto: "El navegador no dejó leer el portapapeles. Pega con Ctrl+V en el cuadro de abajo." }); return; }
+    if (!t.trim()) { setMsgAvisos({ mal: true, texto: "El portapapeles está vacío. Pulsa primero el favorito en la página de Chileautos." }); return; }
+    aplicarAvisos(t);
+  };
+  // Al volver a esta pestaña desde patentechile.com o Chileautos, si el portapapeles trae lo que copia el favorito, se pega solo.
+  const accionesRef = useRef({});
+  accionesRef.current = { aplicarDatosPatente, aplicarAvisos };
+  const ultimoAuto = useRef("");
+  useEffect(() => {
+    const alVolver = async () => {
+      const t = await leerPortapapeles();
+      if (!t || t === ultimoAuto.current) return;
+      if (/^\s*\{\s*"fuente"\s*:\s*"patentechile"/.test(t)) { ultimoAuto.current = t; accionesRef.current.aplicarDatosPatente(t); }
+      else if (/^\s*\{\s*"fuente"\s*:\s*"chileautos"/.test(t)) { ultimoAuto.current = t; accionesRef.current.aplicarAvisos(t); }
+    };
+    window.addEventListener("focus", alVolver);
+    return () => window.removeEventListener("focus", alVolver);
+  }, []);
+  const limpiar = () => { setPegadoPatente(""); setMsgPatente(null); setPatente(""); setKm(""); setMarca(""); setModelo(""); setAnio(""); setVersion(""); setTransmision(""); setCombustible(""); setMargenBruto(MARGEN_BRUTO_DEFECTO); setPegado(""); setMsgAvisos(null); };
 
   const Tarjeta = ({ titulo, sub, valor, destacado = false }) => (
     <div className={`p-4 border ${destacado ? "bg-stone-900 text-stone-100 border-stone-900" : "bg-white border-stone-200"}`}>
@@ -177,7 +211,7 @@ export default function TasacionCompra({ inicial, onResultado, apiPatente } = {}
           <summary className="cursor-pointer text-sm text-stone-700 font-medium">O completar marca, modelo y año con patentechile.com</summary>
           <div className="mt-2">
           <p className="text-xs text-stone-500 mb-2">
-            Entra al sitio y busca la patente a mano. Con la ficha abierta tienes dos formas: pulsar el favorito, o seleccionar todo el texto de la página (Ctrl+A, Ctrl+C) y pegarlo abajo.
+            Entra al sitio y busca la patente a mano. Con la ficha abierta, pulsa el favorito (o selecciona todo el texto con Ctrl+A y cópialo con Ctrl+C), vuelve aquí y pulsa «Pegar datos»: también se pegan solos al volver a esta pestaña.
             De lo pegado solo se leen patente, marca, modelo y año: nunca nombre, RUT ni dirección del dueño. El sitio puede pedir una verificación de seguridad: la completas tú.
           </p>
           <div className="flex flex-wrap items-center gap-3 mb-3">
@@ -189,8 +223,13 @@ export default function TasacionCompra({ inicial, onResultado, apiPatente } = {}
               {copiadoPatente ? "Código copiado ✓" : "No puedo arrastrarlo: copiar el código del marcador"}
             </button>
           </div>
+          <div className="mb-2">
+            <button type="button" onClick={pegarPatente} className="bg-amber-500 text-stone-900 font-semibold px-4 py-2 text-sm hover:bg-amber-400">📋 Pegar datos de patente</button>
+          </div>
+          <details className="mb-1"><summary className="cursor-pointer text-xs text-stone-500">¿No funciona el botón? Pega a mano</summary>
           <textarea value={pegadoPatente} onChange={(e) => aplicarDatosPatente(e.target.value)} rows={2} placeholder="Pega aquí lo que copió el favorito, el texto de la ficha (Ctrl+A, Ctrl+C en patentechile) o la patente (Ctrl+V)"
             className="w-full border border-stone-300 bg-white px-2 py-1.5 text-xs font-mono text-stone-900 focus:outline-none focus:ring-2 focus:ring-amber-500" />
+          </details>
           {msgPatente && (
             <div className="mt-2 flex flex-col gap-1">
               <p className={`text-xs ${msgPatente.mal ? "text-rose-600" : "text-emerald-700"}`}>{msgPatente.texto}</p>
@@ -294,8 +333,15 @@ export default function TasacionCompra({ inicial, onResultado, apiPatente } = {}
           </select>
         </div>
         <label className="text-xs text-stone-500 block mb-1">Avisos copiados con el marcador</label>
+        <div className="flex flex-wrap items-center gap-3 mb-2">
+          <button type="button" onClick={pegarAvisos} className="bg-amber-500 text-stone-900 font-semibold px-4 py-2 text-sm hover:bg-amber-400">📋 Pegar avisos de Chileautos</button>
+          <span className="text-xs text-stone-500">{pegado.trim() ? "Avisos pegados ✓" : "Después de pulsar el favorito en Chileautos, vuelve aquí: se pegan solos o pulsa el botón."}</span>
+        </div>
+        {msgAvisos && <p className={"text-xs mb-2 " + (msgAvisos.mal ? "text-rose-600" : "text-emerald-700")}>{msgAvisos.texto}</p>}
+        <details className="mb-1"><summary className="cursor-pointer text-xs text-stone-500">¿No funciona el botón? Pega a mano</summary>
         <textarea value={pegado} onChange={(e) => setPegado(e.target.value)} rows={3} placeholder="Pega aquí lo que copió el marcador (Ctrl+V)"
           className="w-full border border-stone-300 bg-white px-2 py-1.5 text-xs font-mono text-stone-900 focus:outline-none focus:ring-2 focus:ring-amber-500" />
+        </details>
         {calculo && calculo.error && <p className="text-xs text-rose-600 mt-2">{calculo.error}</p>}
         {calculo && calculo.sinResultados && (
           <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 px-3 py-2 mt-2">
