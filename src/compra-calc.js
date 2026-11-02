@@ -9,6 +9,8 @@
  *     precio sugerido de compra      = precio promedio − margen bruto (lo elige el administrador de MARGENES_BRUTOS)
  * ----------------------------------------------------------------
  */
+import { extractPatenteChile } from "./patente-bookmarklet.js";
+
 export const DESCUENTO_COMPRA = 2_000_000; // margen bruto por defecto
 export const MARGEN_BRUTO_DEFECTO = DESCUENTO_COMPRA;
 // Opciones de la lista "Margen bruto" del módulo.
@@ -339,9 +341,8 @@ export function parseDatosPatente(texto) {
   const t = String(texto || "").trim();
   if (!t) return { ok: false, error: "Pega aquí el texto que copió el marcador." };
   let data;
-  try { data = JSON.parse(t); } catch (e) {
-    return { ok: false, error: "El texto no es el que copia el marcador. Pulsa el favorito en la ficha del vehículo y pega de nuevo." };
-  }
+  try { data = JSON.parse(t); } catch (e) { data = null; }
+  if (data === null || typeof data !== "object") return parseTextoPatente(t);
   if (!data || data.fuente !== "patentechile") {
     return { ok: false, error: "El texto no corresponde a una ficha de patentechile.com copiada con el marcador." };
   }
@@ -356,6 +357,26 @@ export function parseDatosPatente(texto) {
     };
   }
   return { ok: true, data: { patente: normalizePatente(data.patente), marca, modelo, anio } };
+}
+
+/**
+ * Alternativa sin marcador: la persona copia el texto de la página (Ctrl+A, Ctrl+C) o solo la patente / la dirección y lo pega.
+ * Del texto se leen únicamente patente, marca, modelo y año (lo demás, incluidos los datos del dueño, se descarta).
+ * Devuelve lo mismo que parseDatosPatente; si solo hay una patente, { ok:true, soloPatente:true, data:{ patente } }.
+ */
+function parseTextoPatente(t) {
+  const sinEspacios = t.replace(/[\s.-]/g, "").toUpperCase();
+  const candidata = sinEspacios.replace(/^.*[=/:]/, "");
+  if (t.length <= 120 && /^(?:[A-Z]{4}\d{2}|[A-Z]{2}\d{4})$/.test(candidata)) {
+    return { ok: true, soloPatente: true, data: { patente: normalizePatente(candidata) } };
+  }
+  const d = extractPatenteChile({ body: { innerText: t }, title: "", querySelectorAll: () => [] }, { href: "", origin: "", pathname: "" });
+  if (d.marca && d.modelo && d.anio) return { ok: true, data: { patente: normalizePatente(d.patente), marca: d.marca, modelo: d.modelo, anio: d.anio } };
+  return {
+    ok: false,
+    error: "No encontré marca, modelo y año en ese texto. Pega lo que copió el favorito, el texto completo de la ficha del vehículo (Ctrl+A, Ctrl+C) o solo la patente.",
+    etiquetas: Array.isArray(d.etiquetas) ? d.etiquetas : [],
+  };
 }
 
 /* ---------- limpieza de avisos ---------- */

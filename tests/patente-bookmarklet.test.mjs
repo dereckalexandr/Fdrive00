@@ -111,7 +111,7 @@ test("parseDatosPatente acepta los cuatro datos y normaliza la patente", () => {
   assert.deepEqual(r.data, { patente: "SJXH57", marca: "TOYOTA", modelo: "YARIS", anio: 2020 });
 });
 
-test("parseDatosPatente: rechaza texto vacío, no-JSON y otra fuente", () => {
+test("parseDatosPatente: rechaza texto vacío, texto sin datos del vehículo y otra fuente", () => {
   assert.equal(parseDatosPatente("").ok, false);
   assert.equal(parseDatosPatente("hola").ok, false);
   assert.equal(parseDatosPatente('{"fuente":"chileautos","listings":[]}').ok, false);
@@ -122,4 +122,29 @@ test("parseDatosPatente: si falta marca, modelo o año, devuelve el error y las 
   assert.equal(r.ok, false);
   assert.match(r.error, /No pude leer marca, modelo y año/);
   assert.deepEqual(r.etiquetas, ["Propietario:", "Fecha:"]);
+});
+
+test("parseDatosPatente: acepta el texto completo de la ficha pegado a mano y descarta los datos del dueño", () => {
+  const r = parseDatosPatente(`Resultado de la búsqueda
+Patente
+SJXH57
+Marca
+TOYOTA
+Modelo
+YARIS
+Año
+2020
+${DUENO}`);
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.data, { patente: "SJXH57", marca: "TOYOTA", modelo: "YARIS", anio: 2020 });
+  assert.equal(JSON.stringify(r).includes("INVENTADO"), false);
+});
+
+test("parseDatosPatente: una patente suelta o un enlace con la patente solo anota la patente", () => {
+  for (const t of ["VTVH64", "vt-vh-64", "https://www.patentechile.com/resultados?ppu=VTVH64"]) {
+    const r = parseDatosPatente(t);
+    assert.equal(r.ok, true, t);
+    assert.equal(r.soloPatente, true);
+    assert.equal(r.data.patente, "VTVH64");
+  }
 });

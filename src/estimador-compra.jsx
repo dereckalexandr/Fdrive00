@@ -111,6 +111,13 @@ export default function TasacionCompra({ inicial, onResultado, apiPatente } = {}
     const p = parseDatosPatente(texto);
     if (!p.ok) { setMsgPatente({ mal: true, texto: p.error, etiquetas: p.etiquetas || [] }); return; }
     const d = p.data;
+    if (p.soloPatente) {
+      setPegadoPatente("");
+      if (!patente) { setPatente(d.patente); setMsgPatente({ mal: false, texto: `Patente ${d.patente} anotada. Pulsa «Buscar datos» para completar marca, modelo y año.`, avisos: [] }); }
+      else setMsgPatente({ mal: false, texto: "Ya hay una patente escrita; no se cambió.", avisos: [] });
+      return;
+    }
+    setPegadoPatente("");
     setMarca(titleCase(d.marca)); setModelo(titleCase(d.modelo)); setAnio(String(d.anio));
     const avisos = [];
     if (d.patente && d.patente !== patente) avisos.push(patente
@@ -166,12 +173,12 @@ export default function TasacionCompra({ inicial, onResultado, apiPatente } = {}
           </div>
         </div>
 
-        <details className="mt-4 border border-stone-200 p-3" open={!!msgPatente}>
-          <summary className="cursor-pointer text-sm text-stone-700 font-medium">Completar marca, modelo y año con patentechile.com</summary>
+        <details className="mt-4 border border-stone-200 p-3" open>
+          <summary className="cursor-pointer text-sm text-stone-700 font-medium">O completar marca, modelo y año con patentechile.com</summary>
           <div className="mt-2">
           <p className="text-xs text-stone-500 mb-2">
-            Entra al sitio, busca la patente a mano y, con la ficha del vehículo abierta, pulsa el favorito. Copia <strong>solo</strong> patente, marca, modelo y año:
-            nunca nombre, RUT ni dirección del dueño. El sitio puede pedir una verificación de seguridad: la completas tú.
+            Entra al sitio y busca la patente a mano. Con la ficha abierta tienes dos formas: pulsar el favorito, o seleccionar todo el texto de la página (Ctrl+A, Ctrl+C) y pegarlo abajo.
+            De lo pegado solo se leen patente, marca, modelo y año: nunca nombre, RUT ni dirección del dueño. El sitio puede pedir una verificación de seguridad: la completas tú.
           </p>
           <div className="flex flex-wrap items-center gap-3 mb-3">
             <a href="https://www.patentechile.com/" target="_blank" rel="noopener noreferrer"
@@ -182,7 +189,7 @@ export default function TasacionCompra({ inicial, onResultado, apiPatente } = {}
               {copiadoPatente ? "Código copiado ✓" : "No puedo arrastrarlo: copiar el código del marcador"}
             </button>
           </div>
-          <textarea value={pegadoPatente} onChange={(e) => aplicarDatosPatente(e.target.value)} rows={2} placeholder="Pega aquí lo que copió el marcador de patente (Ctrl+V)"
+          <textarea value={pegadoPatente} onChange={(e) => aplicarDatosPatente(e.target.value)} rows={2} placeholder="Pega aquí lo que copió el favorito, el texto de la ficha (Ctrl+A, Ctrl+C en patentechile) o la patente (Ctrl+V)"
             className="w-full border border-stone-300 bg-white px-2 py-1.5 text-xs font-mono text-stone-900 focus:outline-none focus:ring-2 focus:ring-amber-500" />
           {msgPatente && (
             <div className="mt-2 flex flex-col gap-1">
