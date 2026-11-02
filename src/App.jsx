@@ -1695,10 +1695,10 @@ function TasacionCompra({ inicial, onResultado } = {}) {
     const d = p.data;
     setMarca(titleCase(d.marca)); setModelo(titleCase(d.modelo)); setAnio(String(d.anio));
     const avisos = [];
-    if (d.patente && !patente) setPatente(d.patente);
-    if (d.patente && patente && patente !== d.patente) avisos.push(`La patente de la ficha (${d.patente}) no coincide con la que ingresaste (${patente}). Revisa que sea el vehículo correcto.`);
-    if (d.modelo.trim().split(/\s+/).length > 1) avisos.push("El modelo trae varias palabras. Para Chileautos deja solo el nombre del modelo (ej. \"Yaris\", sin la versión), salvo modelos como \"Land Cruiser\".");
-    setMsgPatente({ mal: false, texto: `Se completaron marca, modelo y año${d.patente && !patente ? " y la patente" : ""}.`, avisos });
+    if (d.patente && d.patente !== patente) avisos.push(patente
+      ? `La patente de la ficha (${d.patente}) no coincide con la que ingresaste (${patente}). Revisa que sea el vehículo correcto.`
+      : `La ficha trae la patente ${d.patente}, pero no se completó sola: escríbela tú en el campo Patente.`);
+    setMsgPatente({ mal: false, texto: "Se completaron marca, modelo y año.", avisos });
   };
   const limpiar = () => { setPegadoPatente(""); setMsgPatente(null); setPatente(""); setKm(""); setMarca(""); setModelo(""); setAnio(""); setVersion(""); setTransmision(""); setCombustible(""); setMargenBruto(MARGEN_BRUTO_DEFECTO); setCav({ name: "", data: "" }); setCavMsg(""); setPegado(""); };
 
