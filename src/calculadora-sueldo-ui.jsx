@@ -5,16 +5,17 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { PARAMETROS, AFPS, ENTRADA_VACIA, calcularLiquido, calcularDesdeLiquido, calcularSemanaCorrida } from "./calculadora-sueldo.js";
 import { llamar } from "./publico-api.js";
+import { cargarIndicadores } from "./indicadores.js";
 
-const INPUT = "border border-stone-300 bg-white px-3 py-2.5 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-amber-500 w-full rounded-md";
-const clp = (n) => `$${Math.round(n).toLocaleString("es-CL")}`;
-const Campo = ({ etiqueta, children, ayuda }) => (<label className="text-sm text-stone-700 flex flex-col gap-1 min-w-0">{etiqueta}{children}{ayuda && <span className="text-xs text-stone-500">{ayuda}</span>}</label>);
+export const INPUT = "border border-stone-300 bg-white px-3 py-2.5 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-amber-500 w-full rounded-md";
+export const clp = (n) => `$${Math.round(n).toLocaleString("es-CL")}`;
+export const Campo = ({ etiqueta, children, ayuda }) => (<label className="text-sm text-stone-700 flex flex-col gap-1 min-w-0">{etiqueta}{children}{ayuda && <span className="text-xs text-stone-500">{ayuda}</span>}</label>);
 
 /** Caja de dinero: muestra los miles con punto y entrega solo el número. */
-function Dinero({ valor, onCambio, ...resto }) {
+export function Dinero({ valor, onCambio, ...resto }) {
   return <input inputMode="numeric" value={valor ? Number(valor).toLocaleString("es-CL") : ""} onChange={(e) => onCambio(Number(e.target.value.replace(/\D/g, "").slice(0, 11)) || 0)} placeholder="0" className={INPUT} {...resto} />;
 }
-function Numero({ valor, onCambio, paso = 1, ...resto }) {
+export function Numero({ valor, onCambio, paso = 1, ...resto }) {
   return <input type="number" min="0" step={paso} value={valor === 0 ? "" : valor} onChange={(e) => onCambio(e.target.value === "" ? 0 : Number(e.target.value))} placeholder="0" className={INPUT} {...resto} />;
 }
 const Titulo = ({ children }) => <p className="text-xs uppercase tracking-widest text-stone-400 mt-2 mb-1 col-span-full">{children}</p>;
@@ -41,22 +42,13 @@ export default function Calculadora() {
   useEffect(() => {
     document.title = "Calculadora de sueldo · Drive Futuro";
     const ctl = new AbortController();
-    const t = setTimeout(() => ctl.abort(), 6000);
-    fetch("https://mindicador.cl/api", { signal: ctl.signal })
-      .then((r) => (r.ok ? r.json() : Promise.reject()))
-      .then((d) => {
-        const uf = Number(d && d.uf && d.uf.valor);
-        const utm = Number(d && d.utm && d.utm.valor);
-        if (uf > 1000 && utm > 10000) { setP((x) => ({ ...x, uf, utm })); setOrigen("dia"); }
-      })
-      .catch(() => {})
-      .finally(() => clearTimeout(t));
+    cargarIndicadores(ctl.signal).then((d) => { if (d) { setP((x) => ({ ...x, uf: d.uf, utm: d.utm })); setOrigen("dia"); } });
     // Sueldo mínimo vigente: lo entrega el servidor (lo lee de páginas de referencia; si no puede, usa el último conocido).
     let vivo = true;
     llamar("calculadora.parametros")
       .then((d) => { const m = Number(d && d.sueldoMinimo); if (vivo && m >= 400000 && m <= 5000000) { setP((x) => ({ ...x, sueldoMinimo: m })); setOrigenMinimo(d.fuente === "web" ? "web" : "respaldo"); } })
       .catch(() => {});
-    return () => { vivo = false; clearTimeout(t); ctl.abort(); };
+    return () => { vivo = false; ctl.abort(); };
   }, []);
 
   const resultado = useMemo(() => {
