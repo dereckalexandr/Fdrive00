@@ -4,7 +4,7 @@ import { buildInspeccionPdf, buildTasacionPdf, pdfFileName } from "./pdf-report.
 import { CHECKLIST_SECTIONS, TASACION_SECTIONS, getTasacionSectionItems, ESTADOS_DOCUMENTO, ESTADOS_SI_NO, ESTADOS_CARROCERIA, ESTADOS_INTERIOR, ESTADOS_VIDRIO } from "./checklists.js";
 import { saveDraft, loadDraft, clearDraft, isMeaningful } from "./drafts.js";
 import { computeTasacionTotals, computeValorFinal } from "./tasacion-totals.js";
-import { normalizePatente, isPatenteValida, splitModeloVersion, parseKm, calcularFiltros, buildChileautosUrl, parseAvisosPegados, estimarCompra, parseDatosPatente, modeloParaChileautos, detalleModeloChileautos, detalleMarcaChileautos, TRANSMISIONES, COMBUSTIBLES, MARGENES_BRUTOS, MARGEN_BRUTO_DEFECTO } from "./compra-calc.js";
+import { normalizePatente, isPatenteValida, parseKm, calcularFiltros, buildChileautosUrl, parseAvisosPegados, estimarCompra, parseDatosPatente, modeloParaChileautos, detalleModeloChileautos, detalleMarcaChileautos, TRANSMISIONES, COMBUSTIBLES, MARGENES_BRUTOS, MARGEN_BRUTO_DEFECTO } from "./compra-calc.js";
 import { buildBookmarkletHref } from "./chileautos-bookmarklet.js";
 import { buildPatenteBookmarkletHref } from "./patente-bookmarklet.js";
 import { AdminCrmPanel, PESTANAS_CRM } from "./crm-admin.jsx";
@@ -1601,9 +1601,6 @@ function TasacionCompra({ inicial, onResultado } = {}) {
   const [combustible, setCombustible] = useState((COMBUSTIBLES.find((c) => c.label === ini.combustible) || {}).value || "");
   const [resultadoUsado, setResultadoUsado] = useState(false);
   const [margenBruto, setMargenBruto] = useState(MARGEN_BRUTO_DEFECTO);
-  const [cav, setCav] = useState({ name: "", data: "" });
-  const [cavMsg, setCavMsg] = useState("");
-  const [leyendo, setLeyendo] = useState(false);
   const [pegado, setPegado] = useState("");
   const [copiado, setCopiado] = useState(false);
   const bmRef = useRef(null);
@@ -1633,30 +1630,6 @@ function TasacionCompra({ inicial, onResultado } = {}) {
   if (!marca.trim()) faltantes.push("marca");
   if (!modelo.trim()) faltantes.push("modelo");
   if (!parseKm(anio)) faltantes.push("año");
-
-  const handleCavLoaded = async (name, data) => {
-    setCav({ name, data });
-    setCavMsg("");
-    setLeyendo(true);
-    try {
-      const { extractPdfText, parseCavFields } = await cargarLectorCav();
-      const fields = parseCavFields(await extractPdfText(data));
-      const mv = splitModeloVersion(fields.modelo);
-      const llenados = [];
-      if (fields.marca) { setMarca(titleCase(fields.marca)); llenados.push("marca"); }
-      if (mv.modelo) { setModelo(titleCase(mv.modelo)); llenados.push("modelo"); }
-      if (fields.anio) { setAnio(fields.anio); llenados.push("año"); }
-      if (mv.version) { setVersion(fields.modelo.slice(mv.modelo.length).trim()); llenados.push("versión"); }
-      setCavMsg(llenados.length
-        ? `Se completaron: ${llenados.join(", ")}. Revísalos: si el modelo tiene más de una palabra (ej. "Land Cruiser"), corrígelo.`
-        : "No se detectaron datos en este PDF. Completa marca, modelo y año a mano.");
-    } catch (e) {
-      console.warn("No se pudo leer el CAV:", e);
-      setCavMsg("No se pudo leer el PDF. Completa los datos a mano.");
-    } finally {
-      setLeyendo(false);
-    }
-  };
 
   // Cálculo derivado del texto pegado: se actualiza solo al pegar o al cambiar filtros.
   const calculo = useMemo(() => {
@@ -1700,7 +1673,7 @@ function TasacionCompra({ inicial, onResultado } = {}) {
       : `La ficha trae la patente ${d.patente}, pero no se completó sola: escríbela tú en el campo Patente.`);
     setMsgPatente({ mal: false, texto: "Se completaron marca, modelo y año.", avisos });
   };
-  const limpiar = () => { setPegadoPatente(""); setMsgPatente(null); setPatente(""); setKm(""); setMarca(""); setModelo(""); setAnio(""); setVersion(""); setTransmision(""); setCombustible(""); setMargenBruto(MARGEN_BRUTO_DEFECTO); setCav({ name: "", data: "" }); setCavMsg(""); setPegado(""); };
+  const limpiar = () => { setPegadoPatente(""); setMsgPatente(null); setPatente(""); setKm(""); setMarca(""); setModelo(""); setAnio(""); setVersion(""); setTransmision(""); setCombustible(""); setMargenBruto(MARGEN_BRUTO_DEFECTO); setPegado(""); };
 
   const Tarjeta = ({ titulo, sub, valor, destacado = false }) => (
     <div className={`p-4 border ${destacado ? "bg-stone-900 text-stone-100 border-stone-900" : "bg-white border-stone-200"}`}>
@@ -1722,7 +1695,7 @@ function TasacionCompra({ inicial, onResultado } = {}) {
         </div>
 
         <p className="text-xs uppercase tracking-widest text-stone-400 mb-2">1 · Datos del vehículo</p>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="text-xs text-stone-500 block mb-1">Patente *</label>
             <input type="text" value={patente} onChange={(e) => setPatente(normalizePatente(e.target.value))} placeholder="Ej. TTHY51" maxLength={6}
@@ -1746,25 +1719,11 @@ function TasacionCompra({ inicial, onResultado } = {}) {
             <input type="text" inputMode="numeric" value={kmNum ? kmNum.toLocaleString("es-CL") : ""} onChange={(e) => setKm(e.target.value)} placeholder="Ej. 60.000"
               className="w-full border border-stone-300 bg-white px-2 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-amber-500" />
           </div>
-          <div>
-            <label className="text-xs text-stone-500 block mb-1">Búsqueda por año</label>
-            <select value={margenAnio} onChange={(e) => setMargenAnio(Number(e.target.value))}
-              className="w-full border border-stone-300 bg-white px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500">
-              <option value={1}>Año del vehículo ±1</option>
-              <option value={0}>Solo el año exacto</option>
-            </select>
-          </div>
         </div>
 
-        <div className="mt-4">
-          <label className="text-xs text-stone-500 block mb-1">CAV (opcional): completa marca, modelo, año y versión</label>
-          <PdfDropzone fileName={cav.name} fileData={cav.data} onFileLoaded={handleCavLoaded} onRemove={() => { setCav({ name: "", data: "" }); setCavMsg(""); }} />
-          {leyendo && <p className="text-xs text-stone-500 mt-2">Leyendo el CAV…</p>}
-          {!leyendo && cavMsg && <p className="text-xs text-stone-500 mt-2">{cavMsg}</p>}
-        </div>
-
-        <div className="mt-4 border-t border-stone-200 pt-4">
-          <p className="text-sm text-stone-700 font-medium mb-1">O con patentechile.com (alternativa al CAV)</p>
+        <details className="mt-4 border border-stone-200 p-3" open={!!msgPatente}>
+          <summary className="cursor-pointer text-sm text-stone-700 font-medium">Completar marca, modelo y año con patentechile.com</summary>
+          <div className="mt-2">
           <p className="text-xs text-stone-500 mb-2">
             Entra al sitio, busca la patente a mano y, con la ficha del vehículo abierta, pulsa el favorito. Copia <strong>solo</strong> patente, marca, modelo y año:
             nunca nombre, RUT ni dirección del dueño. El sitio puede pedir una verificación de seguridad: la completas tú.
@@ -1789,7 +1748,8 @@ function TasacionCompra({ inicial, onResultado } = {}) {
               )}
             </div>
           )}
-        </div>
+          </div>
+        </details>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4">
           <TextField label="Marca *" value={marca} onChange={setMarca} placeholder="Ej. Toyota" />
@@ -1817,6 +1777,14 @@ function TasacionCompra({ inicial, onResultado } = {}) {
 
       <div className="bg-white border border-stone-200 p-4 md:p-5">
         <p className="text-xs uppercase tracking-widest text-stone-400 mb-2">2 · Buscar en Chileautos</p>
+        <div className="max-w-xs mb-3">
+          <label className="text-xs text-stone-500 block mb-1">Búsqueda por año</label>
+          <select value={margenAnio} onChange={(e) => setMargenAnio(Number(e.target.value))}
+            className="w-full border border-stone-300 bg-white px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500">
+            <option value={1}>Año del vehículo ±1</option>
+            <option value={0}>Solo el año exacto</option>
+          </select>
+        </div>
         {urlBusqueda ? (
           <>
             <a href={urlBusqueda} target="_blank" rel="noopener noreferrer"
