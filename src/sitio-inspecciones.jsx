@@ -7,11 +7,12 @@
  * VITE_SITIO=inspecciones. Habla con la misma función de Supabase (acción «public»), que limita las consultas y firma cada acceso.
  * ----------------------------------------------------------------
  */
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, lazy, Suspense } from "react";
 import { VEREDICTOS } from "../supabase/functions/api/inspecciones-core.js";
 import { llamar, textoError } from "./publico-api.js";
 import Calculadora from "./calculadora-sueldo-ui.jsx";
 import CalculadoraBhe from "./calculadora-bhe-ui.jsx";
+const EstimadorCompra = lazy(() => import("./estimador-compra.jsx"));
 
 const BTN = "px-5 py-3 text-sm bg-amber-500 text-stone-900 font-semibold rounded-lg shadow-suave hover:bg-amber-400 disabled:opacity-50 transition-colors";
 const BTN_2 = "px-5 py-3 text-sm border border-stone-300 bg-white text-stone-800 font-medium rounded-lg hover:bg-stone-50 transition-colors";
@@ -165,10 +166,11 @@ function Consulta() {
 
 
 /** Secciones del sitio. Se eligen con la parte «#» de la dirección (por ejemplo «#calculadora»), así sirve en cualquier dominio. */
-const SECCIONES = [["inspecciones", "Inspecciones"], ["calculadora", "Calcula tu renta"], ["bhe", "Calculadora BHE"]];
+const SECCIONES = [["inspecciones", "Inspecciones"], ["estimador", "Estimador"], ["calculadora", "Calcula tu renta"], ["bhe", "Calculadora BHE"]];
 const seccionActual = () => { const h = window.location.hash.replace("#", "").toLowerCase(); return SECCIONES.some(([id]) => id === h) ? h : "inspecciones"; };
 const PIE = {
   inspecciones: "Consulta de inspecciones de vehículos por patente.",
+  estimador: "Estimador de compra: precio referencial a partir de los avisos publicados en Chileautos.",
   calculadora: "Calculadora de sueldo líquido e imponible: simulación referencial, no reemplaza la liquidación del empleador.",
   bhe: "Calculadora de boletas de honorarios: simulación referencial con las retenciones del SII.",
 };
@@ -195,7 +197,7 @@ export default function SitioInspecciones() {
           </nav>
         </div>
       </header>
-      <main className="flex-1">{seccion === "calculadora" ? <Calculadora /> : seccion === "bhe" ? <CalculadoraBhe /> : <Consulta />}</main>
+      <main className="flex-1">{seccion === "estimador" ? <div className="max-w-5xl mx-auto px-4 md:px-6 py-8"><Suspense fallback={<p className="text-sm text-stone-500">Cargando…</p>}><EstimadorCompra sinBuscarPatente /></Suspense></div> : seccion === "calculadora" ? <Calculadora /> : seccion === "bhe" ? <CalculadoraBhe /> : <Consulta />}</main>
       <footer className="bg-stone-900 text-stone-400 text-xs">
         <div className="max-w-5xl mx-auto px-4 md:px-6 py-6">{PIE[seccion]}</div>
       </footer>
