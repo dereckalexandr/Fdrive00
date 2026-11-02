@@ -104,26 +104,30 @@ export default function TasacionCompra({ inicial, onResultado, apiPatente } = {}
   const copiarMarcadorPatente = async () => {
     try { await navigator.clipboard.writeText(buildPatenteBookmarkletHref()); setCopiadoPatente(true); setTimeout(() => setCopiadoPatente(false), 2500); } catch (e) { /* sin permiso: queda el botón arrastrable */ }
   };
-  // Al pegar lo que copió el marcador de patentechile.com se completan marca, modelo y año. La patente
-  // se ingresa a mano: solo se rellena si estaba vacía, y si no coincide con la copiada se avisa.
+  // Pegar los datos de una ficha es pedir expresamente ese vehículo: la patente de la ficha SIEMPRE reemplaza a la escrita.
+  // Si es otra patente, se parte de cero con ese vehículo (kilometraje, versión, transmisión, combustible y avisos eran del anterior).
+  const cambiarPatente = (nueva) => {
+    if (!nueva || nueva === patente) return false;
+    const habia = !!patente;
+    setPatente(nueva);
+    setKm(""); setVersion(""); setTransmision(""); setCombustible(""); setPegado(""); setMsgAvisos(null); setResultadoUsado(false);
+    return habia;
+  };
   const aplicarDatosPatente = (texto) => {
     setPegadoPatente(texto);
     if (!texto.trim()) { setMsgPatente(null); return; }
     const p = parseDatosPatente(texto);
     if (!p.ok) { setMsgPatente({ mal: true, texto: p.error, etiquetas: p.etiquetas || [] }); return; }
     const d = p.data;
+    setPegadoPatente("");
+    const reemplazo = cambiarPatente(d.patente);
+    const aviso = reemplazo ? "Era otra patente: se reemplazó y se limpiaron kilometraje, versión, transmisión, combustible y avisos del vehículo anterior." : "";
     if (p.soloPatente) {
-      setPegadoPatente("");
-      if (!patente) { setPatente(d.patente); setMsgPatente({ mal: false, texto: `Patente ${d.patente} anotada. Pulsa «Buscar datos» para completar marca, modelo y año.`, avisos: [] }); }
-      else setMsgPatente({ mal: false, texto: "Ya hay una patente escrita; no se cambió.", avisos: [] });
+      setMsgPatente({ mal: false, texto: `Patente ${d.patente} anotada. Pulsa «Buscar datos» para completar marca, modelo y año.`, avisos: aviso ? [aviso] : [] });
       return;
     }
-    setPegadoPatente("");
     setMarca(titleCase(d.marca)); setModelo(titleCase(d.modelo)); setAnio(String(d.anio));
-    const avisos = [];
-    if (d.patente && !patente) setPatente(d.patente);
-    else if (d.patente && d.patente !== patente) avisos.push(`La patente de la ficha (${d.patente}) no coincide con la que ingresaste (${patente}). Revisa que sea el vehículo correcto.`);
-    setMsgPatente({ mal: false, texto: `Se completaron marca, modelo y año${d.patente && !patente ? " y la patente" : ""}.`, avisos });
+    setMsgPatente({ mal: false, texto: `Se completaron patente ${d.patente || ""}, marca, modelo y año.`, avisos: aviso ? [aviso] : [] });
   };
   const [msgAvisos, setMsgAvisos] = useState(null);
   const leerPortapapeles = async () => {
