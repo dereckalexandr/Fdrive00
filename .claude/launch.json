@@ -1,6 +1,7 @@
 {
   "version": "0.0.1",
   "configurations": [
-    { "name": "demo", "runtimeExecutable": "node", "runtimeArgs": ["scripts/dev-demo.mjs"], "port": 5199 }
+    { "name": "demo", "runtimeExecutable": "node", "runtimeArgs": ["scripts/dev-demo.mjs"], "port": 5199 },
+    { "name": "inspecciones", "runtimeExecutable": "node", "runtimeArgs": ["node_modules/vite/bin/vite.js", "--mode", "inspecciones", "--port", "5174"], "port": 5174 }
   ]
 }
