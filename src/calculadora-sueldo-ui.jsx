@@ -40,7 +40,7 @@ export default function Calculadora() {
 
   // UF y UTM del día (mindicador.cl, datos del Banco Central); si no responde, quedan los valores de referencia.
   useEffect(() => {
-    document.title = "Calculadora de sueldo · Drive Futuro";
+    document.title = "Calcula tu renta · Drive Futuro";
     const ctl = new AbortController();
     cargarIndicadores(ctl.signal).then((d) => { if (d) { setP((x) => ({ ...x, uf: d.uf, utm: d.utm })); setOrigen("dia"); } });
     // Sueldo mínimo vigente: lo entrega el servidor (lo lee de páginas de referencia; si no puede, usa el último conocido).
@@ -60,7 +60,7 @@ export default function Calculadora() {
 
   return (
     <div className="max-w-5xl mx-auto px-4 md:px-6 py-8 md:py-12">
-      <h1 className="font-serif text-3xl md:text-4xl text-stone-900 leading-tight">Calculadora de sueldo</h1>
+      <h1 className="font-serif text-3xl md:text-4xl text-stone-900 leading-tight">Calcula tu renta</h1>
       <p className="text-stone-600 mt-2 max-w-2xl">Calcula la renta líquida y la imponible. Elige si conoces el sueldo base o el líquido que quieres recibir. Es una simulación: no reemplaza la liquidación del empleador.</p>
 
       <div className="mt-6 grid grid-cols-1 lg:grid-cols-5 gap-6 items-start">

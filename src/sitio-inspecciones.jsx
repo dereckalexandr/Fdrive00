@@ -165,7 +165,7 @@ function Consulta() {
 
 
 /** Secciones del sitio. Se eligen con la parte «#» de la dirección (por ejemplo «#calculadora»), así sirve en cualquier dominio. */
-const SECCIONES = [["inspecciones", "Inspecciones"], ["calculadora", "Calculadora"], ["bhe", "Calculadora BHE"]];
+const SECCIONES = [["inspecciones", "Inspecciones"], ["calculadora", "Calcula tu renta"], ["bhe", "Calculadora BHE"]];
 const seccionActual = () => { const h = window.location.hash.replace("#", "").toLowerCase(); return SECCIONES.some(([id]) => id === h) ? h : "inspecciones"; };
 const PIE = {
   inspecciones: "Consulta de inspecciones de vehículos por patente.",
