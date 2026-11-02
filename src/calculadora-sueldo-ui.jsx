@@ -80,6 +80,20 @@ export default function Calculadora() {
             ? <div className="col-span-full"><Campo etiqueta="Sueldo base (imponible) *"><Dinero valor={e.sueldoBase} onCambio={(v) => set("sueldoBase", v)} autoFocus /></Campo></div>
             : <div className="col-span-full"><Campo etiqueta="Sueldo líquido que quieres recibir *" ayuda="Se calcula el sueldo base con el que llegas a ese líquido, con los demás datos de abajo."><Dinero valor={liquidoDeseado} onCambio={setLiquidoDeseado} autoFocus /></Campo></div>}
 
+          <div className="col-span-full rounded-xl bg-amber-50 border border-amber-200 p-4 text-sm">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+              <p className="text-xs uppercase tracking-widest text-amber-800">Valores legales vigentes</p>
+              <p className="text-xs text-stone-500">{origenMinimo === "web" ? "Sueldo mínimo leído automáticamente" : origenMinimo === "manual" ? "Sueldo mínimo editado por ti" : "Sueldo mínimo: último valor conocido"} · {origen === "dia" ? "UF y UTM de hoy" : origen === "manual" ? "UF y UTM editadas" : "UF y UTM de referencia"}</p>
+            </div>
+            <dl className="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-2 mt-2">
+              <div><dt className="text-xs text-stone-500">Sueldo mínimo imponible legal</dt><dd className="font-semibold text-stone-900">{clp(p.sueldoMinimo)}</dd></div>
+              <div><dt className="text-xs text-stone-500">Tope imponible ({p.topeAfpUf} UF)</dt><dd className="font-semibold text-stone-900">{clp(p.topeAfpUf * p.uf)}</dd></div>
+              <div><dt className="text-xs text-stone-500">UF</dt><dd className="font-semibold text-stone-900">${Number(p.uf).toLocaleString("es-CL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</dd></div>
+              <div><dt className="text-xs text-stone-500">UTM</dt><dd className="font-semibold text-stone-900">{clp(p.utm)}</dd></div>
+            </dl>
+            {modo === "base" && <button type="button" onClick={() => set("sueldoBase", Math.round(p.sueldoMinimo))} className="mt-3 text-xs font-medium text-amber-800 underline underline-offset-2 hover:text-amber-900">Usar el sueldo mínimo como sueldo base</button>}
+          </div>
+
           <Titulo>Contrato</Titulo>
           <Campo etiqueta="Tipo de contrato"><select value={e.contrato} onChange={(ev) => set("contrato", ev.target.value)} className={INPUT}><option value="indefinido">Indefinido</option><option value="plazo_fijo">Plazo fijo</option></select></Campo>
           <Campo etiqueta="Gratificación legal"><select value={e.gratificacion ? "si" : "no"} onChange={(ev) => set("gratificacion", ev.target.value === "si")} className={INPUT}><option value="no">No</option><option value="si">Sí (25%, con tope legal)</option></select></Campo>
@@ -108,7 +122,7 @@ export default function Calculadora() {
           <Campo etiqueta="Otros descuentos" ayuda="Anticipos, préstamos, pensión de alimentos, caja de compensación…"><Dinero valor={e.otrosDescuentos} onCambio={(v) => set("otrosDescuentos", v)} /></Campo>
 
           <details className="col-span-full text-sm">
-            <summary className="cursor-pointer text-stone-600">Valores legales usados {origen === "dia" ? "(UF y UTM de hoy)" : origen === "manual" ? "(editados)" : "(referencia de noviembre 2026)"}</summary>
+            <summary className="cursor-pointer text-stone-600">Editar los valores legales</summary>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3">
               <Campo etiqueta="Valor UF"><Numero valor={p.uf} onCambio={(v) => setPar("uf", v)} paso="0.01" /></Campo>
               <Campo etiqueta="Valor UTM"><Numero valor={p.utm} onCambio={(v) => setPar("utm", v)} paso="1" /></Campo>
