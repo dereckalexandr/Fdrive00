@@ -1140,6 +1140,7 @@ function InspectorDashboard({ inspector, onExit, crm }) {
         <div className="pestanas-scroll max-w-5xl mx-auto px-4 md:px-6 py-2 flex gap-1 border-t border-white/10 overflow-x-auto">
           {crmRealiza && tabBtn("solicitudes", "Solicitudes y agenda")}
           {tabBtn("inspeccion", "Inspección")}
+          {tabBtn("estimador", "Estimador")}
           {tabBtn("tasaciones", "Tasaciones")}
         </div>
       </div>
@@ -1249,6 +1250,8 @@ function InspectorDashboard({ inspector, onExit, crm }) {
             </>
           )
         )}
+
+        {tab === "estimador" && <TasacionCompra />}
 
         {tab === "tasaciones" && (
           viewingTasacion ? (
