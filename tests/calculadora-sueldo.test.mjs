@@ -92,3 +92,13 @@ test("Desde el líquido: rechaza valores inválidos y los inalcanzables", () => 
   const solo = calcularDesdeLiquido(80_000, { colacion: 100_000 }, P);
   assert.equal(solo.sueldoBase, 0, "si los no imponibles ya bastan, el sueldo base es 0");
 });
+
+test("Semana corrida: comisión ÷ días hábiles (redondeado) × días festivos y domingos", async () => {
+  const { calcularSemanaCorrida } = await import("../src/calculadora-sueldo.js");
+  assert.deepEqual(calcularSemanaCorrida({ comision: 1_000_000, diasHabiles: 26, diasInhabiles: 4 }), { porDia: 38_462, semanaCorrida: 153_848 });
+  assert.deepEqual(calcularSemanaCorrida({ comision: 900_000, diasHabiles: 25, diasInhabiles: 5 }), { porDia: 36_000, semanaCorrida: 180_000 });
+  assert.deepEqual(calcularSemanaCorrida({ comision: 500_000, diasHabiles: 0, diasInhabiles: 4 }), { porDia: 0, semanaCorrida: 0 }, "sin días hábiles no se divide");
+  assert.deepEqual(calcularSemanaCorrida({ comision: "x", diasHabiles: -3, diasInhabiles: null }), { porDia: 0, semanaCorrida: 0 });
+  const conSemana = calcularLiquido({ sueldoBase: 600_000, semanaCorrida: 153_848 }, P);
+  assert.equal(conSemana.imponible, 753_848, "la semana corrida es parte de la renta imponible");
+});

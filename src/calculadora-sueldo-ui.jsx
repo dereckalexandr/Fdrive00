@@ -3,7 +3,7 @@
  * Todo se calcula en el navegador con src/calculadora-sueldo.js; no se guarda ni se envía nada.
  */
 import React, { useEffect, useMemo, useState } from "react";
-import { PARAMETROS, AFPS, ENTRADA_VACIA, calcularLiquido, calcularDesdeLiquido } from "./calculadora-sueldo.js";
+import { PARAMETROS, AFPS, ENTRADA_VACIA, calcularLiquido, calcularDesdeLiquido, calcularSemanaCorrida } from "./calculadora-sueldo.js";
 import { llamar } from "./publico-api.js";
 
 const INPUT = "border border-stone-300 bg-white px-3 py-2.5 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-amber-500 w-full rounded-md";
@@ -31,6 +31,9 @@ export default function Calculadora() {
   const [p, setP] = useState(PARAMETROS);
   const [origen, setOrigen] = useState("referencia");
   const [origenMinimo, setOrigenMinimo] = useState("referencia");
+  const [calcSemana, setCalcSemana] = useState(false);
+  const [sc, setSc] = useState({ comision: 0, diasHabiles: 0, diasInhabiles: 0 });
+  const semana = calcularSemanaCorrida(sc);
   const set = (k, v) => setE((x) => ({ ...x, [k]: v }));
   const setPar = (k, v) => { setP((x) => ({ ...x, [k]: v })); setOrigen("manual"); if (k === "sueldoMinimo") setOrigenMinimo("manual"); };
 
@@ -103,8 +106,26 @@ export default function Calculadora() {
           <Titulo>Haberes imponibles</Titulo>
           <Campo etiqueta="Horas extra"><Numero valor={e.horasExtra} onCambio={(v) => set("horasExtra", v)} paso="0.5" /></Campo>
           <Campo etiqueta="Comisiones"><Dinero valor={e.comisiones} onCambio={(v) => set("comisiones", v)} /></Campo>
-          <Campo etiqueta="Semana corrida"><Dinero valor={e.semanaCorrida} onCambio={(v) => set("semanaCorrida", v)} /></Campo>
+          <Campo etiqueta={<span className="flex items-center justify-between gap-2">Semana corrida<button type="button" onClick={() => setCalcSemana((v) => !v)} className="text-xs text-amber-800 underline underline-offset-2 font-medium">{calcSemana ? "Cerrar calculadora" : "Calculadora"}</button></span>}><Dinero valor={e.semanaCorrida} onCambio={(v) => set("semanaCorrida", v)} /></Campo>
           <Campo etiqueta="Bonos imponibles"><Dinero valor={e.bonos} onCambio={(v) => set("bonos", v)} /></Campo>
+          {calcSemana && (
+            <div className="col-span-full rounded-xl border border-emerald-300 bg-emerald-50 p-4 flex flex-col gap-3">
+              <p className="font-serif text-base text-stone-900">Calculadora de semana corrida</p>
+              <p className="text-xs text-stone-600">Para quien gana comisiones: la comisión del mes se reparte entre los días hábiles y se paga por cada día festivo y domingo.</p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <Campo etiqueta="Total comisión del mes"><Dinero valor={sc.comision} onCambio={(v) => setSc((x) => ({ ...x, comision: v }))} /></Campo>
+                <Campo etiqueta="Días hábiles del mes"><Numero valor={sc.diasHabiles} onCambio={(v) => setSc((x) => ({ ...x, diasHabiles: v }))} max="31" /></Campo>
+                <Campo etiqueta="Días festivos y domingos"><Numero valor={sc.diasInhabiles} onCambio={(v) => setSc((x) => ({ ...x, diasInhabiles: v }))} max="31" /></Campo>
+              </div>
+              {e.comisiones > 0 && sc.comision !== e.comisiones && <button type="button" onClick={() => setSc((x) => ({ ...x, comision: e.comisiones }))} className="self-start text-xs text-amber-800 underline underline-offset-2">Usar las comisiones ingresadas ({clp(e.comisiones)})</button>}
+              <div className="flex items-center justify-between border-t border-emerald-200 pt-3 text-sm"><span>Comisión ÷ días hábiles (redondeado)</span><span className="font-mono">{clp(semana.porDia)}</span></div>
+              <div className="flex items-center justify-between border-t border-emerald-200 pt-3 text-sm"><span>Resultado (× días festivos y domingos)</span><span className="font-mono text-lg text-emerald-800">{clp(semana.semanaCorrida)}</span></div>
+              <div className="flex gap-2 justify-end">
+                <button type="button" onClick={() => setCalcSemana(false)} className="border border-stone-300 bg-white px-3 py-1.5 text-xs text-stone-600 rounded-md hover:bg-stone-50">Cancelar</button>
+                <button type="button" onClick={() => { set("semanaCorrida", semana.semanaCorrida); setCalcSemana(false); }} className="bg-emerald-600 text-white px-3 py-1.5 text-xs font-medium rounded-md hover:bg-emerald-700">Agregar a semana corrida</button>
+              </div>
+            </div>
+          )}
 
           <Titulo>Haberes no imponibles</Titulo>
           <Campo etiqueta="Colación"><Dinero valor={e.colacion} onCambio={(v) => set("colacion", v)} /></Campo>

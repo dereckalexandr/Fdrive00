@@ -54,6 +54,17 @@ export const ENTRADA_VACIA = {
 const num = (v, max = 1e12) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? Math.min(n, max) : 0; };
 const peso = (n) => Math.round(n);
 
+/**
+ * Semana corrida de un trabajador con comisiones (la misma cuenta de la calculadora del CRM anterior):
+ * comisión del mes ÷ días hábiles del mes (redondeado) × días festivos y domingos (redondeado).
+ * @returns {{ porDia: number, semanaCorrida: number }}
+ */
+export function calcularSemanaCorrida({ comision, diasHabiles, diasInhabiles }) {
+  const dias = Math.round(num(diasHabiles, 31));
+  const porDia = dias > 0 ? Math.round(Math.round(num(comision)) / dias) : 0;
+  return { porDia, semanaCorrida: Math.round(porDia * Math.round(num(diasInhabiles, 31))) };
+}
+
 /** Impuesto único del mes sobre la base tributable (en pesos), con la UTM del mes. */
 export function impuestoUnico(baseTributable, utm) {
   const base = num(baseTributable);
