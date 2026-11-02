@@ -2,7 +2,7 @@
  * ESTIMADOR DE COMPRA
  * ----------------------------------------------------------------
  * Estima cuánto pagar por un vehículo con los avisos de Chileautos. Lo usan el CRM (App.jsx) y el sitio de inspecciones.
- * `sinBuscarPatente` oculta el botón «Buscar datos» (necesita sesión del personal) en el sitio público.
+ * `apiPatente` (opcional): cómo consulta «Buscar datos» (Boostr). En el CRM usa la sesión del personal; el sitio público pasa la acción pública.
  * ----------------------------------------------------------------
  */
 import React, { useState, useEffect, useMemo, useRef } from "react";
@@ -33,7 +33,7 @@ const titleCase = (s) => String(s || "").toLowerCase().replace(/(^|[\s-])\S/g, (
 
 // `inicial` (opcional): datos del vehículo con que parte, cuando se usa dentro de una tasación del CRM.
 // `onResultado` (opcional): si viene, aparece el botón para guardar el resultado en esa tasación.
-export default function TasacionCompra({ inicial, onResultado, sinBuscarPatente = false } = {}) {
+export default function TasacionCompra({ inicial, onResultado, apiPatente } = {}) {
   const ini = inicial || {};
   const [patente, setPatente] = useState(ini.patente ? normalizePatente(ini.patente) : "");
   const [km, setKm] = useState(ini.km != null ? String(ini.km) : "");
@@ -146,7 +146,7 @@ export default function TasacionCompra({ inicial, onResultado, sinBuscarPatente 
             <input type="text" value={patente} onChange={(e) => setPatente(normalizePatente(e.target.value))} placeholder="Ej. TTHY51" maxLength={6}
               className="w-full border border-stone-300 bg-white px-2 py-1.5 text-sm font-mono uppercase focus:outline-none focus:ring-2 focus:ring-amber-500" />
             {patente.length === 6 && !patenteOk && <p className="text-xs text-rose-600 mt-1">Formato no válido (4 letras y 2 números, o 2 letras y 4 números).</p>}
-            {!sinBuscarPatente && <BuscarPatente patente={patente} className="mt-1.5" onDatos={(c) => {
+            <BuscarPatente patente={patente} api={apiPatente} className="mt-1.5" onDatos={(c) => {
               const llenados = [];
               if (c.marca) { setMarca(c.marca); llenados.push("marca"); }
               if (c.modelo) { setModelo(c.modelo); llenados.push("modelo"); }
@@ -157,7 +157,7 @@ export default function TasacionCompra({ inicial, onResultado, sinBuscarPatente 
               const co = COMBUSTIBLES.find((x) => x.label === c.combustible);
               if (co) { setCombustible(co.value); llenados.push("combustible"); }
               return llenados;
-            }} />}
+            }} />
           </div>
           <div>
             <label className="text-xs text-stone-500 block mb-1">Kilometraje *</label>

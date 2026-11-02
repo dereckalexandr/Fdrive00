@@ -12,6 +12,7 @@ import { VEREDICTOS } from "../supabase/functions/api/inspecciones-core.js";
 import { llamar, textoError } from "./publico-api.js";
 import Calculadora from "./calculadora-sueldo-ui.jsx";
 import CalculadoraBhe from "./calculadora-bhe-ui.jsx";
+const apiPatentePublica = (op, params) => llamar("patente", params);
 const EstimadorCompra = lazy(() => import("./estimador-compra.jsx"));
 
 const BTN = "px-5 py-3 text-sm bg-amber-500 text-stone-900 font-semibold rounded-lg shadow-suave hover:bg-amber-400 disabled:opacity-50 transition-colors";
@@ -197,7 +198,7 @@ export default function SitioInspecciones() {
           </nav>
         </div>
       </header>
-      <main className="flex-1">{seccion === "estimador" ? <div className="max-w-5xl mx-auto px-4 md:px-6 py-8"><Suspense fallback={<p className="text-sm text-stone-500">Cargando…</p>}><EstimadorCompra sinBuscarPatente /></Suspense></div> : seccion === "calculadora" ? <Calculadora /> : seccion === "bhe" ? <CalculadoraBhe /> : <Consulta />}</main>
+      <main className="flex-1">{seccion === "estimador" ? <div className="max-w-5xl mx-auto px-4 md:px-6 py-8"><Suspense fallback={<p className="text-sm text-stone-500">Cargando…</p>}><EstimadorCompra apiPatente={apiPatentePublica} /></Suspense></div> : seccion === "calculadora" ? <Calculadora /> : seccion === "bhe" ? <CalculadoraBhe /> : <Consulta />}</main>
       <footer className="bg-stone-900 text-stone-400 text-xs">
         <div className="max-w-5xl mx-auto px-4 md:px-6 py-6">{PIE[seccion]}</div>
       </footer>
