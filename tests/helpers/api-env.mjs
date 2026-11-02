@@ -148,6 +148,8 @@ export let db;
 export const correos = [];
 /** Respuestas simuladas de la API de patentes (Boostr): `respuestas[PATENTE]` = JSON, un número de estado HTTP o un Error. */
 export const boostr = { llamadas: [], respuestas: {} };
+/** Páginas de referencia del sueldo mínimo (simuladas): dirección → texto de la página, o un número de estado de error. */
+export const paginasMinimo = { llamadas: [], respuestas: {} };
 /** Variables de entorno de la función simulada (las pruebas pueden cambiarlas). */
 export let entorno = {};
 const IP = { n: 1 };
@@ -175,6 +177,13 @@ export const iniciarFuncion = async () => {
       if (r instanceof Error) throw r;
       if (typeof r === "number") return new Response("{}", { status: r });
       return new Response(JSON.stringify(r !== undefined ? r : { status: "error", data: "", code: "V-02", message: "No encontramos datos asociados a la patente ingresada" }), { status: 200 });
+    }
+    if (String(url).startsWith("https://www.calcular.cl/") || String(url).startsWith("https://finclaro.cl/")) {
+      paginasMinimo.llamadas.push(String(url));
+      const r = paginasMinimo.respuestas[String(url)];
+      if (r instanceof Error) throw r;
+      if (typeof r === "number") return new Response("", { status: r });
+      return new Response(r ?? "<html>sin datos</html>", { status: 200 });
     }
     if (String(url).startsWith("https://api.resend.com/")) { correos.push(JSON.parse(init.body)); return new Response("{}", { status: 200 }); }
     return fetchReal(url, init);

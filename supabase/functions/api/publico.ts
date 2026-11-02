@@ -12,6 +12,7 @@ import { enviarAviso, enSegundoPlano, correoActivo } from "./correo.ts";
 import { consultarPatente } from "./patentes.ts";
 import { LIMITE_WEB_IP_HORA, normalizarPatente, patenteValida } from "./patentes-core.js";
 import { folioInspeccion } from "./inspecciones-core.js";
+import { SUELDO_MINIMO_RESPALDO, FUENTES_SUELDO_MINIMO, extraerSueldoMinimo, elegirSueldoMinimo } from "./sueldo-minimo-core.js";
 import { inspeccionPublica, fichaParaInforme, PUBLICO_CON_PROPIETARIO, LIMITE_BUSQUEDA_IP_HORA, LIMITE_LECTURA_IP_HORA, VIGENCIA_ACCESO_MS } from "./inspeccion-publica-core.js";
 import {
   visibleEnCatalogo, vehiculoPublico, validarSolicitudWeb, cuotaReferencial, tipoLeadDe, resumenSolicitud, nombreTrasSolicitud, FUENTE_WEB,
@@ -93,6 +94,25 @@ function superaLimitePatentes(ip: string) {
   if (!a || a.reset < ahora) { patentesPorIp.set(ip, { n: 1, reset: ahora + 3_600_000 }); return false; }
   a.n++;
   return a.n > LIMITE_WEB_IP_HORA;
+}
+
+// Sueldo mínimo para la calculadora: se lee de páginas de referencia y se recuerda 6 horas (por instancia de la función).
+const consultasMinimoPorIp = new Map<string, { n: number; reset: number }>();
+let sueldoMinimoCache: { valor: number; fuente: string; hasta: number } | null = null;
+async function sueldoMinimoVigente() {
+  const ahora = Date.now();
+  if (sueldoMinimoCache && sueldoMinimoCache.hasta > ahora) return sueldoMinimoCache;
+  const leidos = await Promise.all(FUENTES_SUELDO_MINIMO.map(async (url: string) => {
+    try {
+      const r = await fetch(url, { headers: { "user-agent": "Mozilla/5.0 (compatible; DriveFuturo/1.0)", accept: "text/html" }, signal: AbortSignal.timeout(6000) });
+      return r.ok ? extraerSueldoMinimo(await r.text()) : null;
+    } catch { return null; }
+  }));
+  const hallados = leidos.filter((v: number | null) => v !== null) as number[];
+  const valor = elegirSueldoMinimo(hallados);
+  // Si no se pudo leer nada se usa el de respaldo y se vuelve a intentar en 15 minutos.
+  sueldoMinimoCache = { valor, fuente: hallados.length ? "web" : "respaldo", hasta: ahora + (hallados.length ? 6 * 3_600_000 : 900_000) };
+  return sueldoMinimoCache;
 }
 
 const QUE_PIDIO: Record<string, string> = { consulta: "una consulta", visita: "una visita", financiamiento: "una simulación de financiamiento", vender: "vender o consignar tu vehículo", renovar: "cambiar tu auto por otro" };
@@ -200,6 +220,13 @@ export async function publicOp(ctx: CtxPublico, body: any): Promise<Response> {
     if (!r.ok) return err(r.error, r.status);
     const v: any = r.vehiculo;
     return json({ vehiculo: { patente: v.patente, marca: v.marca, modeloCompleto: v.modeloCompleto, anio: v.anio ?? null } });
+  }
+
+  /* ---------- calculadora de sueldo: sueldo mínimo vigente ---------- */
+  if (op === "calculadora.parametros") {
+    if (superaLimite(consultasMinimoPorIp, ctx.ip, 60)) return err("demasiadas_solicitudes", 429);
+    const m = await sueldoMinimoVigente();
+    return json({ sueldoMinimo: m.valor, fuente: m.fuente, respaldo: SUELDO_MINIMO_RESPALDO });
   }
 
   /* ---------- consulta pública de inspecciones por patente ---------- */

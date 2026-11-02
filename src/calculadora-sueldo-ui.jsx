@@ -4,6 +4,7 @@
  */
 import React, { useEffect, useMemo, useState } from "react";
 import { PARAMETROS, AFPS, ENTRADA_VACIA, calcularLiquido, calcularDesdeLiquido } from "./calculadora-sueldo.js";
+import { llamar } from "./publico-api.js";
 
 const INPUT = "border border-stone-300 bg-white px-3 py-2.5 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-amber-500 w-full rounded-md";
 const clp = (n) => `$${Math.round(n).toLocaleString("es-CL")}`;
@@ -29,8 +30,9 @@ export default function Calculadora() {
   const [liquidoDeseado, setLiquidoDeseado] = useState(0);
   const [p, setP] = useState(PARAMETROS);
   const [origen, setOrigen] = useState("referencia");
+  const [origenMinimo, setOrigenMinimo] = useState("referencia");
   const set = (k, v) => setE((x) => ({ ...x, [k]: v }));
-  const setPar = (k, v) => { setP((x) => ({ ...x, [k]: v })); setOrigen("manual"); };
+  const setPar = (k, v) => { setP((x) => ({ ...x, [k]: v })); setOrigen("manual"); if (k === "sueldoMinimo") setOrigenMinimo("manual"); };
 
   // UF y UTM del día (mindicador.cl, datos del Banco Central); si no responde, quedan los valores de referencia.
   useEffect(() => {
@@ -46,7 +48,12 @@ export default function Calculadora() {
       })
       .catch(() => {})
       .finally(() => clearTimeout(t));
-    return () => { clearTimeout(t); ctl.abort(); };
+    // Sueldo mínimo vigente: lo entrega el servidor (lo lee de páginas de referencia; si no puede, usa el último conocido).
+    let vivo = true;
+    llamar("calculadora.parametros")
+      .then((d) => { const m = Number(d && d.sueldoMinimo); if (vivo && m >= 400000 && m <= 5000000) { setP((x) => ({ ...x, sueldoMinimo: m })); setOrigenMinimo(d.fuente === "web" ? "web" : "respaldo"); } })
+      .catch(() => {});
+    return () => { vivo = false; clearTimeout(t); ctl.abort(); };
   }, []);
 
   const resultado = useMemo(() => {
@@ -105,7 +112,7 @@ export default function Calculadora() {
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3">
               <Campo etiqueta="Valor UF"><Numero valor={p.uf} onCambio={(v) => setPar("uf", v)} paso="0.01" /></Campo>
               <Campo etiqueta="Valor UTM"><Numero valor={p.utm} onCambio={(v) => setPar("utm", v)} paso="1" /></Campo>
-              <Campo etiqueta="Sueldo mínimo"><Numero valor={p.sueldoMinimo} onCambio={(v) => setPar("sueldoMinimo", v)} paso="1" /></Campo>
+              <Campo etiqueta="Sueldo mínimo" ayuda={origenMinimo === "web" ? "Vigente, leído automáticamente." : origenMinimo === "manual" ? "Editado por ti." : "Último valor conocido (vigente desde mayo de 2026)."}><Numero valor={p.sueldoMinimo} onCambio={(v) => setPar("sueldoMinimo", v)} paso="1" /></Campo>
               <Campo etiqueta="Jornada semanal (horas)"><Numero valor={p.jornadaSemanal} onCambio={(v) => setPar("jornadaSemanal", v)} /></Campo>
             </div>
             <p className="text-xs text-stone-500 mt-2">Tope imponible de AFP y salud: {p.topeAfpUf} UF. Seguro de cesantía: {String(p.topeCesantiaUf).replace(".", ",")} UF. Impuesto según la tabla mensual del SII.</p>

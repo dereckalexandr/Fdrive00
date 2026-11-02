@@ -8,11 +8,11 @@
  * ----------------------------------------------------------------
  */
 
-/** Valores de referencia de noviembre de 2026 (UF del 1.º de noviembre; UTM del mes; topes fijados por la Superintendencia de Pensiones). */
+/** Valores de referencia de noviembre de 2026 (UF del 1.º de noviembre; UTM del mes; sueldo mínimo vigente desde el 1.º de mayo, Ley 21.830; topes de la Superintendencia de Pensiones). */
 export const PARAMETROS = {
   uf: 41252.94,
   utm: 72440,
-  sueldoMinimo: 539000,
+  sueldoMinimo: 553553,
   topeAfpUf: 90,
   topeCesantiaUf: 135.2,
   jornadaSemanal: 42,
