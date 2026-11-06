@@ -307,3 +307,19 @@ test("La cuenta maestra ve todo pero no revisa", async () => {
   assert.equal((await ve(admin, "validacion.revisar", { id: U.valJefe.id, docId: randomUUID(), estado: "aprobado" })).status, 403);
   assert.equal((await ve(admin, "validacion.resumen", { localId: L1 })).status, 200);
 });
+
+test("El Jefe Local se salta al Validador: toma y aprueba los documentos él mismo (aunque no se hayan enviado a la cola)", async () => {
+  const v = await vehiculo();
+  const vv = db.tablas.validaciones.find((x) => x.vehiculo_id === v.id && x.tipo === "vehiculo");
+  vv.enviada_en = null; // todavía no está en la cola del Validador
+  const t = await ve(U.jefe.token, "validacion.tomar", { id: vv.id });
+  assert.equal(t.status, 200, JSON.stringify(t));
+  assert.equal(filaVal(vv.id).validador_id, U.jefe.id);
+  assert.ok(filaVal(vv.id).enviada_en, "al tomarla queda enviada");
+  await aprobarTodo(U.jefe, vv.id);
+  assert.equal(filaVal(vv.id).estado, "aprobada");
+  // El ejecutivo sigue sin poder validar.
+  const v2 = await vehiculo();
+  const vv2 = db.tablas.validaciones.find((x) => x.vehiculo_id === v2.id && x.tipo === "vehiculo");
+  assert.equal((await ve(U.e1.token, "validacion.tomar", { id: vv2.id })).status, 403);
+});

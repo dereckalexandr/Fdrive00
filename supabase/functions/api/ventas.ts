@@ -1440,7 +1440,8 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
 
   /* ---------- validaciones (Validador: revisión de documentos) ---------- */
   if (op.startsWith("validacion.")) {
-    const realiza = !ctx.esAdmin && can("validacion.realizar");
+    // El Jefe Local (supervisor) también valida documentos: puede saltarse al Validador y revisar él mismo.
+    const realiza = !ctx.esAdmin && (can("validacion.realizar") || esSupervisor);
     // Quien ve el inventario (aunque no lo edite) puede mirar los documentos del vehículo; lo demás sigue pidiendo su permiso.
     if (!realiza && !esSupervisor && !can("validacion.usar") && !can("leads.propios") && !can("inventario.ver") && !can("inventario.editar") && !can("tasaciones.realizar")) return err("forbidden", 403);
 
@@ -1548,11 +1549,12 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       if (!realiza) return err("forbidden", 403);
       const v = await cargarVal(String(body.id ?? ""));
       if (!v) return err("no_existe", 404);
-      if (!v.enviada_en) return err("validacion_sin_enviar", 409);
+      // Un supervisor puede tomar documentos que aún no se enviaron a la cola: al tomarlos quedan enviados.
+      if (!v.enviada_en && !esSupervisor) return err("validacion_sin_enviar", 409);
       const tr = validarTransicionValidacion(v.estado, "tomar");
       if (!tr.ok) return err(v.validador_id ? "validacion_ya_tomada" : tr.error!, 409);
       const ahora = new Date().toISOString();
-      const r = await sb.from("validaciones").update({ estado: "en_revision", validador_id: userId, tomada_en: ahora, actualizado_en: ahora }).eq("id", v.id).eq("estado", "pendiente").select().maybeSingle();
+      const r = await sb.from("validaciones").update({ estado: "en_revision", validador_id: userId, tomada_en: ahora, actualizado_en: ahora, ...(v.enviada_en ? {} : { enviada_en: ahora }) }).eq("id", v.id).eq("estado", "pendiente").select().maybeSingle();
       if (r.error) return fallar(r.error);
       if (!r.data) return err("validacion_ya_tomada", 409);
       await anotarVal(v, `${userName} tomó la validación ${folioValidacion(v.numero)}`);

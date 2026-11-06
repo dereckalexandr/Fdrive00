@@ -228,7 +228,7 @@ function Compra({ api, c, puedeOperar, puedeAprobar, cerrado, onCambio, avisar }
       {["oferta", "aceptada", "pago_pendiente"].includes(c.estado) && puedeOperar && !cerrado && req && req.aplica && req.validacionId && !req.enviada && (
         <div className="flex flex-wrap items-center gap-3">
           <button disabled={ocupado || !reqCompleto} title={reqCompleto ? "" : "Completa los datos del vendedor y los documentos"} onClick={enviarAValidar} className={BTN_AMBAR}>Enviar a validar</button>
-          <span className="text-xs text-stone-500">El Validador los verá en su cola recién cuando los envíes.</span>
+          <span className="text-xs text-stone-500">El Validador los verá en su cola recién cuando los envíes. El Jefe Local también puede validarlos él mismo desde la pestaña Validaciones, sin enviarlos.</span>
         </div>
       )}
       {["oferta", "aceptada", "pago_pendiente"].includes(c.estado) && req && req.enviada && <p className="text-xs text-emerald-700">Documentos enviados a validar ✓</p>}

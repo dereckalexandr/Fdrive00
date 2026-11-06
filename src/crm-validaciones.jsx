@@ -363,8 +363,8 @@ function Resumen({ api, version }) {
 ========================================================= */
 export function ModuloValidaciones({ api: apiProp, permisos = [], esAdmin = false }) {
   const can = (p) => esAdmin || permisos.includes(p);
-  const realiza = !esAdmin && permisos.includes("validacion.realizar");
   const supervisa = can("leads.asignar");
+  const realiza = !esAdmin && (permisos.includes("validacion.realizar") || supervisa); // el Jefe Local también valida
   const api = apiProp || apiPorDefecto;
   const [tab, setTab] = useState(realiza ? "cola" : "todas");
   const [version, setVersion] = useState(0);
