@@ -9,9 +9,9 @@ Fecha: 6 de noviembre de 2026 · Referencia: Autofact Pro (`autofactpro.com/cl`,
 - `autofactpro.com/transferencias-digitales-vehiculos`: descripción del flujo para automotoras.
 - `autofact.cl/transferencias/automotoras` y `autofact.cl/transferencias?activeTab=trackingTrf`: precio, pasos, antifraude, seguimiento y calculadora de costos.
 
-**No observado:** la pantalla que quedó abierta (`transferencia/completar/TRF687fe25212861`) está detrás del inicio de sesión y solo se ve la portada de acceso. No se inició sesión ni se ingresó ninguna credencial. Por eso **no se vieron** los formularios internos, los campos exactos, los estados ni el panel de la automotora. Esa parte del levantamiento queda pendiente (ver sección 12).
+**Observado con la sesión iniciada por el usuario (solo lectura, 6 de noviembre de 2026):** el listado de transferencias de la automotora, el glosario de estados, la pantalla `transferencia/completar/TRF…` de un contrato en estado CREADO, la ficha `transferencia/ver/TRF…` de un contrato aprobado (documentos y actividad) y la calculadora de costos. No se ingresó ninguna credencial, no se creó ni se guardó nada y no se pulsó ningún botón que modifique datos. Los datos de personas que aparecen en esas pantallas no se copian a este documento: solo se registra la estructura.
 
-Las preguntas frecuentes de Autofact (qué se necesita para empezar, cuánto demora, cómo se hace el seguimiento) están plegadas y no se pudieron leer.
+**No observado:** los pasos 2 a 4 del asistente (se ven los campos en la página pero no se avanzó), la pantalla de firma del cliente, el flujo «Agregar comprador», el pago y las preguntas frecuentes de Autofact (plegadas). Quedan para la sección 12.
 
 ## 2. Cómo funciona el sistema de referencia
 
@@ -34,6 +34,51 @@ Según la descripción pública de Autofact:
 - Si una parte es extranjera y su cédula está vencida, debe presentar el comprobante digital de permanencia vigente.
 
 **Costos:** el servicio se divide en costo base, arancel e impuesto, y tienen una calculadora con el valor de venta o la tasación fiscal. Para automotoras: desde **$28.000 + IVA** por transferencia, más aranceles e impuestos, con prepago y sin cargos fijos. Otras ofertas que ofrecen durante el trámite: TAG a domicilio y seguro automotriz.
+
+## 2b. Hallazgos de la plataforma autenticada (Autofact Pro)
+
+**Lo más importante:** la automotora ya usa Autofact Pro para transferir (hay decenas de contratos creados por el equipo). Autofact es quien firma con el notario, paga el impuesto y tramita en el Registro Civil. Por eso el módulo del CRM no tiene que reemplazar esa tramitación: debe **ordenar, controlar y dar seguimiento** a lo que ya se hace allá, y preparar los datos y documentos desde el CRM.
+
+**Tipos de contrato (columna «TC»):**
+- **Contrato abierto (CA):** «el cliente deja el vehículo en la automotora, el cual posteriormente es transferido a un nuevo propietario distinto del concesionario». Es el caso de toma o consignación: el dueño firma un mandato y después se **agrega el comprador**. Es lo que más usa el equipo.
+- **Contrato cerrado (AV en la lista):** venta directa en que la automotora actúa como parte, con firma del representante legal. En la lista aparece como «AV»; el significado exacto de la sigla no está explicado en pantalla (por confirmar).
+
+**Panel de transferencias:**
+- Pestañas: Mis contratos, Mis rechazos, Derivados, Consultar todos, Pendiente de pago.
+- Columnas: TC, derivado, factura, patente, marca · modelo · año, creador, fecha de creación, servicios adicionales (por ejemplo TAG), ver y estado.
+- Acciones: crear contrato, filtros, descargar listado rápido, solicitar listado histórico, descargar Excel de fechas, glosario de estados y descarga de declaraciones juradas.
+- Saldo de paquetes (informes, «Solo CAV» y certificados de multas) con recarga, y usuarios con permisos por persona.
+
+**Glosario de estados de Autofact (38):** se agrupan en etapas.
+- **Creación y firma:** Creado · Verificación contrato · Revisión firma · Firma cliente · Firma mandato · Firma Autofact · Esperando firma.
+- **Aprobación de la automotora:** Aprobación toma · Aprobación venta · Aprobado (contrato abierto listo para agregar comprador) · A-Creado (el comprador aún completa sus datos).
+- **Revisión previa:** Esperando informe · Revisión · Revisión aprobación · En evaluación · Gestión · Gestión de facturas.
+- **Pago:** Pendiente pago (Registro Civil e impuesto, a cargo de la automotora).
+- **Tramitación:** Notario · Legalización docs · Ingresado STEV / Pre transferido (ingresado al Registro Civil) · Manual (por ventanilla, 10 a 15 días hábiles).
+- **Restricciones y rechazos:** E. restricción · Alzamiento · Rechazó notario · Rechazo RC · Gestión rechazo RC · Control rechazo RC · Reingresado a RC · Corrección RS.
+- **Cierre:** Transferido (con el CAV a nombre del nuevo dueño) · Archivado · Anulación forzada por T&C · Anulación/devolución forzada por T&C.
+
+**Asistente «Completar» (4 pasos), paso 1 de un contrato abierto:**
+- *Vendedor:* nombre, primer y segundo apellido, región, comuna, calle, número, resto de dirección, correo (obligatorio) y celular.
+- *Declaración jurada PEP* del vendedor (Sí/No: persona expuesta políticamente o con vínculo familiar).
+- *Vehículo:* número de chasis, número de motor, kilometraje, **permiso de circulación (archivo)**, fecha de expiración y comuna del permiso.
+- *Tasación fiscal:* se elige la tasación del SII (año, marca, modelo, cilindrada, transmisión y combustible) y se completan el código SII, la tasación y el **impuesto a la transferencia**.
+- *Resto del asistente (visible en la página, no recorrido):* datos del vehículo (usado, nuevo o «nada» como forma de pago con otro vehículo en parte de pago: patente, dígito verificador, kilometraje, marca, modelo, año, tipo, color, chasis, motor y precio), **empresa o persona representada** (RUT, razón social) y **representantes con poder** (RUT, nombres, fecha del poder, notario, notaría y comuna).
+- Botones: Guardar, Siguiente, Volver, y eliminar con confirmación escribiendo «eliminar».
+
+**Ficha del contrato aprobado:**
+- Botones: Agregar comprador, Rechazar, y un enlace para copiar y compartir con el comprador el seguimiento en tiempo real.
+- Documentos: Contrato, CAV, Certificado de multas, Permiso de circulación (con vencimiento), Cédula del vendedor, Firma del vendedor, Mandato del comprador, Paquete de mandato del vendedor y **Formulario V6**. Cada uno con fecha y botón «Actualizar». Se pueden adjuntar otros y hay documentos internos no obligatorios (Carta de instrucción).
+- Informe Autofact de la patente con indicadores (MU, LD, ER, RT, FV, PT).
+- Pestaña **Actividad**: bitácora de cambios de estado y aprobaciones con quién y cuándo (por ejemplo «Contrato aprobado, incluye firma con clasificación B»).
+- Aviso permanente de la Ley 21.389 (deudores de pensión de alimentos): hay que preguntar a las partes antes de transferir.
+
+**Cumplimiento y seguridad:**
+- Aceptación de «Responsabilidad de entrega de datos» al iniciar cada proceso (el usuario declara que la información es fidedigna).
+- **Declaraciones juradas PEP y de origen de fondos (DOF, sobre 10.000 USD)** descargables por rango de hasta 6 meses, para el Reporte de Operaciones en Efectivo ante la UAF.
+- **Desde el 1 de noviembre de 2026** cambió la verificación de identidad para la firma electrónica avanzada (Resolución N.º 733 del Ministerio de Economía y Ley de Protección de Datos).
+
+**Costos (calculadora pública, ejemplo con un vehículo de $10.000.000):** costo base del servicio $59.990 (incluye validación del contrato y firma digital; se paga al inicio), arancel estatal $39.240 (se paga cuando el contrato está listo) e **impuesto del 1,5% sobre el mayor valor entre el precio de venta y la tasación fiscal** ($150.000). Total $249.230. Para automotoras el precio base publicado es desde $28.000 + IVA, con prepago.
 
 ## 3. Lo que ya existe en el CRM y se puede reutilizar
 
@@ -79,7 +124,7 @@ Las piezas 2, 3 y 4 **no se pueden construir solo con software propio**: requier
 
 - **A. Gestor de transferencias que delega en Autofact.** El CRM crea la transferencia, junta los datos y los documentos, y hace el seguimiento; Autofact firma y tramita. Es lo más rápido y barato de construir, pero depende de que Autofact acepte e idealmente ofrezca una API (**no verificado**). Sin API, el CRM solo registraría el estado a mano.
 - **B. Plataforma propia completa.** El CRM genera el contrato, toma la firma con un proveedor de firma avanzada, valida identidad y gestiona con notaría y Registro Civil. Es el sistema equivalente al de Autofact, pero requiere contratos con terceros y un componente legal fuerte. Es la opción de mayor costo y plazo.
-- **C. Híbrida por fases.** Se parte con el gestor interno (A, con generación del contrato y control de documentos y estados) y se agrega la firma electrónica y la identidad cuando haya proveedor. Es la recomendación.
+- **C. Híbrida por fases (elegida por el usuario el 6 de noviembre de 2026).** Se parte con el gestor interno que sigue lo que ya se tramita en Autofact, y se agrega el contrato propio, la firma y la identidad solo si hay proveedor y decisión.
 
 ## 6. Modelo de datos propuesto
 
@@ -131,32 +176,38 @@ Tablas nuevas (con el mismo criterio de las actuales: RLS activado y acceso solo
 - **Dependencia de terceros:** plazos y costos de firma, biometría y notaría.
 - **Alcance:** Autofact lleva más de tres años y declara más de 1,2 millones de transferencias. Replicar todo es un proyecto grande; por eso se propone por fases.
 
-## 10. Decisiones que necesito de ti
+## 10. Decisiones tomadas y pendientes
 
-1. **Camino:** ¿A (delegar en Autofact), B (plataforma propia) o C (por fases)?
-2. **Alcance de la fase 1:** ¿qué tipos de transferencia entran primero: ventas, compras, consignaciones, o las tres?
-3. **Quién tramita hoy** las transferencias y cómo (notaría, Autofact, un gestor): ¿cuántas por mes?
-4. **Cuenta de Autofact:** ¿ya tienen cuenta de empresa? ¿Saben si ofrecen API o integración?
-5. **Datos de la empresa** para el contrato: razón social, RUT, domicilio, representante legal y su RUT.
-6. **Quién aprueba** el contrato y los pagos (roles y permisos).
+**Tomada:** camino **C** (por fases). Como la automotora ya tramita con Autofact Pro, la fase 1 se define como un **gestor interno que sigue y ordena lo que se hace en Autofact**, sin reemplazar su firma ni su tramitación.
 
-## 11. Plan de trabajo propuesto
+**Pendientes (bloquean el diseño de la fase 1):**
+1. **Contrato:** ¿el contrato lo sigue generando Autofact (el CRM solo registra el folio `TRF…` y su estado) o el CRM genera además su propio contrato de compraventa en PDF para firmar? Recomendación: que Autofact siga generándolo en la fase 1.
+2. **Cómo llega el estado:** Autofact no ofrece (que se haya visto) una API ni un aviso automático. En la fase 1 el estado se actualizaría **a mano** copiándolo desde Autofact. Si existe una API o un correo de avisos por cambio de estado, se podría automatizar. Hay que preguntarle a soporte@autofactpro.com.
+3. **Tipos de contrato:** ¿el equipo usa solo contrato abierto (toma y consignación) o también cerrado (venta directa a nombre de la automotora)?
+4. **Quién hace qué:** quién crea la transferencia, quién aprueba la toma y la venta, y quién paga el impuesto y el arancel (permisos).
+5. **Datos de la empresa** para los documentos propios (razón social, RUT, domicilio, representante legal).
 
-1. Cerrar este levantamiento con tus respuestas y con las pantallas internas de Autofact.
-2. Modelo de datos y estados (`supabase-crm-transferencias.sql`) y reglas puras con pruebas.
-3. Pantallas de gestión en el CRM (lista, ficha, documentos, costos).
-4. Generación del contrato de compraventa en PDF.
-5. Seguimiento público y avisos por correo.
-6. Integración de firma e identidad (fase 2) según el proveedor elegido.
+## 11. Plan de trabajo propuesto (camino C)
+
+**Fase 1: gestor interno (sin firma ni tramitación propias)**
+1. Tabla `transferencias` con el folio de Autofact (`TRF…`), el tipo de contrato, el vínculo con el cierre de venta, la compra o la consignación y el vehículo, el estado de Autofact (los 38 del glosario, agrupados por etapa) y el estado interno del CRM.
+2. Datos del vendedor y del comprador, y del vehículo (chasis, motor, kilometraje, permiso de circulación, tasación fiscal del SII).
+3. Lista de documentos por transferencia: contrato, CAV, certificado de multas, permiso de circulación, cédulas, mandatos y formulario V6, con archivos, vencimiento y revisión del Validador.
+4. Costos: base, arancel estatal e impuesto del 1,5% sobre el mayor valor entre el precio y la tasación fiscal, con quién pagó y cuándo.
+5. Declaraciones PEP y de origen de fondos (sobre 10.000 USD), con listado descargable para la UAF.
+6. Bitácora de actividad y avisos por correo al ejecutivo y al cliente en los cambios de estado.
+7. Alertas: rechazos del Registro Civil o del notario, restricciones, permisos vencidos y transferencias detenidas.
+8. Consulta pública del estado por patente y correo (como el sitio de inspecciones).
+
+**Fase 2: contrato propio y firma** (solo si se decide): generación del contrato en PDF y firma electrónica avanzada con un proveedor acreditado, con la nueva verificación de identidad vigente desde el 1 de noviembre de 2026.
+
+**Fase 3: integración o tramitación propia** (solo si se decide): API o convenio con Autofact, o con notaría y Registro Civil.
 
 ## 12. Lo que falta ver del sistema de referencia
 
-Para completar el levantamiento, hace falta ver las pantallas internas. Esto lo tienes que hacer tú, iniciando sesión en tu cuenta (no se ingresa ninguna credencial desde aquí):
-
-- El listado de transferencias de la automotora y sus estados.
-- La pantalla `transferencia/completar/TRF…` con todos sus campos, pasos y botones.
-- El contrato que se genera, los documentos que piden y cómo se firma.
-- Cómo se paga y cuánto cobra por cada concepto.
-- El seguimiento que ve el cliente.
-
-Con esas pantallas abiertas en el navegador, se puede leer su estructura y ajustar este documento.
+Se puede completar con la sesión iniciada, siempre en solo lectura:
+- Los pasos 2 a 4 del asistente `completar` (avanzar exige guardar, así que conviene hacerlo con un contrato de prueba que el usuario cree).
+- El flujo «Agregar comprador» y la pantalla de firma del cliente.
+- El detalle del pago y de la factura.
+- Las preguntas frecuentes y el manual de la verificación de identidad.
+- Una consulta a soporte sobre API o avisos automáticos de estado.
