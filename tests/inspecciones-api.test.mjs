@@ -551,3 +551,34 @@ test("Eliminar fichas del Inspector: solo el Jefe Local de su local (o la cuenta
   assert.equal((await kv(U.i1.token, "set", k2, { value: JSON.stringify({ patente: "ABCD12", checklist: {} }) })).status, 200);
   assert.equal((await borrar(admin, k2)).status, 200);
 });
+
+test("Crear el lead de compra desde una inspección realizada: toma los datos de la ficha y deja el enlace", async () => {
+  const veh = vehN();
+  const reg = await registrar(U.i1, claveFicha(U.i1), { vehiculo: veh });
+  assert.equal(reg.status, 200, JSON.stringify(reg));
+  const id = reg.inspeccion.id;
+  const cliente = { nombre: "Luis Dueño", telefono: "912345678", rut: "11.111.111-1" };
+  // Quien inspecciona o no tiene la habilitación de Compras no crea el lead.
+  assert.equal((await ve(U.i1.token, "inspecciones.crear_lead", { id, km: 50000, cliente })).status, 403);
+  assert.equal((await ve(U.e1.token, "inspecciones.crear_lead", { id, km: 50000, cliente })).status, 403);
+  // Falta el kilometraje: no está en la ficha.
+  assert.equal((await ve(U.jefe.token, "inspecciones.crear_lead", { id, cliente })).error, "km_invalido");
+  const ok = await ve(U.jefe.token, "inspecciones.crear_lead", { id, km: 50000, cliente });
+  assert.equal(ok.status, 200, JSON.stringify(ok));
+  assert.equal(ok.lead.tipo, "compra");
+  assert.equal(ok.lead.vehiculo_ofrecido.patente, veh.patente);
+  assert.equal(ok.lead.vehiculo_ofrecido.km, 50000);
+  assert.match(ok.lead.fuente, /^Inspección INS-/);
+  assert.equal(ok.inspeccion.lead_id, ok.lead.id);
+  assert.equal(fila(id).lead_id, ok.lead.id);
+  // Una inspección con lead no se vuelve a convertir.
+  assert.equal((await ve(U.jefe.token, "inspecciones.crear_lead", { id, km: 50000, cliente })).error, "inspeccion_con_lead");
+  // Otra inspección de la misma patente: avisa del lead abierto y deja crearlo si se confirma.
+  const reg2 = await registrar(U.i1, claveFicha(U.i1), { vehiculo: veh });
+  const id2 = reg2.inspeccion.id;
+  assert.equal((await ve(U.jefe.token, "inspecciones.crear_lead", { id: id2, km: 51000, cliente })).error, "lead_compra_duplicado");
+  assert.equal((await ve(U.jefe.token, "inspecciones.crear_lead", { id: id2, km: 51000, cliente, confirmarDuplicado: true })).status, 200);
+  // El detalle informa si se puede crear el lead.
+  const det = await ve(U.jefe.token, "inspecciones.get", { id });
+  assert.equal(det.puedeCrearLead, false);
+});

@@ -1727,6 +1727,8 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
   if (op.startsWith("inspecciones.")) {
     const realiza = can("inspecciones.realizar");
     const puedePedir = can("inspecciones.pedir") || esSupervisor;
+    // Crear el lead de compra exige lo mismo que «leads.create» para ese tipo.
+    const puedeCrearLeadCompra = (can(permisoDeTipo("compra")) && can("leads.propios")) || esSupervisor;
     // Quien ve el inventario puede mirar las inspecciones de un vehículo (solo la lista de origen); no pide ni modifica.
     const soloMiraInventario = op === "inspecciones.list" && (can("inventario.ver") || can("inventario.editar"));
     if (!realiza && !puedePedir && !soloMiraInventario) return err("forbidden", 403);
@@ -1767,6 +1769,33 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     }
     const fallar = (e: any) => fallo(e);
     const anotar = async (i: any, texto: string) => { if (i.lead_id) await evento(i.lead_id, "inspeccion", texto); };
+
+    /**
+     * Crea el lead de compra de una inspección ya realizada que no tiene lead (por ejemplo, una espontánea del Inspector): el vehículo sale de la ficha
+     * y la inspección queda ligada al lead. El kilometraje y los datos del cliente los aporta quien lo crea.
+     */
+    if (op === "inspecciones.crear_lead") {
+      if (!puedeCrearLeadCompra) return err("forbidden", 403);
+      const x = await cargarInspeccion(String(body.id ?? ""));
+      if (!x || !(await veInspeccion(x))) return err("no_existe", 404);
+      if (x.estado !== "completada") return err("inspeccion_no_completada", 409);
+      if (x.lead_id) return err("inspeccion_con_lead", 409);
+      const veh = { ...(x.vehiculo || {}), patente: x.patente || (x.vehiculo || {}).patente, km: body.km, color: body.color ?? (x.vehiculo || {}).color };
+      const vo = validarVehiculoOfrecido(veh);
+      if (!vo.ok) return err(vo.error!);
+      const abiertos = await scoped(sb.from("leads").select("id, etapa, vehiculo_ofrecido").eq("tipo", "compra"));
+      if (abiertos.error) return fallar(abiertos.error);
+      const repetido = (abiertos.data ?? []).find((l: any) => ETAPAS_ABIERTAS.includes(l.etapa) && l.vehiculo_ofrecido && l.vehiculo_ofrecido.patente === vo.value.patente);
+      if (repetido && body.confirmarDuplicado !== true) return err("lead_compra_duplicado", 409);
+      const res = await crearLeadCore({ lead: { tipo: "compra", fuente: `Inspección ${folioInspeccion(x.numero)}`, vehiculoOfrecido: vo.value, notas: body.notas }, cliente: body.cliente, asignarA: body.asignarA });
+      if (!res.ok) return res;
+      const creado = await res.json();
+      const lig = await sb.from("inspecciones").update({ lead_id: creado.lead.id, actualizado_en: new Date().toISOString() }).eq("id", x.id);
+      if (lig.error) return fallar(lig.error);
+      await evento(creado.lead.id, "inspeccion", `Lead creado por ${userName} a partir de la inspección ${folioInspeccion(x.numero)} de ${vo.value.patente}`);
+      await audit(ctx.actor, "inspeccion.crear_lead", "inspeccion", x.id, { numero: x.numero, lead_id: creado.lead.id, patente: vo.value.patente });
+      return json({ ...creado, inspeccion: (await enriquecer([{ ...x, lead_id: creado.lead.id }]))[0] });
+    }
 
     if (op === "inspecciones.equipo") {
       if (!esSupervisor) return err("forbidden", 403);
@@ -1863,7 +1892,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     if (op === "inspecciones.get") {
       const x = await cargarInspeccion(String(body.id ?? ""));
       if (!x || !(await veInspeccion(x))) return err("no_existe", 404);
-      return json({ inspeccion: (await enriquecer([x]))[0], puedeGestionar: esSupervisor, puedeRealizar: realiza, esMia: !ctx.esAdmin && x.inspector_id === userId, esSolicitante: !ctx.esAdmin && x.solicitante_id === userId });
+      return json({ inspeccion: (await enriquecer([x]))[0], puedeGestionar: esSupervisor, puedeRealizar: realiza, esMia: !ctx.esAdmin && x.inspector_id === userId, esSolicitante: !ctx.esAdmin && x.solicitante_id === userId, puedeCrearLead: x.estado === "completada" && !x.lead_id && puedeCrearLeadCompra });
     }
 
     // Los datos para armar los PDF de una inspección ya realizada (y de su valorización, si el Inspector la hizo desde ella).
@@ -2797,18 +2826,19 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     });
   }
 
-  if (op === "leads.create") {
+  /** Crea un lead (venta, compra o consignación) con su cliente y su asignación. Lo usan «leads.create» y «inspecciones.crear_lead». */
+  async function crearLeadCore(b: any): Promise<Response> {
     // El tipo de lead (venta, compra o consignación) exige la habilitación correspondiente.
-    const tipoLead = ["compra", "consignacion"].includes(String(body.lead?.tipo)) ? String(body.lead.tipo) : "venta";
+    const tipoLead = ["compra", "consignacion"].includes(String(b.lead?.tipo)) ? String(b.lead.tipo) : "venta";
     if (!(can(permisoDeTipo(tipoLead)) && can("leads.propios")) && !esSupervisor) return err("forbidden", 403);
     const local = await localParaCrear();
     if (!local) return err("sin_local");
 
-    const datosLead = validarLead(body.lead);
+    const datosLead = validarLead(b.lead);
     if (!datosLead.ok) return err(datosLead.error!);
     let ofrecido: any = null;
     if (tipoLead !== "venta") {
-      const vo = validarVehiculoOfrecido(body.lead?.vehiculoOfrecido);
+      const vo = validarVehiculoOfrecido(b.lead?.vehiculoOfrecido);
       if (!vo.ok) return err(vo.error!);
       ofrecido = vo.value;
       datosLead.value.vehiculo_id = null;
@@ -2817,17 +2847,17 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       const { data: v } = await sb.from("vehiculos").select("id, local_id").eq("id", datosLead.value.vehiculo_id).maybeSingle();
       if (!v || v.local_id !== local) return err("vehiculo_invalido");
     }
-    const camp = await resolverCampania(body.lead?.campaniaId, local);
+    const camp = await resolverCampania(b.lead?.campaniaId, local);
     if (!camp.ok) return err("campania_invalida");
 
     // Cliente: uno existente del mismo local, o uno nuevo (si trae RUT que ya existe, se reutiliza).
     let cliente: any = null;
-    if (body.cliente?.id) {
-      const { data } = await sb.from("clientes").select("*").eq("id", String(body.cliente.id)).maybeSingle();
+    if (b.cliente?.id) {
+      const { data } = await sb.from("clientes").select("*").eq("id", String(b.cliente.id)).maybeSingle();
       if (!data || data.local_id !== local) return err("cliente_invalido");
       cliente = data;
     } else {
-      const c = validarCliente(body.cliente);
+      const c = validarCliente(b.cliente);
       if (!c.ok) return err(c.error!);
       if (c.value.rut) {
         const { data } = await sb.from("clientes").select("*").eq("local_id", local).eq("rut", c.value.rut).maybeSingle();
@@ -2845,9 +2875,9 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     let asignado: { id: string; nombre: string } | null = null;
     if (!esSupervisor) {
       asignado = { id: userId, nombre: userName };
-    } else if (body.asignarA && body.asignarA !== "auto") {
+    } else if (b.asignarA && b.asignarA !== "auto") {
       const candidatos = await elegibles(local, tipoLead);
-      asignado = candidatos.find((c: any) => c.id === body.asignarA) ?? null;
+      asignado = candidatos.find((c: any) => c.id === b.asignarA) ?? null;
       if (!asignado) return err("asignado_invalido");
     } else {
       asignado = elegirAsignado(await elegibles(local, tipoLead), await ultimasAsignaciones(tipoLead));
@@ -2863,6 +2893,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     if (asignado) await avisarA([asignado.id], "Nuevo lead asignado", [`Se te asignó un lead de ${cliente.nombre}${cliente.telefono ? ` (teléfono ${cliente.telefono})` : ""}.`, `Lo creó ${userName || "el sistema"}. Contáctalo cuanto antes.`]);
     return json({ lead, cliente, asignado });
   }
+  if (op === "leads.create") return await crearLeadCore(body);
 
   if (op === "leads.update") {
     const lead = await cargarLead(String(body.id ?? ""));

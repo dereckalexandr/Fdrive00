@@ -226,6 +226,7 @@ export function InspeccionDetalle({ api, id, onCerrar, onCambio, onRealizar, onV
   const [destino, setDestino] = useState("");
   const lugares = useLugares(api);
   const [rp, setRp] = useState({ direccion: "", fechaHora: "", contactoLugar: "", lugar: LUGAR_VACIO });
+  const [lc, setLc] = useState({ nombre: "", telefono: "", email: "", rut: "", km: "", duplicado: false });
 
   useEffect(() => { if (modo === "asignar" && datos && datos.puedeGestionar) api("inspecciones.equipo").then((r) => setEquipo(r.inspectores)).catch(() => {}); }, [api, datos, modo]);
   useEffect(() => {
@@ -266,6 +267,7 @@ export function InspeccionDetalle({ api, id, onCerrar, onCambio, onRealizar, onV
       <div className="flex flex-wrap gap-2">
         {x.estado === "pendiente" && datos.puedeRealizar && <button disabled={ocupado} onClick={() => accion("inspecciones.tomar", {}, (r) => (r.choque ? "Es tuya. Ojo: tienes otra inspección a menos de 90 minutos de esta." : "Es tuya: quedó en tu agenda."))} className={BTN_AMBAR}>Tomar</button>}
         {x.estado === "en_proceso" && datos.esMia && onRealizar && <button onClick={() => { onRealizar(x); onCerrar(); }} className={BTN_AMBAR}>Realizar la inspección</button>}
+        {datos.puedeCrearLead && <button onClick={() => setModo(modo === "lead" ? "" : "lead")} className={BTN_AMBAR}>Crear lead de compra</button>}
         {x.estado === "completada" && datos.esMia && x.fichaKey && onVerFicha && <button onClick={() => { onVerFicha(x); onCerrar(); }} className={BTN}>Abrir mi ficha</button>}
         {x.estado === "en_proceso" && (datos.esMia || datos.puedeGestionar) && <button disabled={ocupado} onClick={() => accion("inspecciones.liberar", {}, "Volvió a la cola.")} className={BTN}>Devolver a la cola</button>}
         {abierta && datos.puedeGestionar && <button onClick={() => setModo(modo === "asignar" ? "" : "asignar")} className={BTN}>{x.estado === "pendiente" ? "Asignar a un Inspector" : "Reasignar"}</button>}
@@ -289,6 +291,20 @@ export function InspeccionDetalle({ api, id, onCerrar, onCambio, onRealizar, onV
           </div>
           <LugarInspeccion lugares={lugares} valor={rp.lugar} onChange={(l) => setRp({ ...rp, lugar: l })} actual={x.direccion} />
           <div><button disabled={ocupado || !rp.lugar.opcion} onClick={() => accion("inspecciones.reprogramar", { datos: { ...rp, lugar: lugarDe(rp.lugar), fechaHora: deInputLocal(rp.fechaHora) } }, "Reprogramada.")} className={BTN_PRIMARIO}>Guardar cambios</button></div>
+        </div>
+      )}
+      {modo === "lead" && (
+        <div className="flex flex-col gap-3 border border-stone-200 bg-white p-3">
+          <p className="text-xs text-stone-500">El vehículo ({nombreVeh(x.vehiculo)}, patente {x.vehiculo.patente}) se toma de la ficha. Escribe los datos del dueño y el kilometraje, que no viene en la ficha.</p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <Campo etiqueta="Nombre del dueño *"><input value={lc.nombre} maxLength={120} onChange={(e) => setLc({ ...lc, nombre: e.target.value })} className={INPUT} /></Campo>
+            <Campo etiqueta="Teléfono *"><input value={lc.telefono} maxLength={20} onChange={(e) => setLc({ ...lc, telefono: e.target.value })} className={INPUT} /></Campo>
+            <Campo etiqueta="Kilometraje *"><input inputMode="numeric" value={lc.km} onChange={(e) => setLc({ ...lc, km: e.target.value.replace(/\D/g, "") })} className={INPUT} /></Campo>
+            <Campo etiqueta="Correo (opcional)"><input type="email" value={lc.email} maxLength={120} onChange={(e) => setLc({ ...lc, email: e.target.value })} className={INPUT} /></Campo>
+            <Campo etiqueta="RUT (opcional)"><input value={lc.rut} maxLength={14} onChange={(e) => setLc({ ...lc, rut: e.target.value })} className={INPUT} /></Campo>
+          </div>
+          {msg.texto && /lead de compra abierto/.test(msg.texto) && <label className="text-sm text-stone-700 flex items-center gap-2"><input type="checkbox" checked={lc.duplicado} onChange={(e) => setLc({ ...lc, duplicado: e.target.checked })} />Crear de todas formas</label>}
+          <div><button disabled={ocupado || lc.nombre.trim().length < 3 || lc.telefono.replace(/\D/g, "").length < 8 || !lc.km} onClick={() => accion("inspecciones.crear_lead", { km: Number(lc.km), confirmarDuplicado: lc.duplicado || undefined, cliente: { nombre: lc.nombre, telefono: lc.telefono, email: lc.email || undefined, rut: lc.rut || undefined } }, "Lead de compra creado y ligado a esta inspección. Búscalo en el tablero de compras.")} className={BTN_PRIMARIO}>Crear el lead</button></div>
         </div>
       )}
       {modo === "cancelar" && (
