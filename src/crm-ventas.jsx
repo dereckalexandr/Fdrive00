@@ -169,7 +169,7 @@ function LeadFicha({ api, leadId, catalogos, onCerrar, onCambio, onEditar }) {
       {tipoLead === "compra" && <SeccionCompra api={api} lead={lead} datos={datos} operacion={operacion} setOperacion={setOperacion} avisar={setMsg} onCambio={async () => { await recargar(); onCambio(); }} />}
       {tipoLead === "consignacion" && <SeccionConsignacion api={api} lead={lead} datos={datos} operacion={operacion} setOperacion={setOperacion} avisar={setMsg} onCambio={async () => { await recargar(); onCambio(); }} />}
       {(puedeEditar || catalogos.veTodo) && (
-        <SeccionInspeccion api={api} origen={{ tipo: "lead", id: lead.id }} cerrado={lead.etapa === "ganado" || lead.etapa === "perdido" || !puedeEditar}
+        <SeccionInspeccion api={api} origen={{ tipo: "lead", id: lead.id }} permitirPedir={!esVenta} cerrado={lead.etapa === "ganado" || lead.etapa === "perdido" || !puedeEditar}
           vehiculo={!esVenta ? ofrecido : pp.tiene && pp.patente ? { patente: pp.patente, marca: pp.marca, modelo: pp.modelo, anio: pp.anio, km: pp.km } : vehiculo ? { patente: vehiculo.patente, marca: vehiculo.marca, modelo: vehiculo.modelo, anio: vehiculo.anio, km: vehiculo.km } : {}} />
       )}
       <SeccionValidacion api={api} origen={{ tipo: "lead", id: lead.id }} titulo="Validación de documentos de la venta" version={datos.cierres.length} />

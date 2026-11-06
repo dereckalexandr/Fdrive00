@@ -350,7 +350,7 @@ export function InspeccionesVehiculoSoloLectura({ api, vehiculoId }) {
   );
 }
 
-export function SeccionInspeccion({ api, origen, vehiculo, cerrado = false, version = 0, onCambio = () => {}, onRealizar }) {
+export function SeccionInspeccion({ api, origen, vehiculo, cerrado = false, version = 0, onCambio = () => {}, onRealizar, permitirPedir = true }) {
   const campo = origen.tipo === "lead" ? "leadId" : origen.tipo === "tasacion" ? "tasacionId" : "vehiculoId";
   const { datos, error, recargar } = useCarga(() => api("inspecciones.list", { vista: "origen", [campo]: origen.id }), [api, origen.id, version]);
   const [pidiendo, setPidiendo] = useState(false);
@@ -358,7 +358,7 @@ export function SeccionInspeccion({ api, origen, vehiculo, cerrado = false, vers
   if (error || !datos) return null; // sin permiso o cargando: no estorba
   const lista = datos.inspecciones;
   const abierta = lista.find((x) => x.estado === "pendiente" || x.estado === "en_proceso");
-  const puedePedir = datos.puedePedir && !cerrado;
+  const puedePedir = datos.puedePedir && !cerrado && permitirPedir;
   if (lista.length === 0 && !puedePedir) return null;
   const cambio = async () => { await recargar(); onCambio(); };
   return (
