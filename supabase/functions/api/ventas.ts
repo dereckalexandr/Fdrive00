@@ -1495,6 +1495,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       const ahora = new Date().toISOString();
       const patch: Record<string, unknown> = { estado, actualizado_en: ahora };
       if (estado === "aprobada" && v.estado !== "aprobada") patch.resuelta_en = ahora;
+      if (estado === "aprobada" && !v.enviada_en) patch.enviada_en = ahora; // aprobada = ya pasó por revisión, aunque no se enviara a la cola
       if (estado !== "aprobada") patch.resuelta_en = null;
       const { data, error } = await sb.from("validaciones").update(patch).eq("id", v.id).select().single();
       if (error) throw error;
@@ -2414,7 +2415,8 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       const req = await requisitosDeCompra(c);
       if (req.aplica && req.faltantes.length > 0) return err("compra_incompleta", 409);
       // Los documentos se envían a validar antes de pedir el pago (cuando hay Validadores en el local).
-      if (req.aplica && req.val && !req.val.enviada_en && (await hayValidadores(c.local_id))) return err("validacion_sin_enviar", 409);
+      // Si el Jefe Local ya las validó él mismo, están aprobadas aunque nunca pasaran por la cola: no hace falta enviarlas.
+      if (req.aplica && req.val && !req.val.enviada_en && req.val.estado !== "aprobada" && (await hayValidadores(c.local_id))) return err("validacion_sin_enviar", 409);
       const { data, error } = await sb.from("compras").update({ ...v.value, estado: "pago_pendiente", solicitado_por: userName, motivo_rechazo_pago: null, actualizado_en: new Date().toISOString() }).eq("id", c.id).select().single();
       if (error) return fallar(error);
       await evento(c.lead_id, "compra", `Pago de ${dinero(v.value.monto_final)} (${v.value.medio_pago}) solicitado por ${userName} para ${folioCompra(c.numero)}`);

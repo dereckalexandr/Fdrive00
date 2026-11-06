@@ -918,3 +918,24 @@ test("Enviar a validar: al registrar el contrato de consignación la validación
   const val = db.tablas.validaciones.find((v) => v.consignacion_id === ok.consignacion.id);
   assert.ok(val && val.enviada_en, "queda enviada al registrar el contrato");
 });
+
+test("Pedir el pago: si el Jefe Local ya aprobó los documentos, no hace falta enviarlos a la cola", async () => {
+  fila("usuarios", U.vv.id).activo = true; // el local vuelve a tener un Validador
+  try {
+    const lead = await leadDe(U.c1.token, "compra");
+    const tas = await tasar(lead);
+    const o = await ofertar(U.c1.token, lead.id, tas.id, 6000000);
+    assert.equal(o.status, 200, JSON.stringify(o));
+    const rq = await ve(U.c1.token, "compras.requisitos", { id: o.compra.id });
+    assert.equal((await ve(U.c1.token, "compras.responder", { id: o.compra.id, acepta: true })).status, 200);
+    await cumplirRequisitos(o.compra.id);
+    const val = db.tablas.validaciones.find((v) => v.id === rq.validacionId);
+    assert.equal((await ve(U.c1.token, "compras.solicitarPago", { id: o.compra.id, datos: PAGO() })).error, "validacion_sin_enviar");
+    // Estado real visto en producción: aprobada por el Jefe Local, sin la marca de «enviada».
+    val.estado = "aprobada"; val.enviada_en = null; val.validador_id = U.jefe.id;
+    assert.equal((await ve(U.c1.token, "compras.solicitarPago", { id: o.compra.id, datos: PAGO() })).status, 200);
+  } finally {
+    fila("usuarios", U.vv.id).activo = false;
+    db.tablas.validaciones.forEach((v) => { if (!v.enviada_en) v.enviada_en = new Date().toISOString(); });
+  }
+});
