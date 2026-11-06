@@ -348,3 +348,30 @@ test("Si faltan las tablas de la entrega 2C, el resto sigue funcionando", async 
     if (x) assert.equal((await cerrar(U.jefe.token, x.id, DATOS())).error, "crm_not_installed");
   } finally { Object.assign(db.tablas, guardadas); }
 });
+
+test("Nota de venta: solo con la venta aprobada, con el detalle de lo pagado", async () => {
+  const x = await leadReservado(U.e1.token);
+  const c = await cerrar(U.e1.token, x.lead.id, DATOS({ precioFinal: 9800000, montoFinanciado: 3000000, financiera: "Autofin", comisionFinanciera: 100000 }));
+  assert.equal(c.status, 200, JSON.stringify(c));
+  assert.equal((await ve(U.e1.token, "cierres.nota", { id: c.cierre.id })).error, "cierre_no_aprobado", "pendiente: no hay nota");
+  assert.equal((await ve(U.jefe.token, "cierres.aprobar", { id: c.cierre.id })).status, 200);
+  const r = await ve(U.e1.token, "cierres.nota", { id: c.cierre.id });
+  assert.equal(r.status, 200, JSON.stringify(r));
+  const n = r.nota;
+  assert.match(n.folio, /^VTA-/);
+  assert.equal(n.precio_final, 9800000);
+  assert.equal(n.pagos.reserva, 500000);
+  assert.equal(n.pagos.financiado, 3000000);
+  assert.equal(n.pagos.financiera, "Autofin");
+  assert.equal(n.pagos.saldo, 9800000 - 500000 - 3000000, "saldo = precio - reserva - parte de pago - crédito");
+  assert.equal(n.vehiculo.patente, x.veh.patente);
+  assert.ok(n.cliente.nombre);
+  assert.ok(n.aprobado_por);
+  // Otro ejecutivo no ve la venta ajena.
+  assert.equal((await ve(U.e2.token, "cierres.nota", { id: c.cierre.id })).status, 404);
+  // El PDF se genera.
+  const { buildNotaVentaPdf } = await import("../src/pdf-report.js");
+  const pdf = buildNotaVentaPdf(n, { fmt: (v) => `$${Number(v).toLocaleString("es-CL")}` });
+  assert.equal(String.fromCharCode(...pdf.slice(0, 5)), "%PDF-");
+  assert.ok(pdf.length > 2500);
+});

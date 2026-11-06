@@ -3513,6 +3513,43 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       },
     });
   }
+  /**
+   * Datos de la nota de venta: solo existe con la venta aprobada (documentos validados y aprobación del Jefe Local). Trae el detalle de lo pagado:
+   * reserva, vehículo recibido en parte de pago, crédito de la financiera y el saldo cancelado, más los respaldos de pago adjuntos.
+   */
+  if (op === "cierres.nota") {
+    const c = await cargarCierre(String(body.id ?? ""));
+    if (!c || !(veTodoElLocal || c.ejecutivo_id === userId)) return err("no_existe", 404);
+    if (c.estado !== "aprobada") return err("cierre_no_aprobado", 409);
+    const [loc] = c.local_id ? await porIds("locales", [c.local_id]) : [null];
+    const [cli] = c.cliente_id ? await porIds("clientes", [c.cliente_id]) : [null];
+    const [eje] = c.ejecutivo_id ? await porIds("usuarios", [c.ejecutivo_id]) : [null];
+    const cot = c.cotizacion_id ? (await sb.from("cotizaciones").select("parte_pago").eq("id", c.cotizacion_id).maybeSingle()).data : null;
+    const pp = (cot && cot.parte_pago) || {};
+    const vq = await sb.from("validaciones").select("*").eq("cierre_id", c.id);
+    const val = vq.error ? null : (vq.data ?? []).filter((x: any) => x.estado !== "cancelada").sort((a: any, b: any) => (a.estado === "aprobada" ? -1 : 0) - (b.estado === "aprobada" ? -1 : 0))[0] ?? null;
+    const docs = val ? await enLotes("validacion_docs", "validacion_id", [val.id]) : [];
+    const respaldos = docs.filter((d: any) => d.estado === "aprobado" || (d.archivos ?? []).length > 0).sort((a: any, b: any) => (a.orden ?? 0) - (b.orden ?? 0))
+      .map((d: any) => ({ nombre: d.nombre, estado: d.estado, archivos: (d.archivos ?? []).length, revisado_por: d.revisado_por ?? null }));
+    const reserva = Number(c.reserva_monto) || 0;
+    const parte = Number(c.monto_parte_pago) || 0;
+    const financiado = Number(c.monto_financiado) || 0;
+    const saldo = Math.max(0, Number(c.precio_final) - reserva - parte - financiado);
+    await audit(ctx.actor, "venta.nota", "cierre", c.id, { numero: c.numero });
+    return json({
+      nota: {
+        folio: folioVenta(c.numero), fecha: c.aprobado_en || c.actualizado_en, fecha_entrega: c.fecha_entrega, local: loc ? loc.nombre : "", ejecutivo: eje ? eje.nombre : c.solicitado_por, aprobado_por: c.aprobado_por,
+        cliente: cli ? { nombre: cli.nombre, rut: cli.rut, telefono: cli.telefono, email: cli.email, direccion: cli.direccion, comuna: cli.comuna } : {},
+        vehiculo: c.vehiculo_snapshot || {},
+        precio_lista: c.precio_lista, precio_final: c.precio_final,
+        pagos: { reserva, parte_pago: parte, financiado, financiera: c.financiera || "", saldo },
+        vehiculo_parte_pago: parte > 0 ? { patente: pp.patente || "", marca: pp.marca || "", modelo: pp.modelo || "", anio: pp.anio ?? null, km: pp.km ?? null } : null,
+        validacion: val ? { folio: folioValidacion(val.numero), estado: val.estado } : null,
+        respaldos,
+      },
+    });
+  }
+
   if (op === "cierres.aprobar" || op === "cierres.rechazar") {
     if (!esSupervisor) return err("forbidden", 403);
     const c = await cargarCierre(String(body.id ?? ""));

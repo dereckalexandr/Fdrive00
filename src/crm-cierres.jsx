@@ -13,7 +13,7 @@ import { InputDinero } from "./campo-dinero.jsx";
 import { MODULOS_COMISION, getTramo, etiquetaTramo } from "../supabase/functions/api/comisiones-core.js";
 import { calcularCotizacion, validarCierre, cierreNombre, mesChile, FINANCIERAS } from "../supabase/functions/api/ventas-core.js";
 import { Aprobaciones, topeTasado } from "./crm-cotizaciones.jsx";
-import { buildContratoCompraventaPdf } from "./pdf-report.js";
+import { buildContratoCompraventaPdf, buildNotaVentaPdf } from "./pdf-report.js";
 import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, fechaCorta, hace, Aviso, Cargando, Tarjeta, Campo, Modal, useCarga, mensajeError } from "./crm-ui.jsx";
 
 export const folioVenta = (n) => `VTA-${String(n || 0).padStart(6, "0")}`;
@@ -100,6 +100,17 @@ function FormCierre({ api, lead, cotizacion, reserva, catalogos, tope, onCerrar,
 /* =========================================================
    SECCIÓN EN LA FICHA DEL LEAD
 ========================================================= */
+/** Genera y descarga la nota de venta con el detalle de lo pagado (solo existe con la venta aprobada). */
+async function descargarNotaVenta(api, id) {
+  const { nota } = await api("cierres.nota", { id });
+  const bytes = buildNotaVentaPdf(nota, { fmt: clp });
+  const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+  const a = document.createElement("a");
+  a.href = url; a.download = `Nota-de-venta_${nota.folio}_${(nota.vehiculo && nota.vehiculo.patente) || "vehiculo"}.pdf`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 3000);
+}
+
 /** Genera y descarga el contrato de compraventa (réplica del de Autofact Pro) de una venta. */
 async function descargarContratoCompraventa(api, id, datos) {
   const { contrato } = await api("cierres.contrato", { id, datos });
@@ -166,7 +177,7 @@ export function SeccionCierres({ api, lead, datos, catalogos, onCambio, avisar }
             {c.monto_parte_pago > 0 ? ` · parte de pago ${clp(c.monto_parte_pago)}` : ""}{c.monto_financiado > 0 ? ` · financiado ${clp(c.monto_financiado)} (${c.financiera})` : ""}
             {c.seguro ? " · con seguro" : ""}{c.margen != null ? ` · margen ${clp(c.margen)}` : ""}
           </p>
-          {c.estado === "pendiente" && <p className="text-xs text-amber-700 mt-1">Esperando la aprobación del Jefe Local (pedido por {c.solicitado_por}).</p>}
+          {c.estado === "pendiente" && <p className="text-xs text-amber-700 mt-1">Esperando la aprobación del Jefe Local (pedido por {c.solicitado_por}). Adjunta el respaldo de los pagos en «Validación de documentos de la venta» (más abajo): el Jefe Local o el Validador revisa los documentos y recién ahí se aprueba la venta. Con la venta aprobada podrás imprimir la nota de venta.</p>}
           {c.estado === "aprobada" && <p className="text-xs text-emerald-700 mt-1">Aprobada por {c.aprobado_por}. Cuenta para la comisión de {c.mes}.</p>}
           {c.estado === "rechazada" && <p className="text-xs text-rose-700 mt-1">Rechazada: {c.motivo_rechazo}. Puedes corregir los datos y pedir el cierre de nuevo.</p>}
           {c.estado === "anulada" && <p className="text-xs text-stone-500 mt-1">Anulada{c.anulado_por ? ` por ${c.anulado_por}` : ""}: {c.motivo_anulacion}</p>}
@@ -174,6 +185,7 @@ export function SeccionCierres({ api, lead, datos, catalogos, onCambio, avisar }
             {c.estado === "pendiente" && catalogos.puedeAsignar && <button disabled={ocupado} onClick={() => correr(() => api("cierres.aprobar", { id: c.id }))} className={BTN_AMBAR}>Aprobar venta</button>}
             {c.estado === "pendiente" && puedeEditar && <button disabled={ocupado} onClick={() => correr(() => api("cierres.retirar", { id: c.id }))} className={BTN}>Retirar</button>}
             {c.estado === "aprobada" && catalogos.puedeAsignar && <button onClick={() => { setAnulando(c); setMotivo(""); }} className={BTN}>Anular venta…</button>}
+            {c.estado === "aprobada" && <button disabled={ocupado} onClick={() => correr(() => descargarNotaVenta(api, c.id))} className={BTN_AMBAR}>Imprimir nota de venta (PDF)</button>}
             {(c.estado === "pendiente" || c.estado === "aprobada") && puedeEditar && <button onClick={() => setContrato(contrato === c.id ? "" : c.id)} className={BTN}>Contrato de compraventa…</button>}
           </div>
           {contrato === c.id && <FormContratoCompraventa api={api} cierre={c} avisar={avisar} onCerrar={() => setContrato("")} />}

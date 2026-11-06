@@ -579,6 +579,43 @@ export function buildContratoConsignacionPdf(c, { fmt }) {
 }
 
 /**
+ * Nota de venta de un vehículo (venta aprobada): cliente, vehículo, precio, detalle de lo pagado y respaldos de pago.
+ * @param n  { folio, fecha, fecha_entrega, local, ejecutivo, aprobado_por, cliente, vehiculo, precio_lista, precio_final, pagos: { reserva, parte_pago, financiado, financiera, saldo },
+ *             vehiculo_parte_pago, validacion, respaldos: [{ nombre, archivos }] }
+ */
+export function buildNotaVentaPdf(n, { fmt }) {
+  const v = n.vehiculo || {};
+  const pdf = new PdfDoc(`Nota de venta ${n.folio} · ${[v.marca, v.modelo].filter(Boolean).join(" ")} · ${n.local || "Drive Futuro"}`);
+  pdf.title(`Nota de venta ${n.folio}`, fechaLarga(String(n.fecha || "").slice(0, 10)));
+  const cli = n.cliente || {};
+  pdf.sectionBar("Cliente");
+  pdf.fields([["NOMBRE", cli.nombre], ["RUT", cli.rut], ["TELÉFONO", cli.telefono], ["CORREO", cli.email], ["DIRECCIÓN", cli.direccion], ["COMUNA", cli.comuna]]);
+  pdf.sectionBar("Vehículo vendido");
+  pdf.fields([
+    ["PATENTE", v.patente], ["MARCA", v.marca], ["MODELO", [v.modelo, v.version].filter(Boolean).join(" ")], ["AÑO", v.anio],
+    ["KILOMETRAJE", v.km != null ? `${Number(v.km).toLocaleString("es-CL")} km` : ""], ["FECHA DE ENTREGA", n.fecha_entrega ? fechaLarga(String(n.fecha_entrega).slice(0, 10)) : ""],
+  ]);
+  const p = n.pagos || {};
+  pdf.sectionBar("Precio y detalle de los pagos");
+  if (n.precio_lista != null && Number(n.precio_lista) !== Number(n.precio_final)) pdf.totalLine("Precio de lista", fmt(n.precio_lista));
+  pdf.totalLine("Precio de venta", fmt(n.precio_final), { big: true });
+  if (Number(p.reserva) > 0) pdf.totalLine("Pagado como reserva", fmt(p.reserva), { bold: false });
+  if (Number(p.parte_pago) > 0) {
+    const pp = n.vehiculo_parte_pago || {};
+    const detalle = [pp.marca, pp.modelo, pp.anio, pp.patente].filter(Boolean).join(" ");
+    pdf.totalLine(`Vehículo recibido en parte de pago${detalle ? ` (${detalle})` : ""}`, fmt(p.parte_pago), { bold: false });
+  }
+  if (Number(p.financiado) > 0) pdf.totalLine(`Crédito pagado por la financiera${p.financiera ? ` (${p.financiera})` : ""}`, fmt(p.financiado), { bold: false });
+  pdf.totalLine("Saldo pagado (contado o transferencia)", fmt(p.saldo), { bold: false });
+  pdf.totalLine("Total pagado", fmt(n.precio_final), { big: true });
+  if ((n.respaldos || []).length) pdf.paragraph("RESPALDOS ADJUNTOS", n.respaldos.map((r) => `${r.nombre}${r.archivos ? ` (${r.archivos} archivo${r.archivos === 1 ? "" : "s"})` : ""}`).join(" · "));
+  if (n.validacion) pdf.paragraph("VALIDACIÓN DE DOCUMENTOS", `${n.validacion.folio}: ${n.validacion.estado === "aprobada" ? "aprobada" : n.validacion.estado}`);
+  pdf.sectionBar("Venta realizada por");
+  pdf.fields([["EJECUTIVO", n.ejecutivo], ["APROBADA POR", n.aprobado_por], ["LOCAL", n.local]]);
+  return pdf.build();
+}
+
+/**
  * Contrato de compraventa de vehículo (réplica del contrato de Autofact Pro): comparecencia, cláusulas y firmas de ambas partes.
  * @param c  datos para contratoCompraventa (ver contrato-compraventa-core.js)
  */

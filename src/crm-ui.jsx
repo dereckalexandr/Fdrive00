@@ -147,6 +147,7 @@ const MENSAJES = {
   inspeccion_no_completada: "Solo se crea el lead de una inspección ya realizada.",
   inspeccion_con_lead: "Esta inspección ya tiene un lead.",
   lead_compra_duplicado: "Ya hay un lead de compra abierto con esa patente. Revisa si es el mismo antes de crear otro.",
+  cierre_no_aprobado: "La nota de venta se imprime cuando la venta ya está aprobada.",
   chasis_invalido: "Escribe el número de chasis (VIN) del vehículo.",
   tasacion_fiscal_invalida: "Escribe la tasación fiscal del vehículo (la que figura en el certificado del Registro Civil o el SII).",
   kilometraje_invalido: "El kilometraje no es válido.",
