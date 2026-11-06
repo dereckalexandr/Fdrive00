@@ -608,3 +608,16 @@ test("Crear el lead de compra completa el cliente y el vehículo con lo que trae
   assert.equal(ok2.status, 200, JSON.stringify(ok2));
   assert.equal(ok2.cliente.nombre, "Otra Persona");
 });
+
+test("Un lead nuevo con el RUT de un cliente existente reutiliza al cliente pero actualiza sus datos de contacto", async () => {
+  const rut = "22.222.222-2";
+  const a = await ve(U.jefe.token, "leads.create", { cliente: { nombre: "Pedro Antiguo", rut, telefono: "911111111", email: "viejo@correo.cl" }, lead: {}, asignarA: "auto" });
+  assert.equal(a.status, 200, JSON.stringify(a));
+  const b = await ve(U.jefe.token, "leads.create", { cliente: { nombre: "Pedro Nuevo Apellido", rut, telefono: "922222222" }, lead: {}, asignarA: "auto" });
+  assert.equal(b.status, 200, JSON.stringify(b));
+  assert.equal(b.cliente.id, a.cliente.id, "es la misma persona");
+  assert.equal(b.cliente.nombre, "Pedro Nuevo Apellido");
+  assert.equal(b.cliente.telefono, "922222222");
+  assert.equal(b.cliente.email, "viejo@correo.cl", "lo que no se escribió se conserva");
+  assert.equal(db.tablas.clientes.filter((c) => c.rut === "22222222-2").length, 1);
+});

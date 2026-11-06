@@ -2882,6 +2882,17 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       if (c.value.rut) {
         const { data } = await sb.from("clientes").select("*").eq("local_id", local).eq("rut", c.value.rut).maybeSingle();
         cliente = data ?? null;
+        // Mismo RUT = misma persona, pero lo que se escribe ahora es lo más reciente: el cliente conserva su historia y se actualizan sus datos de contacto.
+        if (cliente) {
+          const cambios: Record<string, unknown> = {};
+          for (const k of ["nombre", "telefono", "email"] as const) if (c.value[k] && c.value[k] !== cliente[k]) cambios[k] = c.value[k];
+          if (Object.keys(cambios).length > 0) {
+            const up = await sb.from("clientes").update(cambios).eq("id", cliente.id).select().single();
+            if (up.error) return fallo(up.error);
+            await audit(ctx.actor, "cliente.actualizar", "cliente", cliente.id, { campos: Object.keys(cambios), motivo: "lead nuevo con el mismo RUT" });
+            cliente = up.data;
+          }
+        }
       }
       if (!cliente) {
         const ins = await sb.from("clientes").insert({ ...c.value, local_id: local, creado_por: ctx.esAdmin ? null : userId }).select().single();
