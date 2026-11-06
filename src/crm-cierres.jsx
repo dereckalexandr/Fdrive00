@@ -13,6 +13,7 @@ import { InputDinero } from "./campo-dinero.jsx";
 import { MODULOS_COMISION, getTramo, etiquetaTramo } from "../supabase/functions/api/comisiones-core.js";
 import { calcularCotizacion, validarCierre, cierreNombre, mesChile, FINANCIERAS } from "../supabase/functions/api/ventas-core.js";
 import { Aprobaciones, topeTasado } from "./crm-cotizaciones.jsx";
+import { buildContratoCompraventaPdf } from "./pdf-report.js";
 import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, fechaCorta, hace, Aviso, Cargando, Tarjeta, Campo, Modal, useCarga, mensajeError } from "./crm-ui.jsx";
 
 export const folioVenta = (n) => `VTA-${String(n || 0).padStart(6, "0")}`;
@@ -99,9 +100,43 @@ function FormCierre({ api, lead, cotizacion, reserva, catalogos, tope, onCerrar,
 /* =========================================================
    SECCIÓN EN LA FICHA DEL LEAD
 ========================================================= */
+/** Genera y descarga el contrato de compraventa (réplica del de Autofact Pro) de una venta. */
+async function descargarContratoCompraventa(api, id, datos) {
+  const { contrato } = await api("cierres.contrato", { id, datos });
+  const bytes = buildContratoCompraventaPdf(contrato, { fmt: clp });
+  const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+  const a = document.createElement("a");
+  a.href = url; a.download = `Contrato-de-compraventa_${(contrato.vehiculo && contrato.vehiculo.patente) || "vehiculo"}.pdf`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 3000);
+}
+
+function FormContratoCompraventa({ api, cierre, avisar, onCerrar }) {
+  const [f, setF] = useState({ chasis: "", tasacionFiscal: "", formaPago: "" });
+  const [ocupado, setOcupado] = useState(false);
+  const descargar = async () => {
+    avisar(""); setOcupado(true);
+    try { await descargarContratoCompraventa(api, cierre.id, f); onCerrar(); } catch (e) { avisar(mensajeError(e)); }
+    setOcupado(false);
+  };
+  return (
+    <div className="mt-2 border border-stone-200 bg-stone-50 p-3 grid gap-2 md:grid-cols-3">
+      <label className="text-xs text-stone-600">N° de chasis (VIN) *<input value={f.chasis} onChange={(e) => setF({ ...f, chasis: e.target.value })} className={INPUT} /></label>
+      <label className="text-xs text-stone-600">Tasación fiscal ($) *<input inputMode="numeric" value={f.tasacionFiscal} onChange={(e) => setF({ ...f, tasacionFiscal: e.target.value.replace(/\D/g, "") })} className={INPUT} /></label>
+      <label className="text-xs text-stone-600">Forma de pago (vacío = al contado)<input value={f.formaPago} onChange={(e) => setF({ ...f, formaPago: e.target.value })} className={INPUT} /></label>
+      <div className="md:col-span-3 flex flex-wrap items-center gap-2">
+        <button disabled={ocupado} onClick={descargar} className={BTN_PRIMARIO}>Descargar contrato (PDF)</button>
+        <button onClick={onCerrar} className={BTN}>Cancelar</button>
+        <p className="text-xs text-stone-500">Borrador con las cláusulas del contrato oficial; los datos de la empresa se toman de la configuración.</p>
+      </div>
+    </div>
+  );
+}
+
 export function SeccionCierres({ api, lead, datos, catalogos, onCambio, avisar }) {
   const [form, setForm] = useState(false);
   const [anulando, setAnulando] = useState(null);
+  const [contrato, setContrato] = useState("");
   const [motivo, setMotivo] = useState("");
   const [ocupado, setOcupado] = useState(false);
   const { cierres, reservas, cotizaciones, puedeEditar } = datos;
@@ -139,7 +174,9 @@ export function SeccionCierres({ api, lead, datos, catalogos, onCambio, avisar }
             {c.estado === "pendiente" && catalogos.puedeAsignar && <button disabled={ocupado} onClick={() => correr(() => api("cierres.aprobar", { id: c.id }))} className={BTN_AMBAR}>Aprobar venta</button>}
             {c.estado === "pendiente" && puedeEditar && <button disabled={ocupado} onClick={() => correr(() => api("cierres.retirar", { id: c.id }))} className={BTN}>Retirar</button>}
             {c.estado === "aprobada" && catalogos.puedeAsignar && <button onClick={() => { setAnulando(c); setMotivo(""); }} className={BTN}>Anular venta…</button>}
+            {(c.estado === "pendiente" || c.estado === "aprobada") && puedeEditar && <button onClick={() => setContrato(contrato === c.id ? "" : c.id)} className={BTN}>Contrato de compraventa…</button>}
           </div>
+          {contrato === c.id && <FormContratoCompraventa api={api} cierre={c} avisar={avisar} onCerrar={() => setContrato("")} />}
           {anulando && anulando.id === c.id && (
             <div className="flex flex-wrap gap-2 mt-2 items-center">
               <input value={motivo} onChange={(e) => setMotivo(e.target.value)} placeholder="Motivo de la anulación" className={`${INPUT} md:w-72`} />

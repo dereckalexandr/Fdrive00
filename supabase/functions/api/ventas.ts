@@ -49,6 +49,7 @@ import {
   colaValidaciones, metricasValidador, validarTransicionValidacion, ESTADOS_ABIERTOS,
   filaDoc, reglaDocCompra as reglaDoc, archivoPermitidoParaDoc, validarDatosDoc, validarDatosCliente, faltantesCompra, faltantesConsignacion, esChecklistCompraActual, validarCuentaBancaria, DOCS_COMPRA, DOCS_CONSIGNACION, TIPOS_CON_REGLAS,
 } from "./validaciones-core.js";
+import { validarContratoCompraventa } from "./contrato-compraventa-core.js";
 import {
   folioInspeccion, VEREDICTOS, validarSolicitudInspeccion, validarReprogramacion, validarResultadoInspeccion, claveEsDe,
   validarTransicionInspeccion, resolverLugar, idDeClave, ordenarAgenda, hayChoque, metricasInspector, colaInspecciones,
@@ -3415,6 +3416,41 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     return json({ cierre: sinCosto(cierre, can("inventario.editar")), validacion: valCierre ? { id: valCierre.id, folio: folioValidacion(valCierre.numero), estado: valCierre.estado, exige } : null });
   }
 
+  /**
+   * Datos del contrato de compraventa (réplica del contrato de Autofact Pro) de una venta pedida o aprobada. El ejecutivo aporta el chasis y la tasación fiscal;
+   * el resto sale del cierre, del comprador y del vehículo. Los datos de la empresa vendedora se leen de la configuración `empresa::datos`.
+   */
+  if (op === "cierres.contrato") {
+    const c = await cargarCierre(String(body.id ?? ""));
+    if (!c) return err("no_existe", 404);
+    if (c.estado !== "pendiente" && c.estado !== "aprobada") return err("cierre_no_vigente", 409);
+    const lead = await cargarLead(c.lead_id);
+    if (!lead || !puedeVer(lead)) return err("no_existe", 404);
+    if (!puedeTocar(lead)) return err("forbidden", 403);
+    const cl = c.cliente_id ? (await sb.from("clientes").select("*").eq("id", c.cliente_id).maybeSingle()).data : null;
+    if (!cl || !cl.nombre || !cl.rut) return err("contrato_datos_incompletos", 409);
+    const veh = (await sb.from("vehiculos").select("*").eq("id", c.vehiculo_id).maybeSingle()).data ?? {};
+    const d = validarContratoCompraventa(body.datos);
+    if (!d.ok) return err(d.error!);
+    const emp = await sb.from("kv_store").select("value").eq("key", "empresa::datos").maybeSingle();
+    let empresa: any = {};
+    try { empresa = emp.data && emp.data.value ? JSON.parse(emp.data.value) : {}; } catch { empresa = {}; }
+    const fecha = new Date().toLocaleDateString("en-CA", { timeZone: "America/Santiago" });
+    await evento(c.lead_id, "cierre", `${userName} descargó el contrato de compraventa de la venta ${folioVenta(c.numero)}`);
+    await audit(ctx.actor, "venta.contrato", "cierre", c.id, { numero: c.numero });
+    return json({
+      contrato: {
+        fecha, ciudad: empresa.ciudad || "Santiago",
+        vendedor: {
+          razon_social: empresa.razon_social || "", rut: empresa.rut || "", domicilio: empresa.domicilio || "", comuna: empresa.comuna || "", region: empresa.region || "",
+          representante: empresa.representante || "", rut_representante: empresa.rut_representante || "", personeria: empresa.personeria || "",
+        },
+        comprador: { nombre: cl.nombre, rut: cl.rut, domicilio: cl.direccion || "", comuna: cl.comuna || "", region: "" },
+        vehiculo: { tipo: "AUTOMÓVIL", color: veh.color || "", chasis: d.value.chasis, marca: veh.marca || "", modelo: veh.modelo || "", version: veh.version || "", anio: veh.anio, numero_motor: veh.numero_motor || "", km: d.value.km ?? veh.km, patente: veh.patente || "" },
+        precio: Number(c.precio_final), forma_pago: d.value.forma_pago, tasacion_fiscal: d.value.tasacion_fiscal,
+      },
+    });
+  }
   if (op === "cierres.aprobar" || op === "cierres.rechazar") {
     if (!esSupervisor) return err("forbidden", 403);
     const c = await cargarCierre(String(body.id ?? ""));

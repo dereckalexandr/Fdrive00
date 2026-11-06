@@ -14,6 +14,7 @@
 import { computeTasacionTotals, computeValorFinal } from "./tasacion-totals.js";
 import { calcularCotizacion } from "../supabase/functions/api/ventas-core.js";
 import { contratoConsignacion } from "../supabase/functions/api/contrato-consignacion-core.js";
+import { contratoCompraventa } from "../supabase/functions/api/contrato-compraventa-core.js";
 
 const PAGE_W = 595;
 const PAGE_H = 842;
@@ -574,6 +575,38 @@ export function buildContratoConsignacionPdf(c, { fmt }) {
   caja(MARGIN + mitad + 16, mitad, "TESTIGO 2", "", "", false);
   pdf.y -= 112;
   pdf.paragraph("NOTA", "Este contrato debe ser firmado por ambas partes. Una vez firmado, el ejecutivo lo sube como documento obligatorio de la consignación.");
+  return pdf.build();
+}
+
+/**
+ * Contrato de compraventa de vehículo (réplica del contrato de Autofact Pro): comparecencia, cláusulas y firmas de ambas partes.
+ * @param c  datos para contratoCompraventa (ver contrato-compraventa-core.js)
+ */
+export function buildContratoCompraventaPdf(c, { fmt }) {
+  const { comparecencia, clausulas, vendedor, comprador } = contratoCompraventa(c, fmt);
+  const v = c.vehiculo || {};
+  const pdf = new PdfDoc(`Contrato de compraventa · ${[v.marca, v.modelo].filter(Boolean).join(" ")} ${v.patente || ""}`);
+  pdf.title("Contrato de compraventa de vehículo", fechaLarga(String(c.fecha || "").slice(0, 10)));
+  pdf.paragraph("COMPARECENCIA", comparecencia);
+  for (const cl of clausulas) pdf.paragraph(cl.titulo, cl.texto);
+  pdf.ensure(130);
+  pdf.sectionBar("Firmas");
+  const caja = (x, w, titulo, nombre, rut) => {
+    const top = pdf.y;
+    const h = 96;
+    pdf.line(x, top, x + w, top, 0.6); pdf.line(x, top - h, x + w, top - h, 0.6); pdf.line(x, top, x, top - h, 0.6); pdf.line(x + w, top, x + w, top - h, 0.6);
+    pdf.text(x + 6, top - 12, titulo, { size: 8, bold: true, gray: 0.4 });
+    pdf.line(x + 8, top - 66, x + w - 8, top - 66, 0.5);
+    pdf.text(x + 8, top - 77, nombre || "Nombre", { size: 8.5 });
+    pdf.text(x + 8, top - 88, rut ? `RUT ${rut}` : "RUT", { size: 8.5 });
+  };
+  const mitad = (CONTENT_W - 16) / 2;
+  const ven = c.vendedor || {};
+  const com = c.comprador || {};
+  caja(MARGIN, mitad, "FIRMA DEL VENDEDOR", vendedor === "________" ? "" : vendedor, ven.representante ? ven.rut_representante : ven.rut);
+  caja(MARGIN + mitad + 16, mitad, "FIRMA DEL COMPRADOR", comprador === "________" ? "" : comprador, com.rut);
+  pdf.y -= 112;
+  pdf.paragraph("NOTA", "Borrador generado por el sistema a partir del modelo de contrato de la plataforma de transferencias. Debe ser firmado por ambas partes (firma electrónica o ante notario) y revisado por un abogado antes de usarse.");
   return pdf.build();
 }
 
