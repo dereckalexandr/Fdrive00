@@ -86,7 +86,7 @@ test("Fotos: se incrustan como imágenes JPEG y el PDF sigue siendo válido", as
 
   const con = buildCotizacionPdf({ ...COT, fotos: [jpegFalso(800, 600), jpegFalso(600, 800), jpegFalso(10, 10)] }, { fmt });
   const texto = comoTexto(con);
-  assert.equal((texto.match(/\/DCTDecode/g) || []).length, 2, "máximo dos fotos");
+  assert.equal((texto.match(/\/DCTDecode/g) || []).length, 1, "una sola foto");
   assert.ok(texto.includes("/Width 800") && texto.includes("/Height 600"));
   assert.ok(texto.includes("/XObject <<") && /\/Im1 \d+ 0 R/.test(texto));
   assert.ok((await readPdf(con)).join(" ").includes("COT-000123"), "pdf.js lo abre");

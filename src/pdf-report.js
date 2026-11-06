@@ -420,12 +420,12 @@ export function buildCotizacionPdf(c, { fmt }) {
     ["COLOR", v.color], ["PATENTE", v.patente],
   ]);
 
-  const fotos = (c.fotos || []).map(leerJpeg).filter(Boolean).slice(0, 2);
-  if (fotos.length > 0) {
-    const boxH = 165;
+  // Una sola foto del vehículo, pequeña (la primera que se pueda leer).
+  const foto = (c.fotos || []).map(leerJpeg).find(Boolean);
+  if (foto) {
+    const boxW = 170, boxH = 115;
     pdf.ensure(boxH + 12);
-    const boxW = fotos.length === 1 ? CONTENT_W : (CONTENT_W - 12) / 2;
-    fotos.forEach((img, k) => pdf.image(img, MARGIN + k * (boxW + 12), pdf.y - boxH, boxW, boxH));
+    pdf.image(foto, MARGIN, pdf.y - boxH, boxW, boxH);
     pdf.y -= boxH + 12;
   }
 

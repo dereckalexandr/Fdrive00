@@ -28,11 +28,11 @@ export function topeTasado(lead, datos) {
   return t ? Number(t.valor_compra) : null;
 }
 
-/** Genera el PDF de una cotización y lo descarga. Las fotos se leen del almacenamiento (hasta 2). */
+/** Genera el PDF de una cotización y lo descarga. Va una sola foto pequeña, la primera del vehículo. */
 export async function descargarCotizacionPdf(cot, { cliente, ejecutivo, local, condiciones }) {
   const snap = cot.vehiculo_snapshot || {};
   const fotos = [];
-  for (const id of (snap.fotos || []).slice(0, 2)) {
+  for (const id of (snap.fotos || []).slice(0, 1)) {
     try { const r = await window.storage.get(`vfoto::${snap.vehiculo_id || cot.vehiculo_id}::${id}`, true); if (r && r.value) fotos.push(r.value); } catch (e) { /* sin foto */ }
   }
   const bytes = buildCotizacionPdf({
