@@ -582,3 +582,29 @@ test("Crear el lead de compra desde una inspección realizada: toma los datos de
   const det = await ve(U.jefe.token, "inspecciones.get", { id });
   assert.equal(det.puedeCrearLead, false);
 });
+
+test("Crear el lead de compra completa el cliente y el vehículo con lo que trae el CAV", async () => {
+  const veh = vehN();
+  const key = claveFicha(U.i1);
+  const reg = await registrar(U.i1, key, { vehiculo: veh });
+  assert.equal(reg.status, 200, JSON.stringify(reg));
+  const ficha = { propietarioNombre: "María Dueña Prueba", propietarioRun: "12.345.678-5", nroMotor: "mot-123", color: "Azul", cavFileName: "cav.pdf" };
+  assert.equal((await kv(U.i1.token, "set", key, { value: JSON.stringify(ficha) })).status, 200);
+  const id = reg.inspeccion.id;
+  // El nombre y el RUN del propietario solo llegan a quien va a crear el lead.
+  const det = await ve(U.jefe.token, "inspecciones.get", { id });
+  assert.deepEqual(det.propietario, { nombre: "María Dueña Prueba", rut: "12.345.678-5" });
+  assert.equal((await ve(U.i1.token, "inspecciones.get", { id })).propietario, undefined);
+  // Sin escribir el nombre ni el RUT, se toman del CAV.
+  const ok = await ve(U.jefe.token, "inspecciones.crear_lead", { id, km: 60000, cliente: { telefono: "912345678" } });
+  assert.equal(ok.status, 200, JSON.stringify(ok));
+  assert.equal(ok.cliente.nombre, "María Dueña Prueba");
+  assert.equal(ok.cliente.rut, "12345678-5");
+  assert.equal(ok.lead.vehiculo_ofrecido.color, "Azul");
+  assert.equal(ok.lead.vehiculo_ofrecido.numeroMotor, "MOT-123");
+  // Lo que se escribe a mano tiene prioridad sobre el CAV.
+  const reg2 = await registrar(U.i1, claveFicha(U.i1), { vehiculo: vehN() });
+  const ok2 = await ve(U.jefe.token, "inspecciones.crear_lead", { id: reg2.inspeccion.id, km: 1, cliente: { nombre: "Otra Persona", telefono: "912345679" } });
+  assert.equal(ok2.status, 200, JSON.stringify(ok2));
+  assert.equal(ok2.cliente.nombre, "Otra Persona");
+});

@@ -227,6 +227,11 @@ export function InspeccionDetalle({ api, id, onCerrar, onCambio, onRealizar, onV
   const lugares = useLugares(api);
   const [rp, setRp] = useState({ direccion: "", fechaHora: "", contactoLugar: "", lugar: LUGAR_VACIO });
   const [lc, setLc] = useState({ nombre: "", telefono: "", email: "", rut: "", km: "", duplicado: false });
+  // Nombre y RUN del propietario que trae el CAV: llenan al cliente del lead (se pueden corregir).
+  useEffect(() => {
+    const p = datos && datos.propietario;
+    if (p) setLc((f) => ({ ...f, nombre: f.nombre || p.nombre, rut: f.rut || p.rut }));
+  }, [datos]);
 
   useEffect(() => { if (modo === "asignar" && datos && datos.puedeGestionar) api("inspecciones.equipo").then((r) => setEquipo(r.inspectores)).catch(() => {}); }, [api, datos, modo]);
   useEffect(() => {
@@ -295,7 +300,7 @@ export function InspeccionDetalle({ api, id, onCerrar, onCambio, onRealizar, onV
       )}
       {modo === "lead" && (
         <div className="flex flex-col gap-3 border border-stone-200 bg-white p-3">
-          <p className="text-xs text-stone-500">El vehículo ({nombreVeh(x.vehiculo)}, patente {x.vehiculo.patente}) se toma de la ficha. Escribe los datos del dueño y el kilometraje, que no viene en la ficha.</p>
+          <p className="text-xs text-stone-500">El vehículo ({nombreVeh(x.vehiculo)}, patente {x.vehiculo.patente}) se toma de la ficha. {datos.propietario && (datos.propietario.nombre || datos.propietario.rut) ? "El nombre y el RUT del dueño vienen del CAV: revísalos. " : ""}Escribe lo que falte: el teléfono y el kilometraje no vienen en la ficha.</p>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <Campo etiqueta="Nombre del dueño *"><input value={lc.nombre} maxLength={120} onChange={(e) => setLc({ ...lc, nombre: e.target.value })} className={INPUT} /></Campo>
             <Campo etiqueta="Teléfono *"><input value={lc.telefono} maxLength={20} onChange={(e) => setLc({ ...lc, telefono: e.target.value })} className={INPUT} /></Campo>

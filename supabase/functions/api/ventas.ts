@@ -1768,6 +1768,13 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       });
     }
     const fallar = (e: any) => fallo(e);
+    /** La ficha completa del Inspector (con el CAV y los datos del propietario), si existe. Solo se usa para crear el lead de compra. */
+    async function fichaDe(x: any): Promise<any | null> {
+      if (!x.inspeccion_key) return null;
+      const g = await sb.from("kv_store").select("value").eq("key", x.inspeccion_key).maybeSingle();
+      if (g.error || !g.data) return null;
+      try { return JSON.parse(g.data.value); } catch { return null; }
+    }
     const anotar = async (i: any, texto: string) => { if (i.lead_id) await evento(i.lead_id, "inspeccion", texto); };
 
     /**
@@ -1780,14 +1787,19 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       if (!x || !(await veInspeccion(x))) return err("no_existe", 404);
       if (x.estado !== "completada") return err("inspeccion_no_completada", 409);
       if (x.lead_id) return err("inspeccion_con_lead", 409);
-      const veh = { ...(x.vehiculo || {}), patente: x.patente || (x.vehiculo || {}).patente, km: body.km, color: body.color ?? (x.vehiculo || {}).color };
+      const ficha = await fichaDe(x);
+      const veh = { ...(x.vehiculo || {}), patente: x.patente || (x.vehiculo || {}).patente, km: body.km, color: body.color || (x.vehiculo || {}).color || (ficha && ficha.color) || undefined, numeroMotor: (ficha && ficha.nroMotor) || undefined };
+      // Los datos del cliente que no se escriben se toman del CAV (nombre y RUN del propietario).
+      const dado = (body.cliente || {}) as Record<string, unknown>;
+      const vacio = (v: unknown) => v === undefined || v === null || String(v).trim() === "";
+      const cliente = { ...dado, nombre: vacio(dado.nombre) ? (ficha && ficha.propietarioNombre) || "" : dado.nombre, rut: vacio(dado.rut) ? (ficha && ficha.propietarioRun) || undefined : dado.rut };
       const vo = validarVehiculoOfrecido(veh);
       if (!vo.ok) return err(vo.error!);
       const abiertos = await scoped(sb.from("leads").select("id, etapa, vehiculo_ofrecido").eq("tipo", "compra"));
       if (abiertos.error) return fallar(abiertos.error);
       const repetido = (abiertos.data ?? []).find((l: any) => ETAPAS_ABIERTAS.includes(l.etapa) && l.vehiculo_ofrecido && l.vehiculo_ofrecido.patente === vo.value.patente);
       if (repetido && body.confirmarDuplicado !== true) return err("lead_compra_duplicado", 409);
-      const res = await crearLeadCore({ lead: { tipo: "compra", fuente: `Inspección ${folioInspeccion(x.numero)}`, vehiculoOfrecido: vo.value, notas: body.notas }, cliente: body.cliente, asignarA: body.asignarA });
+      const res = await crearLeadCore({ lead: { tipo: "compra", fuente: `Inspección ${folioInspeccion(x.numero)}`, vehiculoOfrecido: vo.value, notas: body.notas }, cliente, asignarA: body.asignarA });
       if (!res.ok) return res;
       const creado = await res.json();
       const lig = await sb.from("inspecciones").update({ lead_id: creado.lead.id, actualizado_en: new Date().toISOString() }).eq("id", x.id);
@@ -1892,7 +1904,11 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     if (op === "inspecciones.get") {
       const x = await cargarInspeccion(String(body.id ?? ""));
       if (!x || !(await veInspeccion(x))) return err("no_existe", 404);
-      return json({ inspeccion: (await enriquecer([x]))[0], puedeGestionar: esSupervisor, puedeRealizar: realiza, esMia: !ctx.esAdmin && x.inspector_id === userId, esSolicitante: !ctx.esAdmin && x.solicitante_id === userId, puedeCrearLead: x.estado === "completada" && !x.lead_id && puedeCrearLeadCompra });
+      const puedeCrearLead = x.estado === "completada" && !x.lead_id && puedeCrearLeadCompra;
+      // Quien va a crear el lead de compra recibe el nombre y el RUN del propietario que el CAV trae, para llenar al cliente. Nadie más los ve.
+      const ficha = puedeCrearLead ? await fichaDe(x) : null;
+      const propietario = ficha ? { nombre: String(ficha.propietarioNombre || ""), rut: String(ficha.propietarioRun || "") } : null;
+      return json({ inspeccion: (await enriquecer([x]))[0], puedeGestionar: esSupervisor, puedeRealizar: realiza, esMia: !ctx.esAdmin && x.inspector_id === userId, esSolicitante: !ctx.esAdmin && x.solicitante_id === userId, puedeCrearLead, ...(propietario ? { propietario } : {}) });
     }
 
     // Los datos para armar los PDF de una inspección ya realizada (y de su valorización, si el Inspector la hizo desde ella).
