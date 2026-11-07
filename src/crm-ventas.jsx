@@ -9,6 +9,7 @@
  */
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { InputDinero } from "./campo-dinero.jsx";
+import { COMUNAS_CHILE } from "../supabase/functions/api/comunas-chile.js";
 import {
   ETAPAS, ETAPAS_ACTIVAS, TIPOS_CONTACTO, TIPOS_TAREA, ESTADOS_FINANCIAMIENTO,
   agruparTareas, claseTarea, textoVencimiento, leadsPorAtender, diasEnEtapa, colorDeAntiguedad, etapaNombre, soloDigitos, validarCliente, validarLead, validarTarea, solicitudDeCanal,
@@ -133,7 +134,7 @@ function LeadFicha({ api, leadId, catalogos, onCerrar, onCambio, onEditar }) {
           <span className="text-xs text-stone-500">· Asignado a {asignado ? asignado.nombre : "nadie"}</span>
           {lead.fuente && <span className="text-xs text-stone-500">· Fuente: {lead.fuente}</span>}
           {datos.campania && <span className="text-xs text-stone-500">· Campaña: {datos.campania.nombre}</span>}
-          {puedeEditar && <button onClick={onEditar} disabled={deCanal} title={deCanal ? "La solicitud que el cliente envió por el sitio web no se edita" : ""} className={`${BTN} ml-auto ${deCanal ? "opacity-50 cursor-not-allowed" : ""}`}>Editar datos</button>}
+          {puedeEditar && <button onClick={onEditar} title={deCanal ? "Aquí completas los datos del cliente; el vehículo que declaró por el sitio web no se edita" : ""} className={`${BTN} ml-auto`}>Editar datos</button>}
         </div>
         {cliente && (
           <div className="flex flex-wrap gap-2 text-sm">
@@ -141,6 +142,7 @@ function LeadFicha({ api, leadId, catalogos, onCerrar, onCambio, onEditar }) {
             {cliente.telefono && <a href={`https://wa.me/${waNumero(cliente.telefono)}`} target="_blank" rel="noreferrer" className={BTN}>WhatsApp</a>}
             {cliente.email && <a href={`mailto:${cliente.email}`} className={BTN}>✉ {cliente.email}</a>}
             {cliente.rut && <span className="px-3 py-1.5 text-sm text-stone-500">RUT {cliente.rut}</span>}
+            {(cliente.direccion || cliente.comuna) && <span className="px-3 py-1.5 text-sm text-stone-500">📍 {[cliente.direccion, cliente.comuna].filter(Boolean).join(", ")}</span>}
           </div>
         )}
         {!esVenta && (
@@ -265,7 +267,11 @@ function FormLead({ api, catalogos, lead, onCerrar, onGuardado }) {
   const [asignarA, setAsignarA] = useState("auto");
   const [buscar, setBuscar] = useState("");
   const [coincidencias, setCoincidencias] = useState([]);
-  const [cliente, setCliente] = useState({ nombre: "", rut: "", telefono: "", email: "" });
+  const [cliente, setCliente] = useState({ nombre: "", rut: "", telefono: "", email: "", direccion: "", comuna: "" });
+  // Al editar: los datos del cliente del lead. Las solicitudes que llegaron solas por el sitio web solo permiten completar al cliente.
+  const clienteActual = lead && lead.cliente;
+  const soloCliente = !!lead && solicitudDeCanal(lead);
+  const [clienteEd, setClienteEd] = useState(() => (clienteActual ? { nombre: clienteActual.nombre || "", rut: clienteActual.rut || "", telefono: clienteActual.telefono || "", email: clienteActual.email || "", direccion: clienteActual.direccion || "", comuna: clienteActual.comuna || "" } : null));
   const [elegido, setElegido] = useState(null);
   const tiposLead = catalogos.tiposLead && catalogos.tiposLead.length ? catalogos.tiposLead : ["venta"];
   const [tipo, setTipo] = useState(lead ? lead.tipo || "venta" : tiposLead[0]);
@@ -307,8 +313,14 @@ function FormLead({ api, catalogos, lead, onCerrar, onGuardado }) {
       const c = validarCliente(cliente);
       if (!c.ok) { setError(mensajeError({ message: c.error })); return; }
     }
+    if (editando && clienteEd) {
+      const c = validarCliente(clienteEd);
+      if (!c.ok) { setError(mensajeError({ message: c.error })); return; }
+    }
     setGuardando(true);
     try {
+      if (editando && clienteEd && clienteActual) await api("clientes.save", { id: clienteActual.id, datos: clienteEd });
+      if (editando && soloCliente) { onGuardado(); setGuardando(false); return; }
       if (editando) await api("leads.update", { id: lead.id, lead: datosLead() });
       else await api("leads.create", { cliente: elegido ? { id: elegido.id } : cliente, lead: datosLead(), asignarA: catalogos.puedeAsignar ? asignarA : undefined });
       onGuardado();
@@ -348,12 +360,40 @@ function FormLead({ api, catalogos, lead, onCerrar, onGuardado }) {
                 <Campo etiqueta="RUT (opcional)"><input value={cliente.rut} onChange={(e) => setCliente({ ...cliente, rut: e.target.value })} className={`${INPUT} font-mono`} /></Campo>
                 <Campo etiqueta="Teléfono"><input value={cliente.telefono} onChange={(e) => setCliente({ ...cliente, telefono: e.target.value })} className={INPUT} placeholder="+56 9 1234 5678" /></Campo>
                 <Campo etiqueta="Correo"><input type="email" value={cliente.email} onChange={(e) => setCliente({ ...cliente, email: e.target.value })} className={INPUT} /></Campo>
+                <Campo etiqueta="Dirección (opcional)"><input value={cliente.direccion} maxLength={160} onChange={(e) => setCliente({ ...cliente, direccion: e.target.value })} className={INPUT} /></Campo>
+                <Campo etiqueta="Comuna (opcional)">
+                  <select value={cliente.comuna} onChange={(e) => setCliente({ ...cliente, comuna: e.target.value })} className={INPUT}>
+                    <option value="">Elige la comuna…</option>{COMUNAS_CHILE.map((x) => <option key={x} value={x}>{x}</option>)}
+                  </select>
+                </Campo>
               </div>
             </>
           )}
         </Tarjeta>
       )}
 
+      {editando && clienteEd && (
+        <Tarjeta titulo="Datos del cliente" ayuda="Completa toda la información del cliente: se usa en la cotización, el cierre, los contratos y la nota de venta.">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <Campo etiqueta="Nombre completo *"><input value={clienteEd.nombre} onChange={(e) => setClienteEd({ ...clienteEd, nombre: e.target.value })} className={INPUT} /></Campo>
+            <Campo etiqueta="RUT"><input value={clienteEd.rut} onChange={(e) => setClienteEd({ ...clienteEd, rut: e.target.value })} className={`${INPUT} font-mono`} /></Campo>
+            <Campo etiqueta="Teléfono"><input value={clienteEd.telefono} onChange={(e) => setClienteEd({ ...clienteEd, telefono: e.target.value })} className={INPUT} /></Campo>
+            <Campo etiqueta="Correo"><input type="email" value={clienteEd.email} onChange={(e) => setClienteEd({ ...clienteEd, email: e.target.value })} className={INPUT} /></Campo>
+            <Campo etiqueta="Dirección"><input value={clienteEd.direccion} maxLength={160} placeholder="Calle y número, depto." onChange={(e) => setClienteEd({ ...clienteEd, direccion: e.target.value })} className={INPUT} /></Campo>
+            <Campo etiqueta="Comuna">
+              <select value={clienteEd.comuna} onChange={(e) => setClienteEd({ ...clienteEd, comuna: e.target.value })} className={INPUT}>
+                <option value="">Elige la comuna…</option>
+                {clienteEd.comuna && !COMUNAS_CHILE.includes(clienteEd.comuna) && <option value={clienteEd.comuna}>{clienteEd.comuna}</option>}
+                {COMUNAS_CHILE.map((x) => <option key={x} value={x}>{x}</option>)}
+              </select>
+            </Campo>
+          </div>
+          {soloCliente && <p className="text-xs text-stone-500 mt-2">Esta solicitud llegó por el sitio web: el vehículo y las condiciones que declaró el cliente no se editan; aquí solo completas sus datos.</p>}
+        </Tarjeta>
+      )}
+
+      {!soloCliente && (
+        <>
       <Tarjeta titulo="Interés">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {tipo === "venta" && <Campo etiqueta="Vehículo del inventario">
@@ -412,6 +452,8 @@ function FormLead({ api, catalogos, lead, onCerrar, onGuardado }) {
       </Tarjeta>}
 
       <Campo etiqueta="Notas"><textarea rows={2} value={f.notas} onChange={(e) => set("notas", e.target.value)} className={INPUT} /></Campo>
+        </>
+      )}
       {error && <Aviso>{error}</Aviso>}
       <div className="flex gap-2">
         <button onClick={guardar} disabled={guardando} className={BTN_PRIMARIO}>{guardando ? "Guardando…" : editando ? "Guardar cambios" : "Crear lead"}</button>
@@ -842,7 +884,7 @@ export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador, 
 
       {leadAbierto && !leadEditando && (
         <LeadFicha api={api} leadId={leadAbierto} catalogos={catalogos} onCerrar={() => setLeadAbierto(null)} onCambio={subir}
-          onEditar={async () => { const r = await api("leads.get", { id: leadAbierto }); setLeadEditando(r.lead); }} />
+          onEditar={async () => { const r = await api("leads.get", { id: leadAbierto }); setLeadEditando({ ...r.lead, cliente: r.cliente }); }} />
       )}
       {leadEditando && <FormLead api={api} catalogos={catalogos} lead={leadEditando} onCerrar={() => setLeadEditando(null)} onGuardado={() => { setLeadEditando(null); subir(); }} />}
     </div>

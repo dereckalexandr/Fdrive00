@@ -2,6 +2,7 @@
 // JavaScript puro, sin APIs de Deno ni del navegador: lo usan el servidor, la pantalla y las pruebas.
 import { validarRut, normalizarRut } from "./crm-core.js";
 import { FINANCIERAS } from "./comisiones-core.js";
+import { COMUNAS_CHILE } from "./comunas-chile.js";
 
 /* ---------- Catálogos fijos ---------- */
 export const ESTADOS_VEHICULO = [
@@ -125,6 +126,14 @@ export function ocultarCosto(vehiculo, puedeVerCosto) {
 /* ---------- Clientes ---------- */
 export function validarCliente(input) {
   const i = input || {};
+  // Dirección y comuna son opcionales; solo se incluyen si vienen en la petición (así editar otros datos no los borra).
+  const extra = {};
+  if (i.direccion !== undefined) extra.direccion = texto(i.direccion, 160) || null;
+  if (i.comuna !== undefined) {
+    const comuna = texto(i.comuna, 60);
+    if (comuna && !COMUNAS_CHILE.includes(comuna)) return { ok: false, error: "comuna_invalida" };
+    extra.comuna = comuna || null;
+  }
   const nombre = texto(i.nombre, 80);
   if (nombre.length < 3) return { ok: false, error: "nombre_invalido" };
   let rut = null;
@@ -137,7 +146,7 @@ export function validarCliente(input) {
   const email = texto(i.email, 80).toLowerCase();
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, error: "email_invalido" };
   if (!telefono && !email) return { ok: false, error: "contacto_requerido" };
-  return { ok: true, value: { nombre, rut, telefono: telefono || null, email: email || null, notas: texto(i.notas, 500) || null } };
+  return { ok: true, value: { nombre, rut, telefono: telefono || null, email: email || null, notas: texto(i.notas, 500) || null, ...extra } };
 }
 
 /* ---------- Leads ---------- */

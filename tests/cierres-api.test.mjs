@@ -521,3 +521,28 @@ test("Bandeja de pagos de reservas por validar: la ven el Jefe Local y el Valida
   assert.equal((await ve(U.jefe.token, "reservas.validar_pago", { id: x.res.id, aprueba: true })).status, 200);
   assert.ok(!(await ve(U.jefe.token, "reservas.por_validar", {})).reservas.some((r) => r.id === x.res.id), "validada: ya no está pendiente");
 });
+
+test("Datos completos del cliente de un lead: dirección y comuna al crear y al editar, sin borrar lo demás", async () => {
+  const c1 = await ve(U.e1.token, "leads.create", { cliente: { nombre: "Clara Dirección Prueba", telefono: "955512345", direccion: "Los Alerces 123, depto 4", comuna: "Providencia" }, lead: {} });
+  assert.equal(c1.status, 200, JSON.stringify(c1));
+  assert.equal(c1.cliente.direccion, "Los Alerces 123, depto 4");
+  assert.equal(c1.cliente.comuna, "Providencia");
+  assert.equal((await ve(U.e1.token, "leads.create", { cliente: { nombre: "Comuna Mala Prueba", telefono: "955512346", comuna: "Atlantis" }, lead: {} })).error, "comuna_invalida");
+
+  // Editar al cliente desde la ficha: se completan RUT, correo y dirección; lo que no se manda no se toca.
+  const id = c1.cliente.id;
+  const ed = await ve(U.e1.token, "clientes.save", { id, datos: { nombre: "Clara Dirección Prueba", telefono: "955512345", rut: "12.345.678-5", email: "clara@correo.cl", direccion: "Av. Nueva 999", comuna: "Ñuñoa" } });
+  assert.equal(ed.status, 200, JSON.stringify(ed));
+  assert.equal(ed.cliente.rut, "12345678-5");
+  assert.equal(ed.cliente.email, "clara@correo.cl");
+  assert.equal(ed.cliente.direccion, "Av. Nueva 999");
+  assert.equal(ed.cliente.comuna, "Ñuñoa");
+  const sinDir = await ve(U.e1.token, "clientes.save", { id, datos: { nombre: "Clara D. Prueba", telefono: "955512345", email: "clara@correo.cl" } });
+  assert.equal(sinDir.cliente.direccion, "Av. Nueva 999", "si no se manda la dirección, se conserva");
+  assert.equal((await ve(U.e1.token, "clientes.save", { id, datos: { nombre: "Clara D. Prueba", telefono: "955512345", direccion: "" } })).cliente.direccion, null, "mandarla vacía la borra");
+  // Otro ejecutivo no edita a un cliente que no es suyo.
+  assert.equal((await ve(U.e2.token, "clientes.save", { id, datos: { nombre: "Intruso Prueba", telefono: "955512347" } })).status, 403);
+  // Se ve en la ficha del lead.
+  const g = await ve(U.e1.token, "leads.get", { id: c1.lead.id });
+  assert.equal(g.cliente.nombre, "Clara D. Prueba");
+});
