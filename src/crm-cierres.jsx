@@ -14,6 +14,7 @@ import { MODULOS_COMISION, getTramo, etiquetaTramo } from "../supabase/functions
 import { calcularCotizacion, validarCierre, cierreNombre, mesChile, FINANCIERAS } from "../supabase/functions/api/ventas-core.js";
 import { Aprobaciones, topeTasado } from "./crm-cotizaciones.jsx";
 import { buildContratoCompraventaPdf, buildNotaVentaPdf } from "./pdf-report.js";
+import { PagosVenta, CuentasEmpresa } from "./crm-pagos.jsx";
 import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, fechaCorta, hace, Aviso, Cargando, Tarjeta, Campo, Modal, useCarga, mensajeError } from "./crm-ui.jsx";
 
 export const folioVenta = (n) => `VTA-${String(n || 0).padStart(6, "0")}`;
@@ -177,7 +178,7 @@ export function SeccionCierres({ api, lead, datos, catalogos, onCambio, avisar }
             {c.monto_parte_pago > 0 ? ` · parte de pago ${clp(c.monto_parte_pago)}` : ""}{c.monto_financiado > 0 ? ` · financiado ${clp(c.monto_financiado)} (${c.financiera})` : ""}
             {c.seguro ? " · con seguro" : ""}{c.margen != null ? ` · margen ${clp(c.margen)}` : ""}
           </p>
-          {c.estado === "pendiente" && <p className="text-xs text-amber-700 mt-1">Esperando la aprobación del Jefe Local (pedido por {c.solicitado_por}). Adjunta el respaldo de los pagos en «Validación de documentos de la venta» (más abajo): el Jefe Local o el Validador revisa los documentos y recién ahí se aprueba la venta. Con la venta aprobada podrás imprimir la nota de venta.</p>}
+          {c.estado === "pendiente" && <p className="text-xs text-amber-700 mt-1">Esperando la aprobación del Jefe Local (pedido por {c.solicitado_por}). Registra cada pago con su respaldo (abajo) y adjunta los documentos en «Validación de documentos de la venta»: el Jefe Local o el Validador los revisa y recién ahí se aprueba la venta. Con la venta aprobada podrás imprimir la nota de venta.</p>}
           {c.estado === "aprobada" && <p className="text-xs text-emerald-700 mt-1">Aprobada por {c.aprobado_por}. Cuenta para la comisión de {c.mes}.</p>}
           {c.estado === "rechazada" && <p className="text-xs text-rose-700 mt-1">Rechazada: {c.motivo_rechazo}. Puedes corregir los datos y pedir el cierre de nuevo.</p>}
           {c.estado === "anulada" && <p className="text-xs text-stone-500 mt-1">Anulada{c.anulado_por ? ` por ${c.anulado_por}` : ""}: {c.motivo_anulacion}</p>}
@@ -188,6 +189,7 @@ export function SeccionCierres({ api, lead, datos, catalogos, onCambio, avisar }
             {c.estado === "aprobada" && <button disabled={ocupado} onClick={() => correr(() => descargarNotaVenta(api, c.id))} className={BTN_AMBAR}>Imprimir nota de venta (PDF)</button>}
             {(c.estado === "pendiente" || c.estado === "aprobada") && puedeEditar && <button onClick={() => setContrato(contrato === c.id ? "" : c.id)} className={BTN}>Contrato de compraventa…</button>}
           </div>
+          {(c.estado === "pendiente" || c.estado === "aprobada") && <PagosVenta api={api} cierre={c} avisar={avisar} onCambio={onCambio} />}
           {contrato === c.id && <FormContratoCompraventa api={api} cierre={c} avisar={avisar} onCerrar={() => setContrato("")} />}
           {anulando && anulando.id === c.id && (
             <div className="flex flex-wrap gap-2 mt-2 items-center">
@@ -383,6 +385,7 @@ export function Ventas({ api, catalogos, abrirLead, version, onCambio }) {
 
   return (
     <>
+      {catalogos.puedeAsignar && <CuentasEmpresa api={api} />}
       <Tarjeta>
         <div className="flex flex-wrap items-center gap-3">
           <label className="text-sm text-stone-600 flex items-center gap-2">Mes <input type="month" value={mes} max={mesChile()} onChange={(e) => e.target.value && setMes(e.target.value)} className={`${INPUT} w-44`} /></label>

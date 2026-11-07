@@ -3,7 +3,7 @@
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { iniciarFuncion, api, nuevaIp, loginAdmin, crm, db } from "./helpers/api-env.mjs";
+import { iniciarFuncion, api, nuevaIp, loginAdmin, crm, db, pagarTodo } from "./helpers/api-env.mjs";
 
 const ve = (token, op, extra = {}) => api({ action: "ventas", token, op, ...extra });
 const kv = (token, op, key, extra = {}) => api({ action: "kv", token, op, key, ...extra });
@@ -75,6 +75,7 @@ test("Sin Validadores en el local: la validación se crea pero no frena la venta
 
   const y = await leadReservado(U.e1.token);
   const c2 = await cerrar(U.e1.token, y.lead.id, DATOS());
+  pagarTodo(c2.cierre.id);
   const a = await ve(U.jefe.token, "cierres.aprobar", { id: c2.cierre.id });
   assert.equal(a.status, 200, "sin Validadores el supervisor aprueba sin esperar documentos");
 });
@@ -115,8 +116,10 @@ test("Con un Validador en el local, la venta espera su validación (también la 
   const c = await cerrar(U.jefe.token, y.lead.id, DATOS());
   assert.equal(c.cierre.estado, "pendiente", "la supervisora tampoco aprueba sola");
   assert.equal(c.validacion.exige, true);
+  pagarTodo(c.cierre.id);
   assert.equal((await ve(U.jefe.token, "cierres.aprobar", { id: c.cierre.id })).error, "validacion_pendiente");
   U.cierreJefe = c.cierre; U.valJefe = c.validacion;
+  pagarTodo(U.cierreFin.id);
   assert.equal((await ve(U.jefe.token, "cierres.aprobar", { id: U.cierreFin.id })).error, "validacion_pendiente");
 });
 
@@ -205,6 +208,7 @@ test("Todo aprobado: la validación queda aprobada y recién entonces se aprueba
   assert.ok(db.tablas.lead_eventos.some((e) => /Validación VAL-\d+ aprobada por Vera Validadora/.test(e.detalle)));
   assert.equal((await ve(U.v1.token, "validacion.adjuntar", { id: U.valFin.id, docId: doc.id, archivo: archivo() })).error, "validacion_estado_invalido");
 
+  pagarTodo(U.cierreFin.id);
   const a = await ve(U.jefe.token, "cierres.aprobar", { id: U.cierreFin.id });
   assert.equal(a.status, 200, JSON.stringify(a));
   assert.equal(a.cierre.estado, "aprobada");
@@ -246,6 +250,7 @@ test("Cierre antiguo sin validación: al aprobar se crea y bloquea", async () =>
   const x = await leadReservado(U.e1.token);
   const c = await cerrar(U.e1.token, x.lead.id, DATOS());
   db.tablas.validaciones = db.tablas.validaciones.filter((v) => v.cierre_id !== c.cierre.id);
+  pagarTodo(c.cierre.id);
   const a = await ve(U.jefe.token, "cierres.aprobar", { id: c.cierre.id });
   assert.equal(a.error, "validacion_pendiente");
   assert.equal(db.tablas.validaciones.filter((v) => v.cierre_id === c.cierre.id).length, 1, "se creó al intentar aprobar");

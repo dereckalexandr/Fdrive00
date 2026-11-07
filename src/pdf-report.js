@@ -608,6 +608,15 @@ export function buildNotaVentaPdf(n, { fmt }) {
   if (Number(p.financiado) > 0) pdf.totalLine(`Crédito pagado por la financiera${p.financiera ? ` (${p.financiera})` : ""}`, fmt(p.financiado), { bold: false });
   pdf.totalLine("Saldo pagado (contado o transferencia)", fmt(p.saldo), { bold: false });
   pdf.totalLine("Total pagado", fmt(n.precio_final), { big: true });
+  // Cada pago por separado: fecha, medio, cuenta de la empresa donde llegó, referencia y cuántos respaldos tiene.
+  if ((n.detalle_pagos || []).length) {
+    pdf.sectionBar("Detalle de cada pago");
+    for (const p of n.detalle_pagos) {
+      const partes = [p.fecha_pago ? fechaLarga(String(p.fecha_pago).slice(0, 10)) : "", p.medio_nombre, p.cuenta ? `cuenta ${p.cuenta}` : "", p.referencia ? `ref. ${p.referencia}` : "", p.respaldos ? `${p.respaldos} respaldo${p.respaldos === 1 ? "" : "s"}` : ""].filter(Boolean);
+      const etiqueta = partes.join(" · ");
+      pdf.totalLine(etiqueta.length > 88 ? `${etiqueta.slice(0, 85)}...` : etiqueta, fmt(p.monto), { bold: false });
+    }
+  }
   if ((n.respaldos || []).length) pdf.paragraph("RESPALDOS ADJUNTOS", n.respaldos.map((r) => `${r.nombre}${r.archivos ? ` (${r.archivos} archivo${r.archivos === 1 ? "" : "s"})` : ""}`).join(" · "));
   if (n.validacion) pdf.paragraph("VALIDACIÓN DE DOCUMENTOS", `${n.validacion.folio}: ${n.validacion.estado === "aprobada" ? "aprobada" : n.validacion.estado}`);
   pdf.sectionBar("Venta realizada por");

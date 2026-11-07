@@ -1,7 +1,8 @@
 // Cierre de venta, aprobación del supervisor y comisiones por tramos, contra la función real y una base falsa.
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
-import { iniciarFuncion, api, nuevaIp, loginAdmin, crm, db } from "./helpers/api-env.mjs";
+import { randomUUID } from "node:crypto";
+import { iniciarFuncion, api, nuevaIp, loginAdmin, crm, db, pagarTodo } from "./helpers/api-env.mjs";
 import { mesChile } from "../supabase/functions/api/ventas-core.js";
 
 const ve = (token, op, extra = {}) => api({ action: "ventas", token, op, ...extra });
@@ -42,6 +43,7 @@ async function vender(token, datos = {}, opciones) {
   const x = await leadReservado(token, opciones);
   const c = await cerrar(token, x.lead.id, DATOS(datos));
   assert.equal(c.status, 200, JSON.stringify(c));
+  pagarTodo(c.cierre.id);
   const a = await ve(U.jefe.token, "cierres.aprobar", { id: c.cierre.id });
   assert.equal(a.status, 200, JSON.stringify(a));
   return { ...x, cierre: a.cierre };
@@ -115,6 +117,7 @@ test("Aprobar: solo el supervisor del local; el vehículo, la reserva, la cotiza
   assert.equal((await ve(U.mkt.token, "cierres.aprobar", { id: U.c1.id })).status, 403);
   assert.equal((await ve(U.jefeSur.token, "cierres.aprobar", { id: U.c1.id })).status, 404, "otro local no la ve");
 
+  pagarTodo(U.c1.id);
   const ok = await ve(U.jefe.token, "cierres.aprobar", { id: U.c1.id });
   assert.equal(ok.status, 200, JSON.stringify(ok));
   assert.equal(ok.cierre.estado, "aprobada");
@@ -184,6 +187,7 @@ test("Una reserva con un cierre esperando aprobación no se libera sola al vence
   db.tablas.reservas.find((r) => r.id === x.res.id).vence_en = new Date(Date.now() - 3600_000).toISOString();
   await ve(U.jefe.token, "inventario.list");
   assert.equal(db.tablas.reservas.find((r) => r.id === x.res.id).estado, "activa", "decide el supervisor, no el reloj");
+  pagarTodo(c.id);
   assert.equal((await ve(U.jefe.token, "cierres.aprobar", { id: c.id })).status, 200);
 });
 
@@ -354,6 +358,7 @@ test("Nota de venta: solo con la venta aprobada, con el detalle de lo pagado", a
   const c = await cerrar(U.e1.token, x.lead.id, DATOS({ precioFinal: 9800000, montoFinanciado: 3000000, financiera: "Autofin", comisionFinanciera: 100000 }));
   assert.equal(c.status, 200, JSON.stringify(c));
   assert.equal((await ve(U.e1.token, "cierres.nota", { id: c.cierre.id })).error, "cierre_no_aprobado", "pendiente: no hay nota");
+  pagarTodo(c.cierre.id);
   assert.equal((await ve(U.jefe.token, "cierres.aprobar", { id: c.cierre.id })).status, 200);
   const r = await ve(U.e1.token, "cierres.nota", { id: c.cierre.id });
   assert.equal(r.status, 200, JSON.stringify(r));
@@ -374,4 +379,71 @@ test("Nota de venta: solo con la venta aprobada, con el detalle de lo pagado", a
   const pdf = buildNotaVentaPdf(n, { fmt: (v) => `$${Number(v).toLocaleString("es-CL")}` });
   assert.equal(String.fromCharCode(...pdf.slice(0, 5)), "%PDF-");
   assert.ok(pdf.length > 2500);
+});
+
+test("Pagos de la venta: uno por uno con fecha, cuenta de la empresa y respaldo; la venta solo se aprueba si cuadran", async () => {
+  const hoyCL = hoy();
+  let n = 0;
+  const arch = () => ({ id: `arch${String(300000 + ++n)}`, nombre: "comprobante.jpg", tipo: "image/jpeg", tam: 90000 });
+  // Cuentas bancarias de la empresa: las crea el supervisor y las ve el ejecutivo.
+  assert.equal((await ve(U.e1.token, "cuentas.save", { datos: { banco: "BCI", numeroCuenta: "12345678" } })).status, 403);
+  assert.equal((await ve(U.jefe.token, "cuentas.save", { datos: { banco: "B", numeroCuenta: "12345678" } })).error, "banco_requerido");
+  const cta = await ve(U.jefe.token, "cuentas.save", { datos: { banco: "BCI", tipoCuenta: "Cuenta corriente", numeroCuenta: "12345678", alias: "BCI principal" } });
+  assert.equal(cta.status, 200, JSON.stringify(cta));
+  const cuentas = await ve(U.e1.token, "cuentas.list", {});
+  assert.ok(cuentas.cuentas.some((c) => c.id === cta.cuenta.id), "el ejecutivo ve las cuentas activas");
+  assert.equal(cuentas.puedeEditar, false);
+
+  const x = await leadReservado(U.e1.token);
+  const c = await cerrar(U.e1.token, x.lead.id, DATOS({ precioFinal: 9800000 }));
+  assert.equal(c.status, 200, JSON.stringify(c));
+  const id = c.cierre.id;
+  assert.equal((await ve(U.jefe.token, "cierres.aprobar", { id })).error, "sin_pagos", "sin pagos no se aprueba");
+
+  const reg = (token, pago) => ve(token, "cierres.pago_registrar", { id, pago });
+  const base = { medio: "transferencia", monto: 500000, fechaPago: hoyCL, cuentaId: cta.cuenta.id, referencia: "OP-998877", archivos: [arch()] };
+  assert.equal((await reg(U.e1.token, { ...base, cuentaId: "" })).error, "cuenta_requerida", "la transferencia exige la cuenta de la empresa");
+  assert.equal((await reg(U.e1.token, { ...base, referencia: "" })).error, "referencia_requerida");
+  assert.equal((await reg(U.e1.token, { ...base, archivos: [] })).error, "respaldo_requerido");
+  assert.equal((await reg(U.e1.token, { ...base, fechaPago: "2999-01-01" })).error, "fecha_pago_futura");
+  assert.equal((await reg(U.e1.token, { ...base, cuentaId: randomUUID() })).error, "cuenta_invalida");
+  assert.equal((await reg(U.e1.token, { ...base, monto: 99999999 })).error, "pago_excede_precio");
+  assert.equal((await reg(U.e2.token, base)).status, 404, "otro ejecutivo no ve la venta");
+
+  const p1 = await reg(U.e1.token, base);
+  assert.equal(p1.status, 200, JSON.stringify(p1));
+  assert.equal(p1.pago.medio_nombre, "Transferencia bancaria");
+  assert.match(p1.pago.cuenta, /BCI principal/);
+  assert.equal(p1.pago.cuenta_detalle.numero_cuenta, "12345678");
+  assert.equal((await ve(U.jefe.token, "cierres.aprobar", { id })).error, "pagos_no_cuadran", "faltan pagos por registrar");
+
+  // Un pago mal puesto se anula (con motivo) y se vuelve a registrar.
+  const mal = await reg(U.e1.token, { medio: "efectivo", monto: 4000000, fechaPago: hoyCL, archivos: [arch()] });
+  assert.equal(mal.status, 200, JSON.stringify(mal));
+  assert.equal((await ve(U.e1.token, "cierres.pago_anular", { id, pagoId: mal.pago.id, motivo: "x" })).error, "motivo_requerido");
+  assert.equal((await ve(U.e1.token, "cierres.pago_anular", { id, pagoId: mal.pago.id, motivo: "Monto mal digitado" })).status, 200);
+  assert.equal((await reg(U.e1.token, { medio: "vale_vista", monto: 4300000, fechaPago: hoyCL, cuentaId: cta.cuenta.id, referencia: "VV-5521", archivos: [arch()] })).status, 200);
+  assert.equal((await reg(U.e1.token, { medio: "efectivo", monto: 5000000, fechaPago: hoyCL, archivos: [arch(), arch()] })).status, 200);
+
+  const lista = await ve(U.e1.token, "cierres.pagos", { id });
+  assert.equal(lista.resumen.total, 9800000);
+  assert.equal(lista.resumen.cuadra, true);
+  assert.equal(lista.pagos.filter((p) => p.estado !== "anulado").length, 3);
+  assert.equal(lista.puedeEditar, true);
+
+  const ap = await ve(U.jefe.token, "cierres.aprobar", { id });
+  assert.equal(ap.status, 200, JSON.stringify(ap));
+  assert.equal((await reg(U.e1.token, base)).error, "cierre_no_pendiente", "aprobada: ya no se agregan pagos");
+
+  // La nota de venta lista cada pago con su fecha, medio, cuenta y respaldo.
+  const nota = (await ve(U.e1.token, "cierres.nota", { id })).nota;
+  assert.equal(nota.detalle_pagos.length, 3, "los anulados no salen");
+  const vv = nota.detalle_pagos.find((p) => p.medio_nombre === "Vale vista");
+  assert.equal(vv.monto, 4300000);
+  assert.match(vv.cuenta, /BCI principal/);
+  assert.equal(vv.referencia, "VV-5521");
+  assert.equal(vv.fecha_pago, hoyCL);
+  assert.equal(nota.detalle_pagos.find((p) => p.medio_nombre === "Efectivo").respaldos, 2);
+  const { buildNotaVentaPdf } = await import("../src/pdf-report.js");
+  assert.equal(String.fromCharCode(...buildNotaVentaPdf(nota, { fmt: (v) => `$${v}` }).slice(0, 5)), "%PDF-");
 });

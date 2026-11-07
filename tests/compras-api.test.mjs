@@ -3,7 +3,7 @@
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { iniciarFuncion, api, nuevaIp, loginAdmin, crm, db, correos } from "./helpers/api-env.mjs";
+import { iniciarFuncion, api, nuevaIp, loginAdmin, crm, db, correos, pagarTodo } from "./helpers/api-env.mjs";
 import { mesChile } from "../supabase/functions/api/ventas-core.js";
 import { reglaDocCompra } from "../supabase/functions/api/validaciones-core.js";
 
@@ -397,6 +397,7 @@ test("Venta de un vehículo consignado: el margen sobre el piso paga el 25 % al 
   assert.equal(bajo.error, "bajo_precio_piso", "tampoco se cierra bajo el piso");
   const c = await ve(U.e1.token, "cierres.crear", { leadId: U.ventaLead.id, datos: { precioFinal: 8090000, montoParteDePago: 0, montoFinanciado: 0, fechaEntrega: hoy() } });
   assert.equal(c.status, 200, JSON.stringify(c));
+  pagarTodo(c.cierre.id);
   const ap = await ve(U.jefe.token, "cierres.aprobar", { id: c.cierre.id });
   assert.equal(ap.status, 200, JSON.stringify(ap));
   const cons = fila("consignaciones", U.cons1.id);

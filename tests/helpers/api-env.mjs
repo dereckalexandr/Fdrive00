@@ -39,6 +39,8 @@ const DEFAULTS = {
   material_vehiculo: () => ({ id: randomUUID(), estado: "pendiente", url: null, notas: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
   compras: () => ({ id: randomUUID(), numero: ++contadorCompras, estado: "oferta", vehiculo: {}, motivo: null, monto_final: null, mes: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
   consignaciones: () => ({ id: randomUUID(), numero: ++contadorConsig, estado: "en_validacion", vehiculo: {}, plazo_dias: 90, vence_en: null, motivo: null, cierre_id: null, precio_venta: null, margen: null, mes: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
+  cierre_pagos: () => ({ id: randomUUID(), estado: "vigente", archivos: [], cuenta_id: null, cuenta_detalle: null, referencia: null, notas: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
+  cuentas_empresa: () => ({ id: randomUUID(), activa: true, local_id: null, tipo_cuenta: null, titular: null, rut_titular: null, alias: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
   avisos: () => ({ id: randomUUID(), leido_en: null, creado_en: new Date().toISOString() }),
   cierres: () => ({ id: randomUUID(), numero: ++contadorCierres, estado: "pendiente", mes: null, aprobado_por: null, aprobado_en: null, motivo_rechazo: null, anulado_por: null, anulado_en: null, motivo_anulacion: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
   reservas: () => ({ id: randomUUID(), estado: "activa", motivo: null, cerrado_en: null, creado_en: new Date().toISOString() }),
@@ -63,7 +65,7 @@ function patronARegex(patron, insensible) {
 }
 
 export function crearBaseFalsa() {
-  const tablas = { usuarios: [], locales: [], roles_permisos: [], bitacora: [], config_negocio: [], kv_store: [], vehiculos: [], clientes: [], leads: [], lead_eventos: [], tareas: [], cotizaciones: [], reservas: [], cierres: [], avisos: [], tasaciones: [], inspecciones: [], validaciones: [], validacion_docs: [], anuncios: [], anuncio_portales: [], campanias: [], publicaciones_rrss: [], material_vehiculo: [], compras: [], consignaciones: [], patentes_consultadas: [], alertas_leads: [] };
+  const tablas = { usuarios: [], locales: [], roles_permisos: [], bitacora: [], config_negocio: [], kv_store: [], vehiculos: [], clientes: [], leads: [], lead_eventos: [], tareas: [], cotizaciones: [], reservas: [], cierres: [], avisos: [], tasaciones: [], inspecciones: [], validaciones: [], validacion_docs: [], anuncios: [], anuncio_portales: [], campanias: [], publicaciones_rrss: [], material_vehiculo: [], compras: [], consignaciones: [], cierre_pagos: [], cuentas_empresa: [], patentes_consultadas: [], alertas_leads: [] };
   const consultas = [];
 
   function builder(nombre) {
@@ -146,6 +148,18 @@ let handler;
 export let db;
 /** Correos que la función habría enviado (uno por destinatario). */
 export const correos = [];
+
+/** Deja registrados (directo en la base falsa) los pagos que cubren el precio de una venta, para las pruebas que solo necesitan aprobarla. */
+export function pagarTodo(cierreId) {
+  const cierre = db.tablas.cierres.find((c) => c.id === cierreId);
+  if (!cierre) throw new Error("pagarTodo: no existe el cierre " + cierreId);
+  if (db.tablas.cierre_pagos.some((p) => p.cierre_id === cierreId && p.estado !== "anulado")) return; // ya tiene pagos
+  db.tablas.cierre_pagos.push({
+    id: randomUUID(), numero: db.tablas.cierre_pagos.length + 1, cierre_id: cierre.id, local_id: cierre.local_id ?? null, medio: "efectivo", monto: Number(cierre.precio_final),
+    fecha_pago: "2026-11-01", estado: "vigente", archivos: [{ id: "arch000001", nombre: "recibo.jpg", tipo: "image/jpeg", tam: 1000 }], cuenta_id: null, cuenta_detalle: null,
+    referencia: null, notas: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString(),
+  });
+}
 /** Respuestas simuladas de la API de patentes (Boostr): `respuestas[PATENTE]` = JSON, un número de estado HTTP o un Error. */
 export const boostr = { llamadas: [], respuestas: {} };
 /** Páginas de referencia del sueldo mínimo (simuladas): dirección → texto de la página, o un número de estado de error. */

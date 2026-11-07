@@ -50,6 +50,7 @@ import {
   filaDoc, reglaDocCompra as reglaDoc, archivoPermitidoParaDoc, validarDatosDoc, validarDatosCliente, faltantesCompra, faltantesConsignacion, esChecklistCompraActual, validarCuentaBancaria, DOCS_COMPRA, DOCS_CONSIGNACION, TIPOS_CON_REGLAS,
 } from "./validaciones-core.js";
 import { validarContratoCompraventa } from "./contrato-compraventa-core.js";
+import { validarPago, validarCuentaEmpresa, etiquetaCuenta, resumenPagos, verificarPagos, medioNombre, medioDe, MAX_ARCHIVOS_PAGO } from "./pagos-core.js";
 import {
   folioInspeccion, VEREDICTOS, validarSolicitudInspeccion, validarReprogramacion, validarResultadoInspeccion, claveEsDe,
   validarTransicionInspeccion, resolverLugar, idDeClave, ordenarAgenda, hayChoque, metricasInspector, colaInspecciones,
@@ -3513,6 +3514,123 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       },
     });
   }
+  /* ---------- cuentas bancarias de la empresa y pagos de la venta ---------- */
+  /** Cuentas de la empresa del local (y las que sirven a todos los locales). Quien no es supervisor solo recibe las activas. */
+  async function cuentasDelLocal(local: string | null, soloActivas: boolean) {
+    const { data, error } = await sb.from("cuentas_empresa").select("*");
+    if (error) { if (ctx.isMissingTable(error)) return []; throw error; }
+    return (data ?? []).filter((c: any) => (!soloActivas || c.activa !== false) && (!c.local_id || !local || c.local_id === local))
+      .sort((a: any, b: any) => etiquetaCuenta(a).localeCompare(etiquetaCuenta(b)));
+  }
+  const conEtiqueta = (c: any) => ({ ...c, etiqueta: etiquetaCuenta(c) });
+
+  if (op === "cuentas.list") {
+    if (!esSupervisor && !can("leads.propios") && !can("leads.local")) return err("forbidden", 403);
+    const local = ctx.esAdmin ? (body.localId ? String(body.localId) : null) : localId;
+    return json({ cuentas: (await cuentasDelLocal(local, !esSupervisor)).map(conEtiqueta), puedeEditar: esSupervisor });
+  }
+
+  if (op === "cuentas.save") {
+    if (!esSupervisor) return err("forbidden", 403);
+    const v = validarCuentaEmpresa(body.datos);
+    if (!v.ok) return err(v.error!);
+    const id = body.id ? String(body.id) : "";
+    const ahora = new Date().toISOString();
+    const local = ctx.esAdmin ? (body.localId ? String(body.localId) : null) : localId;
+    if (id) {
+      const prev = (await sb.from("cuentas_empresa").select("*").eq("id", id).maybeSingle()).data;
+      if (!prev || (!ctx.esAdmin && prev.local_id && prev.local_id !== localId)) return err("no_existe", 404);
+      const up = await sb.from("cuentas_empresa").update({ ...v.value, actualizado_en: ahora }).eq("id", id).select().single();
+      if (up.error) return fallo(up.error);
+      await audit(ctx.actor, "cuenta_empresa.editar", "cuenta_empresa", id, { banco: v.value.banco, activa: v.value.activa });
+      return json({ cuenta: conEtiqueta(up.data) });
+    }
+    const ins = await sb.from("cuentas_empresa").insert({ ...v.value, local_id: local, creado_por: userName }).select().single();
+    if (ins.error) return fallo(ins.error);
+    await audit(ctx.actor, "cuenta_empresa.crear", "cuenta_empresa", ins.data.id, { banco: v.value.banco });
+    return json({ cuenta: conEtiqueta(ins.data) });
+  }
+
+  async function pagosDeCierre(cierreId: string) {
+    const { data, error } = await sb.from("cierre_pagos").select("*").eq("cierre_id", cierreId);
+    if (error) { if (ctx.isMissingTable(error)) return []; throw error; }
+    return (data ?? []).sort((a: any, b: any) => String(a.fecha_pago).localeCompare(String(b.fecha_pago)) || String(a.creado_en).localeCompare(String(b.creado_en)));
+  }
+  const conMedio = (p: any) => ({ ...p, medio_nombre: medioNombre(p.medio), cuenta: p.cuenta_detalle ? etiquetaCuenta(p.cuenta_detalle) : "" });
+
+  /** Pagos registrados de una venta, cuánto falta y las cuentas de la empresa para elegir. */
+  if (op === "cierres.pagos") {
+    const c = await cargarCierre(String(body.id ?? ""));
+    if (!c || !(veTodoElLocal || c.ejecutivo_id === userId)) return err("no_existe", 404);
+    const pagos = await pagosDeCierre(c.id);
+    const lead = await cargarLead(c.lead_id);
+    const puedeEditar = c.estado === "pendiente" && !!lead && puedeTocar(lead);
+    const r = resumenPagos(pagos, c.precio_final);
+    return json({
+      pagos: pagos.map(conMedio), puedeEditar, precio_final: Number(c.precio_final),
+      resumen: { total: r.total, falta: r.falta, sobra: r.sobra, cuadra: r.cuadra, sinRespaldo: r.sinRespaldo.length },
+      sugerencias: { reserva: Number(c.reserva_monto) || 0, parte_pago: Number(c.monto_parte_pago) || 0, financiado: Number(c.monto_financiado) || 0 },
+      cuentas: puedeEditar ? (await cuentasDelLocal(c.local_id, true)).map(conEtiqueta) : [],
+    });
+  }
+
+  /**
+   * Registra un pago de la venta con su respaldo. Los archivos ya se subieron a kv_store (dval::<cierre>::<archivo>); aquí solo se anotan.
+   * Transferencia, depósito y vale vista exigen elegir la cuenta de la empresa donde llegó el dinero.
+   */
+  if (op === "cierres.pago_registrar") {
+    const c = await cargarCierre(String(body.id ?? ""));
+    if (!c || !(veTodoElLocal || c.ejecutivo_id === userId)) return err("no_existe", 404);
+    const lead = await cargarLead(c.lead_id);
+    if (!lead || !puedeTocar(lead)) return err("forbidden", 403);
+    if (c.estado !== "pendiente") return err("cierre_no_pendiente", 409);
+    const hoy = new Date().toLocaleDateString("en-CA", { timeZone: "America/Santiago" });
+    const v = validarPago(body.pago, { hoy });
+    if (!v.ok) return err(v.error!);
+    const medio = medioDe(v.value.medio)!;
+    let cuenta: any = null;
+    if (medio.requiereCuenta) {
+      cuenta = (await cuentasDelLocal(c.local_id, true)).find((x: any) => x.id === v.value.cuenta_id) ?? null;
+      if (!cuenta) return err("cuenta_invalida");
+    }
+    const archivos: any[] = [];
+    for (const a of Array.isArray(body.pago?.archivos) ? body.pago.archivos : []) {
+      const r = validarArchivo(a);
+      if (!r.ok) return err(r.error!);
+      archivos.push(r.value);
+    }
+    if (archivos.length > MAX_ARCHIVOS_PAGO) return err("demasiados_archivos");
+    if (medio.requiereRespaldo && archivos.length === 0) return err("respaldo_requerido");
+    const previos = await pagosDeCierre(c.id);
+    if (resumenPagos(previos, c.precio_final).total + v.value.monto > Number(c.precio_final)) return err("pago_excede_precio", 409);
+    const ins = await sb.from("cierre_pagos").insert({
+      ...v.value, cierre_id: c.id, local_id: c.local_id, archivos, registrado_por: userName,
+      cuenta_detalle: cuenta ? { banco: cuenta.banco, tipo_cuenta: cuenta.tipo_cuenta, numero_cuenta: cuenta.numero_cuenta, alias: cuenta.alias } : null,
+    }).select().single();
+    if (ins.error) return fallo(ins.error);
+    await evento(c.lead_id, "cierre", `${userName} registró un pago de ${dinero(v.value.monto)} (${medioNombre(v.value.medio)}${cuenta ? `, cuenta ${etiquetaCuenta(cuenta)}` : ""}) de la venta ${folioVenta(c.numero)}`);
+    await audit(ctx.actor, "venta.pago_registrar", "cierre", c.id, { numero: c.numero, medio: v.value.medio, monto: v.value.monto, cuenta_id: v.value.cuenta_id });
+    return json({ pago: conMedio(ins.data) });
+  }
+
+  /** Anula un pago mal registrado (solo mientras la venta espera su aprobación). Queda en la historia. */
+  if (op === "cierres.pago_anular") {
+    const c = await cargarCierre(String(body.id ?? ""));
+    if (!c || !(veTodoElLocal || c.ejecutivo_id === userId)) return err("no_existe", 404);
+    const lead = await cargarLead(c.lead_id);
+    if (!lead || !puedeTocar(lead)) return err("forbidden", 403);
+    if (c.estado !== "pendiente") return err("cierre_no_pendiente", 409);
+    const motivo = String(body.motivo ?? "").trim().slice(0, 200);
+    if (motivo.length < 3) return err("motivo_requerido");
+    const p = (await pagosDeCierre(c.id)).find((x: any) => x.id === String(body.pagoId ?? ""));
+    if (!p || p.estado === "anulado") return err("no_existe", 404);
+    const up = await sb.from("cierre_pagos").update({ estado: "anulado", anulado_por: userName, anulado_en: new Date().toISOString(), motivo_anulacion: motivo, actualizado_en: new Date().toISOString() }).eq("id", p.id);
+    if (up.error) return fallo(up.error);
+    await evento(c.lead_id, "cierre", `${userName} anuló un pago de ${dinero(p.monto)} (${medioNombre(p.medio)}) de la venta ${folioVenta(c.numero)}: ${motivo}`);
+    await audit(ctx.actor, "venta.pago_anular", "cierre", c.id, { numero: c.numero, pago: p.id, monto: p.monto, motivo });
+    return json({ ok: true });
+  }
+
   /**
    * Datos de la nota de venta: solo existe con la venta aprobada (documentos validados y aprobación del Jefe Local). Trae el detalle de lo pagado:
    * reserva, vehículo recibido en parte de pago, crédito de la financiera y el saldo cancelado, más los respaldos de pago adjuntos.
@@ -3531,6 +3649,10 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     const docs = val ? await enLotes("validacion_docs", "validacion_id", [val.id]) : [];
     const respaldos = docs.filter((d: any) => d.estado === "aprobado" || (d.archivos ?? []).length > 0).sort((a: any, b: any) => (a.orden ?? 0) - (b.orden ?? 0))
       .map((d: any) => ({ nombre: d.nombre, estado: d.estado, archivos: (d.archivos ?? []).length, revisado_por: d.revisado_por ?? null }));
+    const detallePagos = (await pagosDeCierre(c.id)).filter((p: any) => p.estado !== "anulado").map((p: any) => ({
+      medio_nombre: medioNombre(p.medio), monto: Number(p.monto), fecha_pago: p.fecha_pago, cuenta: p.cuenta_detalle ? etiquetaCuenta(p.cuenta_detalle) : "",
+      referencia: p.referencia || "", respaldos: (p.archivos ?? []).length, registrado_por: p.registrado_por || "",
+    }));
     const reserva = Number(c.reserva_monto) || 0;
     const parte = Number(c.monto_parte_pago) || 0;
     const financiado = Number(c.monto_financiado) || 0;
@@ -3542,7 +3664,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
         cliente: cli ? { nombre: cli.nombre, rut: cli.rut, telefono: cli.telefono, email: cli.email, direccion: cli.direccion, comuna: cli.comuna } : {},
         vehiculo: c.vehiculo_snapshot || {},
         precio_lista: c.precio_lista, precio_final: c.precio_final,
-        pagos: { reserva, parte_pago: parte, financiado, financiera: c.financiera || "", saldo },
+        pagos: { reserva, parte_pago: parte, financiado, financiera: c.financiera || "", saldo }, detalle_pagos: detallePagos,
         vehiculo_parte_pago: parte > 0 ? { patente: pp.patente || "", marca: pp.marca || "", modelo: pp.modelo || "", anio: pp.anio ?? null, km: pp.km ?? null } : null,
         validacion: val ? { folio: folioValidacion(val.numero), estado: val.estado } : null,
         respaldos,
@@ -3569,6 +3691,10 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     const reserva = c.reserva_id ? (await sb.from("reservas").select("*").eq("id", c.reserva_id).maybeSingle()).data : null;
     const { data: veh } = await sb.from("vehiculos").select("estado").eq("id", c.vehiculo_id).maybeSingle();
     if (!reserva || reserva.estado !== "activa" || !veh || veh.estado !== "reservado") return err("reserva_no_vigente", 409);
+    // Los pagos registrados deben sumar el precio de venta y traer su respaldo (si las tablas de pagos aún no existen, no se exige).
+    const pg = await sb.from("cierre_pagos").select("*").eq("cierre_id", c.id);
+    if (pg.error) { if (!ctx.isMissingTable(pg.error)) return fallo(pg.error); }
+    else { const vp = verificarPagos(pg.data ?? [], c.precio_final); if (!vp.ok) return err(vp.error!, 409); }
     // Con Validadores en el local, la venta solo se aprueba con sus documentos validados.
     if (await hayValidadores(c.local_id)) {
       const vq = await sb.from("validaciones").select("*").eq("cierre_id", c.id);
