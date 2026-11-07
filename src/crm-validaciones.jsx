@@ -15,6 +15,7 @@ import { validacionNombre, docNombre, tipoValidacionNombre, claveArchivo, reglaD
 import { compressImage, makePhotoId } from "./photos.js";
 import { InputDinero } from "./campo-dinero.jsx";
 import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, useCarga, mensajeError, apiPorDefecto } from "./crm-ui.jsx";
+import { ReservasPorValidar } from "./crm-pagos.jsx";
 
 const COLOR = { pendiente: "bg-amber-100 text-amber-800", en_revision: "bg-sky-100 text-sky-800", observada: "bg-orange-100 text-orange-800", rechazada: "bg-rose-100 text-rose-800", aprobada: "bg-emerald-100 text-emerald-800", cancelada: "bg-stone-200 text-stone-600" };
 const COLOR_DOC = { pendiente: "bg-stone-100 text-stone-600", aprobado: "bg-emerald-100 text-emerald-800", observado: "bg-orange-100 text-orange-800", rechazado: "bg-rose-100 text-rose-800", no_aplica: "bg-stone-200 text-stone-600" };
@@ -373,8 +374,10 @@ export function ModuloValidaciones({ api: apiProp, permisos = [], esAdmin = fals
   const subir = () => setVersion((v) => v + 1);
   const cola = useCarga(() => (realiza || supervisa ? api("validacion.list", { vista: "cola" }).then((r) => r.validaciones.length).catch(() => 0) : Promise.resolve(0)), [version]);
 
+  const reservas = useCarga(() => (realiza || supervisa ? api("reservas.por_validar", {}).then((r) => r.reservas.length).catch(() => 0) : Promise.resolve(0)), [version]);
   const opciones = [];
   if (realiza) opciones.push(["cola", "Por tomar", cola.datos || 0], ["mias", "Mis validaciones"]);
+  if (realiza || supervisa) opciones.push(["reservas", "Pagos de reservas", reservas.datos || 0]);
   opciones.push(["todas", realiza ? "Todas del local" : "Validaciones"], ["resumen", "Resumen"]);
   const tomar = async (v) => { await api("validacion.tomar", { id: v.id }); subir(); setAbierta(v.id); };
 
@@ -393,6 +396,7 @@ export function ModuloValidaciones({ api: apiProp, permisos = [], esAdmin = fals
           <Lista api={api} vista="local" estadoFiltro={filtro} version={version} onAbrir={setAbierta} onTomar={tomar} vacio="No hay validaciones con ese filtro." />
         </>
       )}
+      {tab === "reservas" && <ReservasPorValidar api={api} version={version} onCambio={subir} />}
       {tab === "resumen" && <Resumen api={api} version={version} />}
       {abierta && <ValidacionDetalle api={api} id={abierta} onCerrar={() => setAbierta(null)} onCambio={subir} />}
     </div>

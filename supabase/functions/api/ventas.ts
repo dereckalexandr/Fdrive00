@@ -3393,6 +3393,27 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     return json({ reserva });
   }
 
+  /** Pagos de reservas que esperan validación (Jefe Local y Validador), con los datos para revisarlos sin abrir cada lead. */
+  if (op === "reservas.por_validar") {
+    if (!esSupervisor && !can("validacion.realizar")) return err("forbidden", 403);
+    const { data, error } = await scoped(sb.from("reservas").select("*").eq("pago_estado", "pendiente").order("creado_en"));
+    if (error) return fallo(error);
+    const filas: any[] = (data ?? []).filter((r: any) => r.estado === "activa" || r.estado === "convertida");
+    const [leads, vehiculos, clientes] = await Promise.all([porIds("leads", filas.map((r) => r.lead_id)), porIds("vehiculos", filas.map((r) => r.vehiculo_id)), porIds("clientes", filas.map((r) => r.cliente_id))]);
+    const usuarios = await porIds("usuarios", leads.map((l: any) => l.asignado_a));
+    return json({
+      reservas: filas.map((r: any) => {
+        const l = leads.find((x: any) => x.id === r.lead_id) || {};
+        const v = vehiculos.find((x: any) => x.id === r.vehiculo_id) || {};
+        return {
+          ...r, medio_nombre: medioNombre(r.medio_pago), cuenta: r.cuenta_detalle ? etiquetaCuenta(r.cuenta_detalle) : "",
+          cliente: (clientes.find((x: any) => x.id === r.cliente_id) || {}).nombre ?? "", ejecutivo: (usuarios.find((x: any) => x.id === l.asignado_a) || {}).nombre ?? "",
+          vehiculo: v.marca ? `${v.marca} ${v.modelo} ${v.anio} · ${v.patente}` : "",
+        };
+      }),
+    });
+  }
+
   /** El Jefe Local o el Validador aprueba o rechaza el pago de una reserva. Hasta que no esté validado, la venta no se puede aprobar. */
   if (op === "reservas.validar_pago") {
     if (!esSupervisor && !can("validacion.realizar")) return err("forbidden", 403);

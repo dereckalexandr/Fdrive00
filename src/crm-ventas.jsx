@@ -775,7 +775,7 @@ export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador, 
   // Cuántos descuentos esperan aprobación (solo para quien los aprueba): se muestra como insignia en la pestaña.
   const puedeAprobar = can("leads.asignar");
   const pend = useCarga(() => (puedeAprobar
-    ? Promise.all([api("cotizaciones.pendientes").then((r) => r.pendientes.length).catch(() => 0), api("cierres.list", { estado: "pendiente" }).then((r) => r.cierres.length).catch(() => 0)]).then(([a, b]) => a + b)
+    ? Promise.all([api("cotizaciones.pendientes").then((r) => r.pendientes.length).catch(() => 0), api("cierres.list", { estado: "pendiente" }).then((r) => r.cierres.length).catch(() => 0), api("reservas.por_validar", {}).then((r) => r.reservas.length).catch(() => 0)]).then(([a, b, c]) => a + b + c)
     : Promise.resolve(0)), [api, version, puedeAprobar]);
 
   if (cat.cargando && !cat.datos) return <Cargando />;

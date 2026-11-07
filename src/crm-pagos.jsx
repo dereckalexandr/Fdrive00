@@ -272,6 +272,42 @@ export function PagosVenta({ api, cierre, avisar, onCambio = () => {} }) {
   );
 }
 
+/** Bandeja de pagos de reservas por validar (Jefe Local y Validador): cada reserva con su medio, cuenta, referencia y respaldo, y los botones para validarla o rechazarla. */
+export function ReservasPorValidar({ api, version = 0, onCambio = () => {}, abrirLead }) {
+  const [msg, setMsg] = useState("");
+  const [v, setV] = useState(0);
+  const { cargando, error, datos, recargar } = useCarga(() => api("reservas.por_validar", {}), [api, version, v]);
+  if (cargando && !datos) return <Cargando />;
+  if (error && !datos) return <Aviso>{error}</Aviso>;
+  const cambio = async () => { await recargar(); setV((x) => x + 1); onCambio(); };
+  return (
+    <div className="flex flex-col gap-3">
+      {msg && <Aviso>{msg}</Aviso>}
+      {datos.reservas.length === 0 && <p className="text-sm text-stone-500">No hay pagos de reservas esperando validación. 👌</p>}
+      {datos.reservas.map((r) => (
+        <div key={r.id} className="bg-white border border-stone-200 p-4 text-sm flex flex-col gap-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-stone-900 font-medium">{r.cliente || "Cliente"}</span>
+            <span className="text-stone-500">· {r.vehiculo}</span>
+            <span className="ml-auto font-mono text-stone-900">{clp(r.monto)}</span>
+          </div>
+          <p className="text-xs text-stone-600">
+            {r.medio_nombre} · pagado el {fechaCorta(r.fecha_pago)}{r.cuenta ? ` · cuenta ${r.cuenta}` : ""}{r.referencia ? ` · ref. ${r.referencia}` : ""}
+            {r.ejecutivo ? ` · ejecutivo ${r.ejecutivo}` : ""}
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            {(r.archivos || []).length === 0 ? <span className="text-xs text-stone-400">Sin respaldo</span> : (r.archivos || []).map((a) => (
+              <button key={a.id} type="button" onClick={() => abrirArchivo(r.cotizacion_id || r.id, a)} className="text-xs text-sky-700 hover:underline">{a.tipo === "application/pdf" ? "📄" : "🖼"} {a.nombre}</button>
+            ))}
+            {abrirLead && <button type="button" onClick={() => abrirLead(r.lead_id)} className="text-xs text-stone-600 underline ml-auto">Abrir el lead</button>}
+          </div>
+          <PagoReserva api={api} reserva={r} puedeValidar puedeCorregir={false} onCambio={cambio} avisar={setMsg} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /** Cuentas bancarias de la empresa: solo el Administrador las crea o modifica; el Jefe Local las ve. */
 export function CuentasEmpresa({ api }) {
   const [version, setVersion] = useState(0);

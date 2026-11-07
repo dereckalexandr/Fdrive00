@@ -14,7 +14,7 @@ import { MODULOS_COMISION, getTramo, etiquetaTramo } from "../supabase/functions
 import { calcularCotizacion, validarCierre, cierreNombre, mesChile, FINANCIERAS } from "../supabase/functions/api/ventas-core.js";
 import { Aprobaciones, topeTasado } from "./crm-cotizaciones.jsx";
 import { buildContratoCompraventaPdf, buildNotaVentaPdf } from "./pdf-report.js";
-import { PagosVenta, CuentasEmpresa } from "./crm-pagos.jsx";
+import { PagosVenta, CuentasEmpresa, ReservasPorValidar } from "./crm-pagos.jsx";
 import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, fechaCorta, hace, Aviso, Cargando, Tarjeta, Campo, Modal, useCarga, mensajeError } from "./crm-ui.jsx";
 
 export const folioVenta = (n) => `VTA-${String(n || 0).padStart(6, "0")}`;
@@ -267,6 +267,9 @@ export function AprobacionesTodo({ api, version, abrirLead, onCambio }) {
     <>
       <Aprobaciones api={api} version={version} abrirLead={abrirLead} onCambio={onCambio} />
       <CierresPorAprobar api={api} version={version} abrirLead={abrirLead} onCambio={onCambio} />
+      <Tarjeta titulo="Pagos de reservas por validar" ayuda="El pago de cada reserva debe validarse antes de poder aprobar la venta.">
+        <ReservasPorValidar api={api} version={version} abrirLead={abrirLead} onCambio={onCambio} />
+      </Tarjeta>
     </>
   );
 }

@@ -506,3 +506,18 @@ test("Reserva: exige medio de pago, cuenta y respaldo; el pago se valida y se de
   assert.match(p0.cuenta, /Santander ventas/);
   assert.equal(p0.referencia, "OP-7788");
 });
+
+test("Bandeja de pagos de reservas por validar: la ven el Jefe Local y el Validador; sale de la lista al validarse", async () => {
+  const x = await leadReservado(U.e1.token);
+  const lista = await ve(U.jefe.token, "reservas.por_validar", {});
+  assert.equal(lista.status, 200, JSON.stringify(lista));
+  const fila = lista.reservas.find((r) => r.id === x.res.id);
+  assert.ok(fila, "la reserva nueva espera validación");
+  assert.equal(fila.medio_nombre, "Efectivo");
+  assert.equal(fila.monto, 500000);
+  assert.ok(fila.cliente && fila.vehiculo, "trae el cliente y el vehículo para revisarla sin abrir el lead");
+  assert.equal(fila.archivos.length, 1);
+  assert.equal((await ve(U.e1.token, "reservas.por_validar", {})).status, 403, "el ejecutivo no ve la bandeja");
+  assert.equal((await ve(U.jefe.token, "reservas.validar_pago", { id: x.res.id, aprueba: true })).status, 200);
+  assert.ok(!(await ve(U.jefe.token, "reservas.por_validar", {})).reservas.some((r) => r.id === x.res.id), "validada: ya no está pendiente");
+});
