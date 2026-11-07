@@ -328,3 +328,27 @@ test("El Jefe Local se salta al Validador: toma y aprueba los documentos él mis
   const vv2 = db.tablas.validaciones.find((x) => x.vehiculo_id === v2.id && x.tipo === "vehiculo");
   assert.equal((await ve(U.e1.token, "validacion.tomar", { id: vv2.id })).status, 403);
 });
+
+test("Una validación de venta que quedó sin documentos se repara sola al abrirla (con los documentos del vehículo ya aprobados)", async () => {
+  const x = await leadReservado(U.e1.token);
+  const c = await cerrar(U.e1.token, x.lead.id, DATOS());
+  assert.equal(c.status, 200, JSON.stringify(c));
+  const id = c.validacion.id;
+  assert.ok(docsFila(id).length >= 8, "nace con su lista completa");
+  // Estado visto en producción: la validación existe pero sin ningún documento.
+  db.tablas.validacion_docs = db.tablas.validacion_docs.filter((d) => d.validacion_id !== id);
+  assert.equal(docsFila(id).length, 0);
+  const g = await ve(U.jefe.token, "validacion.get", { id });
+  assert.equal(g.status, 200, JSON.stringify(g));
+  assert.ok(g.docs.length >= 8, "se vuelve a crear la lista");
+  assert.ok(g.docs.some((d) => d.clave === "comprobante_pago"));
+  assert.equal(docsFila(id).length, g.docs.length);
+  assert.notEqual(filaVal(id).estado, "aprobada", "no queda aprobada sin revisar nada");
+  // Aprobar la venta también la repara antes de mirar la validación.
+  const y = await leadReservado(U.e1.token);
+  const c2 = await cerrar(U.e1.token, y.lead.id, DATOS());
+  db.tablas.validacion_docs = db.tablas.validacion_docs.filter((d) => d.validacion_id !== c2.validacion.id);
+  pagarTodo(c2.cierre.id);
+  assert.equal((await ve(U.jefe.token, "cierres.aprobar", { id: c2.cierre.id })).error, "validacion_pendiente", "con la lista reparada, faltan documentos por validar");
+  assert.ok(docsFila(c2.validacion.id).length >= 8);
+});

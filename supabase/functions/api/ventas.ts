@@ -298,6 +298,38 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     return (data ?? []).some((u: any) => u.activo && permisosEfectivos(u.roles ?? [], overrides, u.permisos_extra).includes("validacion.realizar"));
   }
   /** Crea una validación con su lista de documentos (reutiliza los del vehículo ya aprobados). null si las tablas aún no existen. */
+  /**
+   * Una fila de documento con TODAS sus columnas. Si en un mismo insert unas filas traen el estado y los archivos (documentos reutilizados) y otras no,
+   * la base recibe NULL en las que faltan y rechaza todo el insert por las columnas NOT NULL: la validación quedaba sin documentos.
+   */
+  const filaNuevaDoc = (validacionId: string, d: any, orden: number, reutilizado?: any) => ({
+    validacion_id: validacionId, ...filaDoc(d), orden, estado: "pendiente", comentario: null, revisado_por: null, revisado_en: null, archivos: [], ...(reutilizado ?? {}),
+  });
+  /**
+   * Repara una validación de venta que quedó sin documentos (por el error de arriba): crea su lista, con los documentos del vehículo ya aprobados,
+   * y recalcula su estado. No hace nada si ya tiene documentos.
+   */
+  async function repararValidacionSinDocs(v: any) {
+    try {
+      if (!v || v.tipo !== "venta") return false;
+      if ((await enLotes("validacion_docs", "validacion_id", [v.id])).length > 0) return false;
+      const c = v.cierre_id ? (await sb.from("cierres").select("*").eq("id", v.cierre_id).maybeSingle()).data : null;
+      let reutil: Record<string, any> = {};
+      if (v.vehiculo_id) {
+        const o = await sb.from("validaciones").select("*").eq("vehiculo_id", v.vehiculo_id).eq("tipo", "vehiculo").eq("estado", "aprobada");
+        const origen = (o.data ?? [])[0];
+        if (origen) reutil = docsReutilizables(await enLotes("validacion_docs", "validacion_id", [origen.id]), origen.id);
+      }
+      const docs = checklistPara("venta", { conFinanciamiento: Number(c?.monto_financiado) > 0, conParteDePago: Number(c?.monto_parte_pago) > 0 }).map((d, i) => filaNuevaDoc(v.id, d, i, reutil[d.clave]));
+      const di = await sb.from("validacion_docs").insert(docs);
+      if (di.error) throw di.error;
+      const estado = estadoDeValidacion(docs, !!v.validador_id);
+      const patch: Record<string, unknown> = { estado: v.validador_id && estado === "pendiente" ? "en_revision" : estado, actualizado_en: new Date().toISOString() };
+      if (estado === "aprobada") patch.resuelta_en = new Date().toISOString();
+      await sb.from("validaciones").update(patch).eq("id", v.id);
+      return true;
+    } catch (e) { console.error("repararValidacionSinDocs:", String((e as any)?.message ?? e)); return false; }
+  }
   async function crearValidacion(p: { tipo: string; local_id: string; cierre_id?: string; compra_id?: string; consignacion_id?: string; reutilizarDe?: string; sinEnviar?: boolean; lead_id?: string | null; vehiculo_id?: string | null; tasacion_id?: string | null; sujeto: Record<string, unknown>; opciones?: { conFinanciamiento?: boolean; conParteDePago?: boolean } }) {
     try {
       const ins = await sb.from("validaciones").insert({
@@ -317,7 +349,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       }
       // Un vehículo recién comprado o consignado hereda como aprobados los documentos del vehículo ya revisados en la operación.
       if (p.reutilizarDe && p.tipo !== "compra" && p.tipo !== "consignacion") reutil = docsReutilizables(await enLotes("validacion_docs", "validacion_id", [p.reutilizarDe]), p.reutilizarDe);
-      const docs = checklistPara(p.tipo, p.opciones).map((d, i) => ({ validacion_id: v.id, ...filaDoc(d), orden: i, ...(reutil[d.clave] ?? {}) }));
+      const docs = checklistPara(p.tipo, p.opciones).map((d, i) => filaNuevaDoc(v.id, d, i, reutil[d.clave]));
       const di = await sb.from("validacion_docs").insert(docs);
       if (di.error) throw di.error;
       const estado = estadoDeValidacion(docs, false);
@@ -1503,6 +1535,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       return { val: data, docs };
     }
     const detalle = async (v: any) => {
+      if (await repararValidacionSinDocs(v)) v = (await cargarVal(v.id)) ?? v;
       const docs = await docsDe([v.id]);
       const [fila] = await enriquecerVal([v]);
       return { validacion: fila, docs, esMia: realiza && v.validador_id === userId, puedeRevisar: realiza && v.validador_id === userId && ESTADOS_ABIERTOS.includes(v.estado) && v.estado !== "pendiente", puedeAdjuntar: v.estado !== "aprobada" && v.estado !== "cancelada" && (await puedeAdjuntar(v)), puedeGestionar: esSupervisor, puedeRealizar: realiza };
@@ -3823,6 +3856,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       if (!vq.error) {
         const activas = (vq.data ?? []).filter((x: any) => x.estado !== "cancelada");
         let val = activas.find((x: any) => x.estado === "aprobada") || activas[0];
+        if (val && (await repararValidacionSinDocs(val))) val = (await sb.from("validaciones").select("*").eq("id", val.id).maybeSingle()).data ?? val;
         if (!val) {
           const { data: vh } = await sb.from("vehiculos").select("*").eq("id", c.vehiculo_id).maybeSingle();
           val = await crearValidacion({
