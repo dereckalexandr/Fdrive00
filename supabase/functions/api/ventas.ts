@@ -3527,11 +3527,12 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
   if (op === "cuentas.list") {
     if (!esSupervisor && !can("leads.propios") && !can("leads.local")) return err("forbidden", 403);
     const local = ctx.esAdmin ? (body.localId ? String(body.localId) : null) : localId;
-    return json({ cuentas: (await cuentasDelLocal(local, !esSupervisor)).map(conEtiqueta), puedeEditar: esSupervisor });
+    return json({ cuentas: (await cuentasDelLocal(local, !esSupervisor)).map(conEtiqueta), puedeEditar: ctx.esAdmin });
   }
 
+  // Solo el Administrador crea o modifica las cuentas bancarias de la empresa; el resto las ve y las elige al registrar un pago.
   if (op === "cuentas.save") {
-    if (!esSupervisor) return err("forbidden", 403);
+    if (!ctx.esAdmin) return err("forbidden", 403);
     const v = validarCuentaEmpresa(body.datos);
     if (!v.ok) return err(v.error!);
     const id = body.id ? String(body.id) : "";

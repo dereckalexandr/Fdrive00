@@ -387,12 +387,15 @@ test("Pagos de la venta: uno por uno con fecha, cuenta de la empresa y respaldo;
   const arch = () => ({ id: `arch${String(300000 + ++n)}`, nombre: "comprobante.jpg", tipo: "image/jpeg", tam: 90000 });
   // Cuentas bancarias de la empresa: las crea el supervisor y las ve el ejecutivo.
   assert.equal((await ve(U.e1.token, "cuentas.save", { datos: { banco: "BCI", numeroCuenta: "12345678" } })).status, 403);
-  assert.equal((await ve(U.jefe.token, "cuentas.save", { datos: { banco: "B", numeroCuenta: "12345678" } })).error, "banco_requerido");
-  const cta = await ve(U.jefe.token, "cuentas.save", { datos: { banco: "BCI", tipoCuenta: "Cuenta corriente", numeroCuenta: "12345678", alias: "BCI principal" } });
+  assert.equal((await ve(U.jefe.token, "cuentas.save", { datos: { banco: "BCI", numeroCuenta: "12345678" } })).status, 403, "ni el Jefe Local");
+  assert.equal((await ve(admin, "cuentas.save", { datos: { banco: "B", numeroCuenta: "12345678" } })).error, "banco_requerido");
+  const cta = await ve(admin, "cuentas.save", { datos: { banco: "BCI", tipoCuenta: "Cuenta corriente", numeroCuenta: "12345678", alias: "BCI principal" } });
   assert.equal(cta.status, 200, JSON.stringify(cta));
   const cuentas = await ve(U.e1.token, "cuentas.list", {});
   assert.ok(cuentas.cuentas.some((c) => c.id === cta.cuenta.id), "el ejecutivo ve las cuentas activas");
   assert.equal(cuentas.puedeEditar, false);
+  assert.equal((await ve(U.jefe.token, "cuentas.list", {})).puedeEditar, false, "el Jefe Local las ve pero no las edita");
+  assert.equal((await ve(admin, "cuentas.list", {})).puedeEditar, true);
 
   const x = await leadReservado(U.e1.token);
   const c = await cerrar(U.e1.token, x.lead.id, DATOS({ precioFinal: 9800000 }));

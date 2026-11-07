@@ -183,7 +183,7 @@ export function PagosVenta({ api, cierre, avisar, onCambio = () => {} }) {
   );
 }
 
-/** Cuentas bancarias de la empresa (Jefe Local y Administrador). */
+/** Cuentas bancarias de la empresa: solo el Administrador las crea o modifica; el Jefe Local las ve. */
 export function CuentasEmpresa({ api }) {
   const [version, setVersion] = useState(0);
   const [msg, setMsg] = useState("");
@@ -218,18 +218,19 @@ export function CuentasEmpresa({ api }) {
 
   return (
     <Tarjeta titulo="Cuentas bancarias de la empresa" ayuda="Donde llegan las transferencias, depósitos y vales vista de las ventas. El ejecutivo elige una de estas cuentas al registrar cada pago.">
-      {datos.cuentas.length === 0 && <p className="text-sm text-stone-500 mb-3">Todavía no hay cuentas. Agrega la primera para poder registrar pagos por banco.</p>}
+      {datos.cuentas.length === 0 && <p className="text-sm text-stone-500 mb-3">{datos.puedeEditar ? "Todavía no hay cuentas. Agrega la primera para poder registrar pagos por banco." : "Todavía no hay cuentas. Pídele al Administrador que las agregue para poder registrar pagos por banco."}</p>}
+      {!datos.puedeEditar && <p className="text-xs text-stone-500 mb-3">Solo el Administrador puede agregar o modificar las cuentas.</p>}
       <ul className="flex flex-col gap-1 mb-3">
         {datos.cuentas.map((c) => (
           <li key={c.id} className={`flex flex-wrap items-center gap-3 border border-stone-200 px-3 py-2 text-sm ${c.activa === false ? "opacity-60" : ""}`}>
             <span className="flex-1 min-w-[220px]"><span className="text-stone-900">{c.etiqueta}</span>{(c.titular || c.rut_titular) && <span className="text-stone-500"> · {[c.titular, c.rut_titular].filter(Boolean).join(" · ")}</span>}{c.activa === false && <span className="ml-2 text-xs text-stone-500">(inactiva)</span>}</span>
-            <button onClick={() => abrir(c)} className={BTN}>Editar</button>
-            <button disabled={ocupado} onClick={() => cambiarActiva(c)} className={BTN}>{c.activa === false ? "Activar" : "Desactivar"}</button>
+            {datos.puedeEditar && <button onClick={() => abrir(c)} className={BTN}>Editar</button>}
+            {datos.puedeEditar && <button disabled={ocupado} onClick={() => cambiarActiva(c)} className={BTN}>{c.activa === false ? "Activar" : "Desactivar"}</button>}
           </li>
         ))}
       </ul>
-      {!editando && <button onClick={() => abrir(null)} className={BTN_AMBAR}>+ Agregar cuenta</button>}
-      {editando && (
+      {datos.puedeEditar && !editando && <button onClick={() => abrir(null)} className={BTN_AMBAR}>+ Agregar cuenta</button>}
+      {datos.puedeEditar && editando && (
         <div className="border border-stone-200 bg-stone-50 p-3 flex flex-col gap-3">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <Campo etiqueta="Banco *"><input value={f.banco} maxLength={60} onChange={(e) => setF({ ...f, banco: e.target.value })} className={INPUT} /></Campo>
