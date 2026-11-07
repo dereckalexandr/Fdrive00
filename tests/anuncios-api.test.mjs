@@ -3,7 +3,7 @@
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { iniciarFuncion, api, nuevaIp, loginAdmin, crm, db } from "./helpers/api-env.mjs";
+import { iniciarFuncion, api, nuevaIp, loginAdmin, crm, db, pagoReserva } from "./helpers/api-env.mjs";
 
 const ve = (token, op, extra = {}) => api({ action: "ventas", token, op, ...extra });
 const CLAVE = "Prueba12345";
@@ -145,7 +145,7 @@ test("Alertas: el precio cambia en el inventario y el aviso queda desactualizado
 test("Alertas: vehículo reservado y vencimientos", async () => {
   const l = (await ve(U.e1.token, "leads.create", { cliente: { nombre: "Cliente Aviso", telefono: "911111111" }, lead: {} })).lead;
   const cot = (await ve(U.e1.token, "cotizaciones.save", { leadId: l.id, vehiculoId: U.v1.id, datos: {} })).cotizacion;
-  assert.ok((await ve(U.e1.token, "reservas.crear", { cotizacionId: cot.id, monto: 500000 })).reserva);
+  assert.ok((await ve(U.e1.token, "reservas.crear", { pago: pagoReserva(), cotizacionId: cot.id, monto: 500000 })).reserva);
   const g = await ve(U.an.token, "anuncios.get", { id: U.a1.id });
   assert.ok(g.anuncio.alertas.some((a) => a.tipo === "reservado"), "reservado: hay que pausar");
   // No se puede publicar en otro portal mientras esté reservado.

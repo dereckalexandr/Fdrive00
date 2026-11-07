@@ -149,13 +149,23 @@ export let db;
 /** Correos que la función habría enviado (uno por destinatario). */
 export const correos = [];
 
-/** Deja registrados (directo en la base falsa) los pagos que cubren el precio de una venta, para las pruebas que solo necesitan aprobarla. */
+/** El pago de una reserva (efectivo con su respaldo) para las pruebas que solo necesitan reservar. */
+export const pagoReserva = () => ({ medio: "efectivo", fechaPago: new Date().toLocaleDateString("en-CA", { timeZone: "America/Santiago" }), archivos: [{ id: "archres" + randomUUID().slice(0, 8).replace(/-/g, ""), nombre: "recibo.jpg", tipo: "image/jpeg", tam: 1000 }] });
+
+/**
+ * Deja listo (directo en la base falsa) lo que pide la aprobación de una venta: el pago de la reserva validado y los pagos que cubren el resto del precio.
+ * Para las pruebas que solo necesitan aprobar la venta.
+ */
 export function pagarTodo(cierreId) {
   const cierre = db.tablas.cierres.find((c) => c.id === cierreId);
   if (!cierre) throw new Error("pagarTodo: no existe el cierre " + cierreId);
+  const reserva = db.tablas.reservas.find((r) => r.id === cierre.reserva_id);
+  if (reserva && (reserva.pago_estado === "pendiente" || reserva.pago_estado === "rechazado")) reserva.pago_estado = "validado";
   if (db.tablas.cierre_pagos.some((p) => p.cierre_id === cierreId && p.estado !== "anulado")) return; // ya tiene pagos
+  const resto = Number(cierre.precio_final) - (Number(cierre.reserva_monto) || 0);
+  if (resto <= 0) return;
   db.tablas.cierre_pagos.push({
-    id: randomUUID(), numero: db.tablas.cierre_pagos.length + 1, cierre_id: cierre.id, local_id: cierre.local_id ?? null, medio: "efectivo", monto: Number(cierre.precio_final),
+    id: randomUUID(), numero: db.tablas.cierre_pagos.length + 1, cierre_id: cierre.id, local_id: cierre.local_id ?? null, medio: "efectivo", monto: resto,
     fecha_pago: "2026-11-01", estado: "vigente", archivos: [{ id: "arch000001", nombre: "recibo.jpg", tipo: "image/jpeg", tam: 1000 }], cuenta_id: null, cuenta_detalle: null,
     referencia: null, notas: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString(),
   });

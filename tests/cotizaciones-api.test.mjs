@@ -2,7 +2,7 @@
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { iniciarFuncion, api, nuevaIp, loginAdmin, crm, db } from "./helpers/api-env.mjs";
+import { iniciarFuncion, api, nuevaIp, loginAdmin, crm, db, pagoReserva } from "./helpers/api-env.mjs";
 
 const ve = (token, op, extra = {}) => api({ action: "ventas", token, op, ...extra });
 const CLAVE = "Prueba12345";
@@ -87,7 +87,7 @@ test("Un descuento deja la cotización esperando aprobación; sin aprobar no se 
   assert.equal(r.cotizacion.solicitado_por, "Eva Uno");
   assert.equal(r.cotizacion.financiamiento.plazo_meses, 36);
   U.cotDesc = r.cotizacion;
-  assert.equal((await ve(U.e1.token, "reservas.crear", { cotizacionId: U.cotDesc.id, monto: 500000 })).error, "cotizacion_pendiente");
+  assert.equal((await ve(U.e1.token, "reservas.crear", { pago: pagoReserva(), cotizacionId: U.cotDesc.id, monto: 500000 })).error, "cotizacion_pendiente");
 });
 
 test("Bandeja de aprobaciones: solo el supervisor de ese local, con el margen que quedaría", async () => {
@@ -144,7 +144,7 @@ test("Rechazar exige un motivo; una rechazada no se reserva y al editarla vuelve
   const r = await ve(U.jefe.token, "cotizaciones.rechazar", { id: U.cotDesc.id, motivo: "Es demasiado" });
   assert.equal(r.cotizacion.estado, "rechazada");
   assert.equal(r.cotizacion.motivo_rechazo, "Es demasiado");
-  assert.equal((await ve(U.e1.token, "reservas.crear", { cotizacionId: U.cotDesc.id, monto: 500000 })).error, "cotizacion_no_vigente");
+  assert.equal((await ve(U.e1.token, "reservas.crear", { pago: pagoReserva(), cotizacionId: U.cotDesc.id, monto: 500000 })).error, "cotizacion_no_vigente");
   const ed = await ve(U.e1.token, "cotizaciones.save", { leadId: U.lead1.id, id: U.cotDesc.id, datos: { descuento: 200000 } });
   assert.equal(ed.cotizacion.estado, "pendiente", "un descuento nuevo se vuelve a pedir");
   assert.equal(ed.cotizacion.motivo_rechazo, null);
@@ -172,12 +172,12 @@ test("Permisos: solo quien puede modificar el lead cotiza; los demás ni lo ven"
 });
 
 test("Reservar: el vehículo, la cotización y el lead cambian juntos", async () => {
-  const sinMonto = await ve(U.e1.token, "reservas.crear", { cotizacionId: U.cotDesc.id, monto: 0 });
+  const sinMonto = await ve(U.e1.token, "reservas.crear", { pago: pagoReserva(), cotizacionId: U.cotDesc.id, monto: 0 });
   assert.equal(sinMonto.error, "monto_invalido");
-  assert.equal((await ve(U.e1.token, "reservas.crear", { cotizacionId: U.cotDesc.id, monto: 99999999 })).error, "monto_invalido");
-  assert.equal((await ve(U.e1.token, "reservas.crear", { cotizacionId: U.cotDesc.id, monto: 500000, medioPago: "Trueque" })).error, "medio_invalido");
+  assert.equal((await ve(U.e1.token, "reservas.crear", { pago: pagoReserva(), cotizacionId: U.cotDesc.id, monto: 99999999 })).error, "monto_invalido");
+  assert.equal((await ve(U.e1.token, "reservas.crear", { pago: pagoReserva(), cotizacionId: U.cotDesc.id, monto: 500000, medioPago: "Trueque" })).error, "medio_invalido");
 
-  const r = await ve(U.e1.token, "reservas.crear", { cotizacionId: U.cotDesc.id, monto: 500000, medioPago: "Transferencia", notas: "Depositó hoy" });
+  const r = await ve(U.e1.token, "reservas.crear", { pago: pagoReserva(), cotizacionId: U.cotDesc.id, monto: 500000, medioPago: "Transferencia", notas: "Depositó hoy" });
   assert.equal(r.status, 200, JSON.stringify(r));
   assert.equal(r.reserva.estado, "activa");
   assert.equal(r.reserva.monto, 500000);
@@ -196,7 +196,7 @@ test("Reservar: el vehículo, la cotización y el lead cambian juntos", async ()
 });
 
 test("Con una reserva activa: nadie más reserva ni cotiza ese vehículo; el estado no se toca a mano", async () => {
-  assert.equal((await ve(U.e1.token, "reservas.crear", { cotizacionId: U.cotDesc.id, monto: 500000 })).error, "ya_reservada");
+  assert.equal((await ve(U.e1.token, "reservas.crear", { pago: pagoReserva(), cotizacionId: U.cotDesc.id, monto: 500000 })).error, "ya_reservada");
   const otraCot = await ve(U.e2.token, "cotizaciones.save", { leadId: U.lead2.id, vehiculoId: U.v1.id, datos: {} });
   assert.equal(otraCot.error, "vehiculo_no_disponible", "otro ejecutivo no puede cotizar un vehículo reservado");
   assert.equal((await ve(U.jefe.token, "inventario.setEstado", { id: U.v1.id, estado: "disponible" })).error, "vehiculo_reservado");
@@ -251,7 +251,7 @@ test("Cancelar la reserva: el vehículo y la cotización vuelven a estar disponi
 });
 
 test("Reserva vencida: se libera sola cuando alguien abre el sistema", async () => {
-  const r = await ve(U.e1.token, "reservas.crear", { cotizacionId: U.cotDesc.id, monto: 400000, dias: 1 });
+  const r = await ve(U.e1.token, "reservas.crear", { pago: pagoReserva(), cotizacionId: U.cotDesc.id, monto: 400000, dias: 1 });
   assert.equal(r.status, 200, JSON.stringify(r));
   // Se simula que pasó el plazo.
   db.tablas.reservas.find((x) => x.id === r.reserva.id).vence_en = new Date(Date.now() - 3600_000).toISOString();
@@ -268,7 +268,7 @@ test("Reserva vencida: se libera sola cuando alguien abre el sistema", async () 
 });
 
 test("Una reserva no vencida no se toca al abrir el sistema", async () => {
-  const r = await ve(U.e1.token, "reservas.crear", { cotizacionId: U.cotDesc.id, monto: 400000 });
+  const r = await ve(U.e1.token, "reservas.crear", { pago: pagoReserva(), cotizacionId: U.cotDesc.id, monto: 400000 });
   assert.equal(r.status, 200);
   await ve(U.jefe.token, "inventario.list");
   assert.equal(db.tablas.reservas.find((x) => x.id === r.reserva.id).estado, "activa");
@@ -284,13 +284,13 @@ test("Perder un lead con reserva cancela la reserva y libera el vehículo", asyn
   assert.equal(db.tablas.cotizaciones.find((c) => c.id === U.cotDesc.id).estado, "vigente");
   assert.equal(db.tablas.leads.find((l) => l.id === U.lead1.id).etapa, "perdido", "no vuelve a 'Cotizado'");
   assert.equal((await cotizar(U.e1.token, U.lead1.id, U.v1.id)).error, "lead_cerrado");
-  assert.equal((await ve(U.e1.token, "reservas.crear", { cotizacionId: U.cotDesc.id, monto: 1000 })).error, "lead_cerrado");
+  assert.equal((await ve(U.e1.token, "reservas.crear", { pago: pagoReserva(), cotizacionId: U.cotDesc.id, monto: 1000 })).error, "lead_cerrado");
 });
 
 test("Anular una cotización: se puede salvo que tenga una reserva", async () => {
   const l = await lead(U.e1.token, "Hilda Vega", "944444444");
   const cot = (await cotizar(U.e1.token, l.id, U.v1.id)).cotizacion;
-  const res = await ve(U.e1.token, "reservas.crear", { cotizacionId: cot.id, monto: 300000 });
+  const res = await ve(U.e1.token, "reservas.crear", { pago: pagoReserva(), cotizacionId: cot.id, monto: 300000 });
   assert.equal(res.status, 200);
   assert.equal((await ve(U.e1.token, "cotizaciones.anular", { id: cot.id })).error, "tiene_reserva");
   assert.equal((await cotizar(U.e1.token, l.id, U.v1.id, { id: cot.id })).error, "vehiculo_no_disponible");
@@ -298,14 +298,14 @@ test("Anular una cotización: se puede salvo que tenga una reserva", async () =>
   const ok = await ve(U.e1.token, "cotizaciones.anular", { id: cot.id });
   assert.equal(ok.cotizacion.estado, "anulada");
   assert.equal((await ve(U.e1.token, "cotizaciones.anular", { id: cot.id })).error, "cotizacion_cerrada");
-  assert.equal((await ve(U.e1.token, "reservas.crear", { cotizacionId: cot.id, monto: 1000 })).error, "cotizacion_no_vigente");
+  assert.equal((await ve(U.e1.token, "reservas.crear", { pago: pagoReserva(), cotizacionId: cot.id, monto: 1000 })).error, "cotizacion_no_vigente");
 });
 
 test("Una cotización vencida no se puede reservar", async () => {
   const l = await lead(U.e2.token, "Ivo Pérez", "955555555");
   const cot = (await cotizar(U.e2.token, l.id, U.v1.id)).cotizacion;
   db.tablas.cotizaciones.find((c) => c.id === cot.id).vigencia_hasta = new Date(Date.now() - 1000).toISOString();
-  assert.equal((await ve(U.e2.token, "reservas.crear", { cotizacionId: cot.id, monto: 1000 })).error, "cotizacion_vencida");
+  assert.equal((await ve(U.e2.token, "reservas.crear", { pago: pagoReserva(), cotizacionId: cot.id, monto: 1000 })).error, "cotizacion_vencida");
 });
 
 test("Configuración: días de reserva y vigencia salen de ahí; valores inválidos se rechazan", async () => {
@@ -326,7 +326,7 @@ test("Configuración: días de reserva y vigencia salen de ahí; valores inváli
   const cot = (await cotizar(U.e2.token, l.id, U.v1.id)).cotizacion;
   const vig = (Date.parse(cot.vigencia_hasta) - Date.now()) / 86_400_000;
   assert.ok(vig > 9.9 && vig <= 10.01, `vigencia ${vig}`);
-  const r = await ve(U.e2.token, "reservas.crear", { cotizacionId: cot.id, monto: 1000 });
+  const r = await ve(U.e2.token, "reservas.crear", { pago: pagoReserva(), cotizacionId: cot.id, monto: 1000 });
   const d = (Date.parse(r.reserva.vence_en) - Date.now()) / 86_400_000;
   assert.ok(d > 4.9 && d <= 5.01, `reserva ${d}`);
   await ve(U.e2.token, "reservas.cancelar", { id: r.reserva.id });

@@ -1,7 +1,7 @@
 // Avisos por correo de los eventos del CRM y del sitio web, contra la función real con el envío simulado.
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
-import { iniciarFuncion, api, nuevaIp, loginAdmin, crm, correos, db, pagarTodo } from "./helpers/api-env.mjs";
+import { iniciarFuncion, api, nuevaIp, loginAdmin, crm, correos, db, pagarTodo, pagoReserva } from "./helpers/api-env.mjs";
 
 const ve = (token, op, extra = {}) => api({ action: "ventas", token, op, ...extra });
 const pub = (op, extra = {}) => api({ action: "public", op, ...extra });
@@ -74,7 +74,7 @@ test("Cierre de venta: avisa a quien aprueba y luego al ejecutivo", async () => 
   const l = (await nuevoLead(U.e1.token)).lead;
   const v = await vehiculo();
   const cot = (await ve(U.e1.token, "cotizaciones.save", { leadId: l.id, vehiculoId: v.id, datos: {} })).cotizacion;
-  assert.ok((await ve(U.e1.token, "reservas.crear", { cotizacionId: cot.id, monto: 500000 })).reserva);
+  assert.ok((await ve(U.e1.token, "reservas.crear", { pago: pagoReserva(), cotizacionId: cot.id, monto: 500000 })).reserva);
   vaciar();
   const c = await ve(U.e1.token, "cierres.crear", { leadId: l.id, datos: { precioFinal: 9800000, montoParteDePago: 0, montoFinanciado: 0, fechaEntrega: hoy() } });
   assert.equal(c.status, 200, JSON.stringify(c));

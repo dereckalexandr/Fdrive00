@@ -3,7 +3,7 @@
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { iniciarFuncion, api, nuevaIp, loginAdmin, crm, db } from "./helpers/api-env.mjs";
+import { iniciarFuncion, api, nuevaIp, loginAdmin, crm, db, pagoReserva } from "./helpers/api-env.mjs";
 
 const ve = (token, op, extra = {}) => api({ action: "ventas", token, op, ...extra });
 const kv = (token, op, key, extra = {}) => api({ action: "kv", token, op, key, ...extra });
@@ -230,7 +230,7 @@ test("Editar el lead: el valor tampoco puede subir y el vínculo con la tasació
 
 test("Cierre de venta: lo recibido por el vehículo tampoco supera lo tasado", async () => {
   const cot = (await ve(U.e1.token, "cotizaciones.save", { leadId: U.l1.id, vehiculoId: U.veh.id, datos: { parteDePago: { tiene: true, valor: 6000000 } } })).cotizacion;
-  assert.equal((await ve(U.e1.token, "reservas.crear", { cotizacionId: cot.id, monto: 300000 })).status, 200);
+  assert.equal((await ve(U.e1.token, "reservas.crear", { pago: pagoReserva(), cotizacionId: cot.id, monto: 300000 })).status, 200);
   const cierre = (datos) => ve(U.e1.token, "cierres.crear", { leadId: U.l1.id, datos: { precioFinal: 11500000, fechaEntrega: hoy(), ...datos } });
   assert.equal((await cierre({ montoParteDePago: 7000000 })).error, "parte_pago_excede_tasacion");
   const ok = await cierre({ montoParteDePago: 6500000 });

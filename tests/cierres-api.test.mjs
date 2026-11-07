@@ -2,7 +2,7 @@
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { iniciarFuncion, api, nuevaIp, loginAdmin, crm, db, pagarTodo } from "./helpers/api-env.mjs";
+import { iniciarFuncion, api, nuevaIp, loginAdmin, crm, db, pagarTodo, pagoReserva } from "./helpers/api-env.mjs";
 import { mesChile } from "../supabase/functions/api/ventas-core.js";
 
 const ve = (token, op, extra = {}) => api({ action: "ventas", token, op, ...extra });
@@ -31,7 +31,7 @@ async function leadReservado(token, { precio = 10000000, costo = 8500000 } = {})
   const veh = await vehiculo(precio, costo);
   const l = (await ve(token, "leads.create", { cliente: { nombre: `Cliente Prueba ${++clienteN}`, telefono: `9${String(10000000 + clienteN)}` }, lead: {} })).lead;
   const cot = (await ve(token, "cotizaciones.save", { leadId: l.id, vehiculoId: veh.id, datos: {} })).cotizacion;
-  const res = (await ve(token, "reservas.crear", { cotizacionId: cot.id, monto: 500000 })).reserva;
+  const res = (await ve(token, "reservas.crear", { pago: pagoReserva(), cotizacionId: cot.id, monto: 500000 })).reserva;
   assert.ok(res, "no se pudo reservar");
   return { lead: l, veh, cot, res };
 }
@@ -220,7 +220,7 @@ test("Anular una venta aprobada: solo el supervisor, con motivo; el vehículo y 
   assert.equal(f.detalle.mes, MES);
   assert.equal(f.detalle.motivo, "El cliente no pagó");
   // El vehículo queda libre para venderse de nuevo.
-  assert.equal((await ve(U.e2.token, "reservas.crear", { cotizacionId: v.cot.id, monto: 400000 })).status, 200);
+  assert.equal((await ve(U.e2.token, "reservas.crear", { pago: pagoReserva(), cotizacionId: v.cot.id, monto: 400000 })).status, 200);
 });
 
 test("Listado de ventas: cada ejecutivo ve las suyas; el supervisor, las del local; el costo solo para quien corresponde", async () => {
@@ -401,7 +401,11 @@ test("Pagos de la venta: uno por uno con fecha, cuenta de la empresa y respaldo;
   const c = await cerrar(U.e1.token, x.lead.id, DATOS({ precioFinal: 9800000 }));
   assert.equal(c.status, 200, JSON.stringify(c));
   const id = c.cierre.id;
-  assert.equal((await ve(U.jefe.token, "cierres.aprobar", { id })).error, "sin_pagos", "sin pagos no se aprueba");
+  assert.equal((await ve(U.jefe.token, "cierres.aprobar", { id })).error, "reserva_pago_sin_validar", "el pago de la reserva debe estar validado");
+  assert.equal((await ve(U.e1.token, "reservas.validar_pago", { id: x.res.id, aprueba: true })).status, 403, "el ejecutivo no valida");
+  assert.equal((await ve(U.jefe.token, "reservas.validar_pago", { id: x.res.id, aprueba: true })).status, 200);
+  assert.equal((await ve(U.jefe.token, "cierres.aprobar", { id })).error, "pagos_no_cuadran", "la reserva ya cuenta, pero falta el resto");
+  assert.equal((await ve(U.e1.token, "cierres.pagos", { id })).resumen.total, 500000, "la reserva se descuenta de lo que falta");
 
   const reg = (token, pago) => ve(token, "cierres.pago_registrar", { id, pago });
   const base = { medio: "transferencia", monto: 500000, fechaPago: hoyCL, cuentaId: cta.cuenta.id, referencia: "OP-998877", archivos: [arch()] };
@@ -425,13 +429,14 @@ test("Pagos de la venta: uno por uno con fecha, cuenta de la empresa y respaldo;
   assert.equal(mal.status, 200, JSON.stringify(mal));
   assert.equal((await ve(U.e1.token, "cierres.pago_anular", { id, pagoId: mal.pago.id, motivo: "x" })).error, "motivo_requerido");
   assert.equal((await ve(U.e1.token, "cierres.pago_anular", { id, pagoId: mal.pago.id, motivo: "Monto mal digitado" })).status, 200);
-  assert.equal((await reg(U.e1.token, { medio: "vale_vista", monto: 4300000, fechaPago: hoyCL, cuentaId: cta.cuenta.id, referencia: "VV-5521", archivos: [arch()] })).status, 200);
+  assert.equal((await reg(U.e1.token, { medio: "vale_vista", monto: 3800000, fechaPago: hoyCL, cuentaId: cta.cuenta.id, referencia: "VV-5521", archivos: [arch()] })).status, 200);
   assert.equal((await reg(U.e1.token, { medio: "efectivo", monto: 5000000, fechaPago: hoyCL, archivos: [arch(), arch()] })).status, 200);
 
   const lista = await ve(U.e1.token, "cierres.pagos", { id });
   assert.equal(lista.resumen.total, 9800000);
   assert.equal(lista.resumen.cuadra, true);
-  assert.equal(lista.pagos.filter((p) => p.estado !== "anulado").length, 3);
+  assert.equal(lista.pagos.filter((p) => p.estado !== "anulado").length, 4, "la reserva y los 3 pagos");
+  assert.equal(lista.pagos[0].origen, "reserva");
   assert.equal(lista.puedeEditar, true);
 
   const ap = await ve(U.jefe.token, "cierres.aprobar", { id });
@@ -440,13 +445,64 @@ test("Pagos de la venta: uno por uno con fecha, cuenta de la empresa y respaldo;
 
   // La nota de venta lista cada pago con su fecha, medio, cuenta y respaldo.
   const nota = (await ve(U.e1.token, "cierres.nota", { id })).nota;
-  assert.equal(nota.detalle_pagos.length, 3, "los anulados no salen");
+  assert.equal(nota.detalle_pagos.length, 4, "la reserva y los 3 pagos; los anulados no salen");
+  assert.match(nota.detalle_pagos[0].medio_nombre, /^Reserva/);
+  assert.equal(nota.detalle_pagos[0].monto, 500000);
   const vv = nota.detalle_pagos.find((p) => p.medio_nombre === "Vale vista");
-  assert.equal(vv.monto, 4300000);
+  assert.equal(vv.monto, 3800000);
   assert.match(vv.cuenta, /BCI principal/);
   assert.equal(vv.referencia, "VV-5521");
   assert.equal(vv.fecha_pago, hoyCL);
   assert.equal(nota.detalle_pagos.find((p) => p.medio_nombre === "Efectivo").respaldos, 2);
   const { buildNotaVentaPdf } = await import("../src/pdf-report.js");
   assert.equal(String.fromCharCode(...buildNotaVentaPdf(nota, { fmt: (v) => `$${v}` }).slice(0, 5)), "%PDF-");
+});
+
+test("Reserva: exige medio de pago, cuenta y respaldo; el pago se valida y se descuenta de lo que falta por recibir", async () => {
+  const hoyCL = hoy();
+  const cta = (await ve(admin, "cuentas.save", { datos: { banco: "Santander", tipoCuenta: "Cuenta corriente", numeroCuenta: "99887766", alias: "Santander ventas" } })).cuenta;
+  const veh = await vehiculo(10000000, 8500000);
+  const l = (await ve(U.e1.token, "leads.create", { cliente: { nombre: `Cliente Reserva ${++clienteN}`, telefono: `9${String(10000000 + clienteN)}` }, lead: {} })).lead;
+  const cot = (await ve(U.e1.token, "cotizaciones.save", { leadId: l.id, vehiculoId: veh.id, datos: {} })).cotizacion;
+  const arch = (id) => ({ id, nombre: "transferencia.jpg", tipo: "image/jpeg", tam: 80000 });
+  const res = (pago, extra = {}) => ve(U.e1.token, "reservas.crear", { cotizacionId: cot.id, monto: 700000, pago, ...extra });
+
+  assert.equal((await res(undefined)).error, "medio_pago_invalido", "sin medio de pago no hay reserva");
+  assert.equal((await res({ medio: "transferencia", fechaPago: hoyCL, referencia: "OP-1", archivos: [arch("resarch001")] })).error, "cuenta_requerida");
+  assert.equal((await res({ medio: "transferencia", fechaPago: hoyCL, cuentaId: cta.id, referencia: "OP-1", archivos: [] })).error, "respaldo_requerido");
+  assert.equal((await res({ medio: "transferencia", fechaPago: "2999-01-01", cuentaId: cta.id, referencia: "OP-1", archivos: [arch("resarch001")] })).error, "fecha_pago_futura");
+  const ok = await res({ medio: "transferencia", fechaPago: hoyCL, cuentaId: cta.id, referencia: "OP-7788", archivos: [arch("resarch002")] });
+  assert.equal(ok.status, 200, JSON.stringify(ok));
+  const r = ok.reserva;
+  assert.equal(r.pago_estado, "pendiente");
+  assert.equal(r.medio_pago, "transferencia");
+  assert.equal(r.cuenta_detalle.numero_cuenta, "99887766");
+  assert.equal(r.archivos[0].v, cot.id, "el respaldo queda bajo la cotización");
+
+  // Validación: la hace el Jefe Local; un rechazo exige motivo y el ejecutivo puede corregir y reenviar.
+  assert.equal((await ve(U.e1.token, "reservas.validar_pago", { id: r.id, aprueba: true })).status, 403);
+  assert.equal((await ve(U.jefe.token, "reservas.validar_pago", { id: r.id, aprueba: false })).error, "motivo_requerido");
+  const rech = await ve(U.jefe.token, "reservas.validar_pago", { id: r.id, aprueba: false, motivo: "El comprobante no se lee" });
+  assert.equal(rech.reserva.pago_estado, "rechazado");
+  assert.equal(rech.reserva.pago_motivo_rechazo, "El comprobante no se lee");
+  assert.equal((await ve(U.e2.token, "reservas.pago_corregir", { id: r.id, pago: {} })).status, 404, "otro ejecutivo no la ve");
+  const corr = await ve(U.e1.token, "reservas.pago_corregir", { id: r.id, pago: { medio: "transferencia", fechaPago: hoyCL, cuentaId: cta.id, referencia: "OP-7788", archivos: [arch("resarch003")] } });
+  assert.equal(corr.status, 200, JSON.stringify(corr));
+  assert.equal(corr.reserva.pago_estado, "pendiente");
+  assert.equal(corr.reserva.pago_motivo_rechazo, null);
+  assert.equal((await ve(U.jefe.token, "reservas.validar_pago", { id: r.id, aprueba: true })).reserva.pago_estado, "validado");
+  assert.equal((await ve(U.jefe.token, "reservas.validar_pago", { id: r.id, aprueba: true })).error, "reserva_pago_no_pendiente");
+
+  // En la venta, la reserva ya está recibida: solo falta el resto del precio.
+  const c = await cerrar(U.e1.token, l.id, DATOS({ precioFinal: 9800000 }));
+  assert.equal(c.status, 200, JSON.stringify(c));
+  const pagos = await ve(U.e1.token, "cierres.pagos", { id: c.cierre.id });
+  assert.equal(pagos.reserva_pago_estado, "validado");
+  assert.equal(pagos.resumen.total, 700000);
+  assert.equal(pagos.resumen.falta, 9100000);
+  const p0 = pagos.pagos[0];
+  assert.equal(p0.origen, "reserva");
+  assert.match(p0.medio_nombre, /Reserva \(Transferencia bancaria\)/);
+  assert.match(p0.cuenta, /Santander ventas/);
+  assert.equal(p0.referencia, "OP-7788");
 });

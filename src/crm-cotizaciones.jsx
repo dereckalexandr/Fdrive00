@@ -9,8 +9,10 @@
  */
 import React, { useState, useEffect } from "react";
 import { InputDinero } from "./campo-dinero.jsx";
-import { calcularCotizacion, validarCotizacion, validarReserva, cotizacionNombre, COTIZACION_ENTREGABLE, ESTADOS_FINANCIAMIENTO, MEDIOS_PAGO, textoVencimiento } from "../supabase/functions/api/ventas-core.js";
+import { calcularCotizacion, validarCotizacion, validarReserva, cotizacionNombre, COTIZACION_ENTREGABLE, ESTADOS_FINANCIAMIENTO, textoVencimiento } from "../supabase/functions/api/ventas-core.js";
 import { buildCotizacionPdf } from "./pdf-report.js";
+import { medioDe, medioNombre } from "../supabase/functions/api/pagos-core.js";
+import { CamposPago, PagoReserva, subirRespaldos, limpiarRespaldos, metaRespaldos } from "./crm-pagos.jsx";
 import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, hace, Aviso, Cargando, Tarjeta, Campo, Modal, useCarga, mensajeError } from "./crm-ui.jsx";
 
 const COLOR_COT = {
@@ -159,30 +161,37 @@ function FormCotizacion({ api, lead, cotizacion, catalogos, tope, onCerrar, onGu
    FORMULARIO DE RESERVA
 ========================================================= */
 function FormReserva({ api, cotizacion, catalogos, onCerrar, onGuardado }) {
-  const [f, setF] = useState({ monto: "", dias: catalogos.dias_reserva || 3, medioPago: "Transferencia", notas: "" });
+  const [f, setF] = useState({ monto: "", dias: catalogos.dias_reserva || 3, notas: "" });
+  const [pago, setPago] = useState({ medio: "transferencia", fechaPago: new Date().toLocaleDateString("en-CA", { timeZone: "America/Santiago" }), cuentaId: "", referencia: "" });
+  const [archivos, setArchivos] = useState([]);
+  const { datos: ctas } = useCarga(() => api("cuentas.list", {}), [api]);
   const [error, setError] = useState("");
   const [guardando, setGuardando] = useState(false);
   const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
   const guardar = async () => {
     const v = validarReserva(f, { precioFinal: cotizacion.precio_final, diasDefecto: catalogos.dias_reserva });
     if (!v.ok) { setError(mensajeError({ message: v.error === "monto_invalido" ? "El monto debe ser mayor a 0 y no superar el precio final." : v.error })); return; }
-    setGuardando(true);
-    try { await api("reservas.crear", { cotizacionId: cotizacion.id, ...f }); onGuardado(); }
-    catch (e) { setError(mensajeError(e)); }
+    setGuardando(true); setError("");
+    let subidos = [];
+    try {
+      subidos = await subirRespaldos(cotizacion.id, archivos);
+      const medio = medioDe(pago.medio);
+      await api("reservas.crear", { cotizacionId: cotizacion.id, monto: f.monto, dias: f.dias, notas: f.notas, pago: { ...pago, cuentaId: medio.requiereCuenta ? pago.cuentaId : "", archivos: metaRespaldos(archivos) } });
+      onGuardado();
+    } catch (e) { await limpiarRespaldos(cotizacion.id, subidos); setError(mensajeError(e)); }
     setGuardando(false);
   };
   const snap = cotizacion.vehiculo_snapshot || {};
   return (
-    <Modal titulo="Reservar vehículo" onCerrar={onCerrar} ancho="max-w-lg">
+    <Modal titulo="Reservar vehículo" onCerrar={onCerrar} ancho="max-w-2xl">
       <div className="bg-white border border-stone-200 p-4 text-sm">
         <p className="text-stone-900">{snap.marca} {snap.modelo} {snap.anio} · <span className="font-mono">{snap.patente}</span></p>
         <p className="text-stone-600">Cotización {folio(cotizacion.numero)} · precio final {clp(cotizacion.precio_final)}</p>
       </div>
       <Campo etiqueta="Monto de la reserva ($)"><InputDinero value={f.monto} onChange={(e) => set("monto", e.target.value)} className={INPUT} autoFocus /></Campo>
-      <div className="grid grid-cols-2 gap-3">
-        <Campo etiqueta="Días de reserva" ayuda={`Por defecto ${catalogos.dias_reserva || 3}.`}><input type="number" min="1" max="30" value={f.dias} onChange={(e) => set("dias", e.target.value)} className={INPUT} /></Campo>
-        <Campo etiqueta="Medio de pago"><select value={f.medioPago} onChange={(e) => set("medioPago", e.target.value)} className={INPUT}>{MEDIOS_PAGO.map((m) => <option key={m}>{m}</option>)}</select></Campo>
-      </div>
+      <Campo etiqueta="Días de reserva" ayuda={`Por defecto ${catalogos.dias_reserva || 3}.`}><input type="number" min="1" max="30" value={f.dias} onChange={(e) => set("dias", e.target.value)} className={INPUT} /></Campo>
+      <p className="text-xs uppercase tracking-wide text-stone-500">Pago de la reserva</p>
+      <CamposPago f={pago} setF={setPago} archivos={archivos} setArchivos={setArchivos} cuentas={(ctas && ctas.cuentas) || []} avisar={setError} conMonto={false} />
       <Campo etiqueta="Notas (opcional)"><input value={f.notas} onChange={(e) => set("notas", e.target.value)} className={INPUT} /></Campo>
       <Aviso tipo="info">El vehículo quedará reservado y saldrá de lo disponible. Si la reserva vence o se cancela, vuelve solo a estar disponible. El sistema <strong>registra</strong> el monto recibido; no mueve dinero, y una devolución se gestiona fuera de aquí.</Aviso>
       {error && <Aviso>{error}</Aviso>}
@@ -225,8 +234,9 @@ export function SeccionCotizaciones({ api, lead, datos, catalogos, onCambio, avi
 
       {activa && (
         <div className="border border-sky-300 bg-sky-50 p-3 text-sm">
-          <p className="text-stone-900"><strong>Reserva activa</strong> · {clp(activa.monto)}{activa.medio_pago ? ` por ${activa.medio_pago.toLowerCase()}` : ""} · {textoVencimiento(activa.vence_en)} ({fechaHora(activa.vence_en)})</p>
+          <p className="text-stone-900"><strong>Reserva activa</strong> · {clp(activa.monto)}{activa.medio_pago ? ` por ${(medioDe(activa.medio_pago) ? medioNombre(activa.medio_pago) : activa.medio_pago).toLowerCase()}` : ""} · {textoVencimiento(activa.vence_en)} ({fechaHora(activa.vence_en)})</p>
           {activa.notas && <p className="text-xs text-stone-600">{activa.notas}</p>}
+          <PagoReserva api={api} reserva={activa} puedeValidar={catalogos.puedeAsignar} puedeCorregir={puedeEditar} onCambio={onCambio} avisar={avisar} />
           {puedeEditar && (
             <div className="flex flex-wrap gap-2 mt-2">
               <button disabled={!!ocupado} onClick={() => correr("ext", () => api("reservas.extender", { id: activa.id, dias: 2 }))} className={BTN}>Extender 2 días</button>

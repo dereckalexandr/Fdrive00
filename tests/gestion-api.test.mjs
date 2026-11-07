@@ -2,7 +2,7 @@
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { iniciarFuncion, api, nuevaIp, loginAdmin, crm, db, pagarTodo } from "./helpers/api-env.mjs";
+import { iniciarFuncion, api, nuevaIp, loginAdmin, crm, db, pagarTodo, pagoReserva } from "./helpers/api-env.mjs";
 import { mesChile } from "../supabase/functions/api/ventas-core.js";
 
 const ve = (token, op, extra = {}) => api({ action: "ventas", token, op, ...extra });
@@ -142,7 +142,7 @@ test("Reservas por vencer: las que caen en las próximas 48 horas", async () => 
   const v1 = await vehiculo(); const v2 = await vehiculo();
   for (const [l, v, dias] of [[x, v1, 1], [y, v2, 5]]) {
     const c = (await ve(U.e1.token, "cotizaciones.save", { leadId: l.id, vehiculoId: v.id, datos: {} })).cotizacion;
-    const r = await ve(U.e1.token, "reservas.crear", { cotizacionId: c.id, monto: 300000, dias });
+    const r = await ve(U.e1.token, "reservas.crear", { pago: pagoReserva(), cotizacionId: c.id, monto: 300000, dias });
     assert.equal(r.status, 200, JSON.stringify(r));
   }
   const g = await ve(U.jefe.token, "gestion.resumen");
@@ -160,7 +160,7 @@ test("Embudo del mes: de los leads que llegaron, cuántos llegan a cada paso", a
   const l = await lead(U.e1.token, { fuente: "WhatsApp" });
   await ve(U.e1.token, "leads.nota", { id: l.id, tipo: "llamada", detalle: "ok" });
   const c = (await ve(U.e1.token, "cotizaciones.save", { leadId: l.id, vehiculoId: v.id, datos: {} })).cotizacion;
-  await ve(U.e1.token, "reservas.crear", { cotizacionId: c.id, monto: 400000 });
+  await ve(U.e1.token, "reservas.crear", { pago: pagoReserva(), cotizacionId: c.id, monto: 400000 });
   const cierre = (await ve(U.e1.token, "cierres.crear", { leadId: l.id, datos: { precioFinal: 9800000, fechaEntrega: hoy() } })).cierre;
   pagarTodo(cierre.id);
   assert.equal((await ve(U.jefe.token, "cierres.aprobar", { id: cierre.id })).status, 200);
@@ -279,7 +279,7 @@ test("Un lead con un cierre de venta en curso no se reasigna", async () => {
   const v = await vehiculo();
   const l = await lead(U.e1.token);
   const c = (await ve(U.e1.token, "cotizaciones.save", { leadId: l.id, vehiculoId: v.id, datos: {} })).cotizacion;
-  await ve(U.e1.token, "reservas.crear", { cotizacionId: c.id, monto: 300000 });
+  await ve(U.e1.token, "reservas.crear", { pago: pagoReserva(), cotizacionId: c.id, monto: 300000 });
   await ve(U.e1.token, "cierres.crear", { leadId: l.id, datos: { precioFinal: 9900000, fechaEntrega: hoy() } });
   const r = await ve(U.jefe.token, "leads.reasignarLote", { ids: [l.id], asignarA: U.e2.id });
   assert.deepEqual(r.omitidos, [{ id: l.id, motivo: "cierre_en_curso" }]);

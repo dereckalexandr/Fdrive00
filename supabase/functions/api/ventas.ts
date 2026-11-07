@@ -3349,11 +3349,25 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     const v = validarReserva(body, { precioFinal: Number(cot.precio_final), diasDefecto: cfg.dias_reserva });
     if (!v.ok) return err(v.error!);
     const vence = new Date(Date.now() + v.value.dias * 86_400_000).toISOString();
+    // El pago de la reserva: medio, fecha, cuenta de la empresa si fue por banco, referencia y respaldo. Queda pendiente de validación.
+    const hoyReserva = new Date().toLocaleDateString("en-CA", { timeZone: "America/Santiago" });
+    const pg = validarPago({ ...(body.pago || {}), monto: v.value.monto }, { hoy: hoyReserva });
+    if (!pg.ok) return err(pg.error!);
+    const medioR = medioDe(pg.value.medio)!;
+    let cuentaR: any = null;
+    if (medioR.requiereCuenta) {
+      cuentaR = (await cuentasDelLocal(lead.local_id, true)).find((x: any) => x.id === pg.value.cuenta_id) ?? null;
+      if (!cuentaR) return err("cuenta_invalida");
+    }
+    const arR = archivosDePago(body.pago?.archivos, cot.id, medioR);
+    if (arR.error) return err(arR.error);
 
     // La base impide dos reservas activas del mismo vehículo; si alguien se adelantó, falla aquí.
     const ins = await sb.from("reservas").insert({
       local_id: lead.local_id, lead_id: lead.id, cotizacion_id: cot.id, vehiculo_id: veh.id, cliente_id: lead.cliente_id,
-      monto: v.value.monto, medio_pago: v.value.medio_pago, notas: v.value.notas, vence_en: vence, creado_por: userId,
+      monto: v.value.monto, medio_pago: pg.value.medio, notas: v.value.notas, vence_en: vence, creado_por: userId,
+      fecha_pago: pg.value.fecha_pago, cuenta_id: pg.value.cuenta_id, referencia: pg.value.referencia, archivos: arR.archivos, pago_estado: "pendiente",
+      cuenta_detalle: cuentaR ? { banco: cuentaR.banco, tipo_cuenta: cuentaR.tipo_cuenta, numero_cuenta: cuentaR.numero_cuenta, alias: cuentaR.alias } : null,
     }).select().single();
     if (ins.error) return ins.error.code === "23505" ? err("vehiculo_no_disponible", 409) : fallo(ins.error);
     const reserva = ins.data;
@@ -3371,10 +3385,66 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       await sb.from("vehiculos").update({ estado: "disponible" }).eq("id", veh.id).eq("estado", "reservado");
       throw e;
     }
-    await evento(lead.id, "reserva", `Reserva de ${veh.marca} ${veh.modelo} (${veh.patente}) por ${dinero(v.value.monto)} hasta el ${fechaCL(vence)}`);
+    await evento(lead.id, "reserva", `Reserva de ${veh.marca} ${veh.modelo} (${veh.patente}) por ${dinero(v.value.monto)} (${medioNombre(pg.value.medio)}${cuentaR ? `, cuenta ${etiquetaCuenta(cuentaR)}` : ""}) hasta el ${fechaCL(vence)}; el pago queda por validar`);
+    await avisarValidadores(lead.local_id, "Pago de reserva por validar", [`${userName} registró una reserva de ${dinero(v.value.monto)} (${medioNombre(pg.value.medio)}) de ${veh.marca} ${veh.modelo} (${veh.patente}). Falta validar el pago.`]);
+    await avisarSupervisores(lead.local_id, "Pago de reserva por validar", [`${userName} registró una reserva de ${dinero(v.value.monto)} (${medioNombre(pg.value.medio)}) de ${veh.marca} ${veh.modelo} (${veh.patente}). Falta validar el pago.`]);
     if (lead.etapa !== "reservado") await evento(lead.id, "etapa", `${etapaNombre(lead.etapa)} → Reservado`);
     await audit(ctx.actor, "reserva.crear", "reserva", reserva.id, { patente: veh.patente, monto: v.value.monto, vence_en: vence, cotizacion: cot.numero });
     return json({ reserva });
+  }
+
+  /** El Jefe Local o el Validador aprueba o rechaza el pago de una reserva. Hasta que no esté validado, la venta no se puede aprobar. */
+  if (op === "reservas.validar_pago") {
+    if (!esSupervisor && !can("validacion.realizar")) return err("forbidden", 403);
+    const { data: r } = await scoped(sb.from("reservas").select("*").eq("id", String(body.id ?? ""))).maybeSingle();
+    if (!r) return err("no_existe", 404);
+    if (r.estado !== "activa" && r.estado !== "convertida") return err("reserva_cerrada");
+    if (r.pago_estado !== "pendiente") return err("reserva_pago_no_pendiente", 409);
+    const aprueba = body.aprueba === true;
+    const motivo = String(body.motivo ?? "").trim().slice(0, 200);
+    if (!aprueba && motivo.length < 3) return err("motivo_requerido");
+    const ahora = new Date().toISOString();
+    const up = await sb.from("reservas").update(aprueba
+      ? { pago_estado: "validado", pago_validado_por: userName, pago_validado_en: ahora, pago_motivo_rechazo: null }
+      : { pago_estado: "rechazado", pago_validado_por: userName, pago_validado_en: ahora, pago_motivo_rechazo: motivo }).eq("id", r.id).select().single();
+    if (up.error) return fallo(up.error);
+    await evento(r.lead_id, "reserva", aprueba ? `${userName} validó el pago de la reserva (${dinero(r.monto)})` : `${userName} rechazó el pago de la reserva (${dinero(r.monto)}): ${motivo}`);
+    await audit(ctx.actor, aprueba ? "reserva.pago_validar" : "reserva.pago_rechazar", "reserva", r.id, { monto: r.monto, motivo: motivo || null });
+    await avisarEjecutivoDe(r.lead_id, aprueba ? "Pago de reserva validado" : "Pago de reserva rechazado", aprueba ? `${userName} validó el pago de la reserva.` : `${userName} rechazó el pago de la reserva: ${motivo}. Corrígelo y vuelve a enviarlo.`);
+    return json({ reserva: up.data });
+  }
+
+  /** El ejecutivo corrige los datos del pago de una reserva (por ejemplo, tras un rechazo) y lo vuelve a enviar a validar. */
+  if (op === "reservas.pago_corregir") {
+    const { data: r } = await scoped(sb.from("reservas").select("*").eq("id", String(body.id ?? ""))).maybeSingle();
+    if (!r) return err("no_existe", 404);
+    const lead = await cargarLead(r.lead_id);
+    if (!lead || !puedeVer(lead)) return err("no_existe", 404);
+    if (!puedeTocar(lead)) return err("forbidden", 403);
+    if (r.estado !== "activa") return err("reserva_cerrada");
+    if (r.pago_estado !== "rechazado" && r.pago_estado !== "pendiente") return err("reserva_pago_no_corregible", 409);
+    const hoy = new Date().toLocaleDateString("en-CA", { timeZone: "America/Santiago" });
+    const pg = validarPago({ ...(body.pago || {}), monto: r.monto }, { hoy });
+    if (!pg.ok) return err(pg.error!);
+    const medio = medioDe(pg.value.medio)!;
+    let cuenta: any = null;
+    if (medio.requiereCuenta) {
+      cuenta = (await cuentasDelLocal(r.local_id, true)).find((x: any) => x.id === pg.value.cuenta_id) ?? null;
+      if (!cuenta) return err("cuenta_invalida");
+    }
+    const ar = archivosDePago(body.pago?.archivos, r.cotizacion_id || r.id, medio);
+    if (ar.error) return err(ar.error);
+    const up = await sb.from("reservas").update({
+      medio_pago: pg.value.medio, fecha_pago: pg.value.fecha_pago, cuenta_id: pg.value.cuenta_id, referencia: pg.value.referencia, archivos: ar.archivos, pago_estado: "pendiente",
+      pago_validado_por: null, pago_validado_en: null, pago_motivo_rechazo: null,
+      cuenta_detalle: cuenta ? { banco: cuenta.banco, tipo_cuenta: cuenta.tipo_cuenta, numero_cuenta: cuenta.numero_cuenta, alias: cuenta.alias } : null,
+    }).eq("id", r.id).select().single();
+    if (up.error) return fallo(up.error);
+    await evento(r.lead_id, "reserva", `${userName} corrigió el pago de la reserva y lo envió a validar (${medioNombre(pg.value.medio)})`);
+    await audit(ctx.actor, "reserva.pago_corregir", "reserva", r.id, { medio: pg.value.medio });
+    await avisarValidadores(r.local_id, "Pago de reserva por validar", [`${userName} corrigió el pago de una reserva de ${dinero(r.monto)}. Falta validarlo.`]);
+    await avisarSupervisores(r.local_id, "Pago de reserva por validar", [`${userName} corrigió el pago de una reserva de ${dinero(r.monto)}. Falta validarlo.`]);
+    return json({ reserva: up.data });
   }
 
   if (op === "reservas.cancelar" || op === "reservas.extender") {
@@ -3557,18 +3627,51 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     if (error) { if (ctx.isMissingTable(error)) return []; throw error; }
     return (data ?? []).sort((a: any, b: any) => String(a.fecha_pago).localeCompare(String(b.fecha_pago)) || String(a.creado_en).localeCompare(String(b.creado_en)));
   }
-  const conMedio = (p: any) => ({ ...p, medio_nombre: medioNombre(p.medio), cuenta: p.cuenta_detalle ? etiquetaCuenta(p.cuenta_detalle) : "" });
+  /** Valida los archivos de respaldo de un pago (ya subidos a kv_store bajo dval::<ns>::<archivo>) y exige al menos uno si el medio lo pide. */
+  function archivosDePago(raw: unknown, ns: string, medio: any): { error?: string; archivos?: any[] } {
+    const archivos: any[] = [];
+    for (const a of Array.isArray(raw) ? raw : []) {
+      const r = validarArchivo(a);
+      if (!r.ok) return { error: r.error };
+      archivos.push({ ...r.value, v: ns });
+    }
+    if (archivos.length > MAX_ARCHIVOS_PAGO) return { error: "demasiados_archivos" };
+    if (medio.requiereRespaldo && archivos.length === 0) return { error: "respaldo_requerido" };
+    return { archivos };
+  }
+  /** El pago de la reserva, visto como un pago más de la venta: la reserva se descuenta de lo que falta por recibir. */
+  function pagoDeReserva(r: any, c: any) {
+    if (!r || !(Number(c.reserva_monto) > 0)) return null;
+    const nuevo = !!medioDe(r.medio_pago);
+    return {
+      id: `reserva-${r.id}`, origen: "reserva", medio: nuevo ? r.medio_pago : "reserva", medio_etiqueta: nuevo ? medioNombre(r.medio_pago) : (r.medio_pago || ""),
+      monto: Number(c.reserva_monto), fecha_pago: r.fecha_pago || String(r.creado_en || "").slice(0, 10), cuenta_detalle: r.cuenta_detalle || null, referencia: r.referencia || null,
+      archivos: r.archivos ?? [], estado: "vigente", pago_estado: r.pago_estado || null, motivo_rechazo: r.pago_motivo_rechazo || null, pago_validado_por: r.pago_validado_por || null,
+      reserva_id: r.id, cotizacion_id: r.cotizacion_id || null,
+    };
+  }
+  /** Todos los pagos de una venta: primero la reserva (ya recibida) y luego los que registra el ejecutivo. */
+  async function pagosConReserva(c: any) {
+    const res = c.reserva_id ? (await sb.from("reservas").select("*").eq("id", c.reserva_id).maybeSingle()).data : null;
+    const virtual = pagoDeReserva(res, c);
+    return { reserva: res, pagos: [...(virtual ? [virtual] : []), ...(await pagosDeCierre(c.id))] };
+  }
+  const conMedio = (p: any) => ({
+    ...p, medio_nombre: p.origen === "reserva" ? `Reserva${p.medio_etiqueta ? ` (${p.medio_etiqueta})` : ""}` : medioNombre(p.medio),
+    cuenta: p.cuenta_detalle ? etiquetaCuenta(p.cuenta_detalle) : "",
+  });
 
   /** Pagos registrados de una venta, cuánto falta y las cuentas de la empresa para elegir. */
   if (op === "cierres.pagos") {
     const c = await cargarCierre(String(body.id ?? ""));
     if (!c || !(veTodoElLocal || c.ejecutivo_id === userId)) return err("no_existe", 404);
-    const pagos = await pagosDeCierre(c.id);
+    const { reserva, pagos } = await pagosConReserva(c);
     const lead = await cargarLead(c.lead_id);
     const puedeEditar = c.estado === "pendiente" && !!lead && puedeTocar(lead);
     const r = resumenPagos(pagos, c.precio_final);
     return json({
-      pagos: pagos.map(conMedio), puedeEditar, precio_final: Number(c.precio_final),
+      pagos: pagos.map(conMedio), puedeEditar, precio_final: Number(c.precio_final), reserva_pago_estado: reserva ? reserva.pago_estado || null : null,
+      puedeValidarReserva: !!reserva && reserva.pago_estado === "pendiente" && (esSupervisor || can("validacion.realizar")),
       resumen: { total: r.total, falta: r.falta, sobra: r.sobra, cuadra: r.cuadra, sinRespaldo: r.sinRespaldo.length },
       sugerencias: { reserva: Number(c.reserva_monto) || 0, parte_pago: Number(c.monto_parte_pago) || 0, financiado: Number(c.monto_financiado) || 0 },
       cuentas: puedeEditar ? (await cuentasDelLocal(c.local_id, true)).map(conEtiqueta) : [],
@@ -3594,15 +3697,10 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       cuenta = (await cuentasDelLocal(c.local_id, true)).find((x: any) => x.id === v.value.cuenta_id) ?? null;
       if (!cuenta) return err("cuenta_invalida");
     }
-    const archivos: any[] = [];
-    for (const a of Array.isArray(body.pago?.archivos) ? body.pago.archivos : []) {
-      const r = validarArchivo(a);
-      if (!r.ok) return err(r.error!);
-      archivos.push(r.value);
-    }
-    if (archivos.length > MAX_ARCHIVOS_PAGO) return err("demasiados_archivos");
-    if (medio.requiereRespaldo && archivos.length === 0) return err("respaldo_requerido");
-    const previos = await pagosDeCierre(c.id);
+    const ar = archivosDePago(body.pago?.archivos, c.id, medio);
+    if (ar.error) return err(ar.error);
+    const archivos = ar.archivos!;
+    const previos = (await pagosConReserva(c)).pagos;
     if (resumenPagos(previos, c.precio_final).total + v.value.monto > Number(c.precio_final)) return err("pago_excede_precio", 409);
     const ins = await sb.from("cierre_pagos").insert({
       ...v.value, cierre_id: c.id, local_id: c.local_id, archivos, registrado_por: userName,
@@ -3650,8 +3748,8 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     const docs = val ? await enLotes("validacion_docs", "validacion_id", [val.id]) : [];
     const respaldos = docs.filter((d: any) => d.estado === "aprobado" || (d.archivos ?? []).length > 0).sort((a: any, b: any) => (a.orden ?? 0) - (b.orden ?? 0))
       .map((d: any) => ({ nombre: d.nombre, estado: d.estado, archivos: (d.archivos ?? []).length, revisado_por: d.revisado_por ?? null }));
-    const detallePagos = (await pagosDeCierre(c.id)).filter((p: any) => p.estado !== "anulado").map((p: any) => ({
-      medio_nombre: medioNombre(p.medio), monto: Number(p.monto), fecha_pago: p.fecha_pago, cuenta: p.cuenta_detalle ? etiquetaCuenta(p.cuenta_detalle) : "",
+    const detallePagos = (await pagosConReserva(c)).pagos.filter((p: any) => p.estado !== "anulado").map(conMedio).map((p: any) => ({
+      medio_nombre: p.medio_nombre, monto: Number(p.monto), fecha_pago: p.fecha_pago, cuenta: p.cuenta_detalle ? etiquetaCuenta(p.cuenta_detalle) : "",
       referencia: p.referencia || "", respaldos: (p.archivos ?? []).length, registrado_por: p.registrado_por || "",
     }));
     const reserva = Number(c.reserva_monto) || 0;
@@ -3693,9 +3791,11 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     const { data: veh } = await sb.from("vehiculos").select("estado").eq("id", c.vehiculo_id).maybeSingle();
     if (!reserva || reserva.estado !== "activa" || !veh || veh.estado !== "reservado") return err("reserva_no_vigente", 409);
     // Los pagos registrados deben sumar el precio de venta y traer su respaldo (si las tablas de pagos aún no existen, no se exige).
-    const pg = await sb.from("cierre_pagos").select("*").eq("cierre_id", c.id);
+    // El pago de la reserva debe estar validado (las reservas antiguas, sin validación, pasan).
+    if (reserva.pago_estado === "pendiente" || reserva.pago_estado === "rechazado") return err("reserva_pago_sin_validar", 409);
+    const pg = await sb.from("cierre_pagos").select("id").eq("cierre_id", c.id).limit(1);
     if (pg.error) { if (!ctx.isMissingTable(pg.error)) return fallo(pg.error); }
-    else { const vp = verificarPagos(pg.data ?? [], c.precio_final); if (!vp.ok) return err(vp.error!, 409); }
+    else { const vp = verificarPagos((await pagosConReserva(c)).pagos, c.precio_final); if (!vp.ok) return err(vp.error!, 409); }
     // Con Validadores en el local, la venta solo se aprueba con sus documentos validados.
     if (await hayValidadores(c.local_id)) {
       const vq = await sb.from("validaciones").select("*").eq("cierre_id", c.id);

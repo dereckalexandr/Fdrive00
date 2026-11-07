@@ -3,7 +3,7 @@
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { iniciarFuncion, api, nuevaIp, loginAdmin, crm, db, pagarTodo } from "./helpers/api-env.mjs";
+import { iniciarFuncion, api, nuevaIp, loginAdmin, crm, db, pagarTodo, pagoReserva } from "./helpers/api-env.mjs";
 
 const ve = (token, op, extra = {}) => api({ action: "ventas", token, op, ...extra });
 const kv = (token, op, key, extra = {}) => api({ action: "kv", token, op, key, ...extra });
@@ -33,7 +33,7 @@ async function leadReservado(token, veh) {
   veh = veh || (await vehiculo());
   const l = (await ve(token, "leads.create", { cliente: { nombre: `Cliente ${++n}`, telefono: `9${String(20000000 + n)}` }, lead: {} })).lead;
   const cot = (await ve(token, "cotizaciones.save", { leadId: l.id, vehiculoId: veh.id, datos: {} })).cotizacion;
-  const res = (await ve(token, "reservas.crear", { cotizacionId: cot.id, monto: 500000 })).reserva;
+  const res = (await ve(token, "reservas.crear", { pago: pagoReserva(), cotizacionId: cot.id, monto: 500000 })).reserva;
   assert.ok(res, "no se pudo reservar");
   return { lead: l, veh };
 }

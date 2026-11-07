@@ -3,7 +3,7 @@
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { iniciarFuncion, api, nuevaIp, loginAdmin, crm, db, correos, pagarTodo } from "./helpers/api-env.mjs";
+import { iniciarFuncion, api, nuevaIp, loginAdmin, crm, db, correos, pagarTodo, pagoReserva } from "./helpers/api-env.mjs";
 import { mesChile } from "../supabase/functions/api/ventas-core.js";
 import { reglaDocCompra } from "../supabase/functions/api/validaciones-core.js";
 
@@ -391,7 +391,7 @@ test("Precio piso: el vehículo consignado no se publica, cotiza ni vende por de
 test("Venta de un vehículo consignado: el margen sobre el piso paga el 25 % al ejecutivo de la consignación", async () => {
   // El supervisor aprueba el descuento y se reserva.
   if (U.cot.estado === "pendiente") assert.equal((await ve(U.jefe.token, "cotizaciones.aprobar", { id: U.cot.id })).status, 200);
-  const res = await ve(U.e1.token, "reservas.crear", { cotizacionId: U.cot.id, monto: 500000 });
+  const res = await ve(U.e1.token, "reservas.crear", { pago: pagoReserva(), cotizacionId: U.cot.id, monto: 500000 });
   assert.equal(res.status, 200, JSON.stringify(res));
   const bajo = await ve(U.e1.token, "cierres.crear", { leadId: U.ventaLead.id, datos: { precioFinal: 7900000, montoParteDePago: 0, montoFinanciado: 0, fechaEntrega: hoy() } });
   assert.equal(bajo.error, "bajo_precio_piso", "tampoco se cierra bajo el piso");
