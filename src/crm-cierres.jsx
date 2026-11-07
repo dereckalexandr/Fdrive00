@@ -165,7 +165,7 @@ export function SeccionCierres({ api, lead, datos, catalogos, onCambio, avisar }
         <p className="text-sm text-stone-700">Cierre de venta</p>
         {puedeEditar && lead.etapa === "reservado" && reserva && cotizacion && !hayEnCurso && <button onClick={() => setForm(true)} className={BTN_AMBAR}>Cerrar la venta</button>}
       </div>
-      {cierres.length === 0 && <p className="text-sm text-stone-500">El lead está reservado. Cuando el cliente pague y retire el vehículo, registra aquí el cierre.</p>}
+      {cierres.length === 0 && <p className="text-sm text-stone-500">El lead está reservado. Pulsa «Cerrar la venta» para pedir el cierre: enseguida aparece el panel «Pagos de la venta», donde registras cada pago con su respaldo (y la cuenta de la empresa si fue por banco). El Jefe Local aprueba la venta cuando los pagos cuadran con el precio.</p>}
       {cierres.map((c) => (
         <div key={c.id} className="border border-stone-300 p-3 text-sm">
           <div className="flex flex-wrap items-center gap-2">
