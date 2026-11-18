@@ -49,7 +49,7 @@ import {
   colaValidaciones, metricasValidador, validarTransicionValidacion, ESTADOS_ABIERTOS,
   filaDoc, reglaDocCompra as reglaDoc, archivoPermitidoParaDoc, validarDatosDoc, validarDatosCliente, faltantesCompra, faltantesConsignacion, esChecklistCompraActual, validarCuentaBancaria, DOCS_COMPRA, DOCS_CONSIGNACION, TIPOS_CON_REGLAS,
 } from "./validaciones-core.js";
-import { validarContratoCompraventa } from "./contrato-compraventa-core.js";
+import { validarContratoCompraventa, validarEmpresa, CAMPOS_EMPRESA } from "./contrato-compraventa-core.js";
 import { validarPago, validarCuentaEmpresa, etiquetaCuenta, resumenPagos, verificarPagos, medioNombre, medioDe, MAX_ARCHIVOS_PAGO, MEDIOS_PAGO_COMPRA, medioCompraDe } from "./pagos-core.js";
 import {
   folioInspeccion, VEREDICTOS, validarSolicitudInspeccion, validarReprogramacion, validarResultadoInspeccion, claveEsDe,
@@ -3715,6 +3715,29 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       .sort((a: any, b: any) => etiquetaCuenta(a).localeCompare(etiquetaCuenta(b)));
   }
   function conEtiqueta(c: any) { return { ...c, etiqueta: etiquetaCuenta(c) }; }
+
+  /** Datos de la empresa vendedora (contratos): los ve el supervisor y solo el Administrador los modifica. */
+  async function datosEmpresa() {
+    const g = await sb.from("kv_store").select("value").eq("key", "empresa::datos").maybeSingle();
+    let d: any = {};
+    try { d = g.data && g.data.value ? JSON.parse(g.data.value) : {}; } catch { d = {}; }
+    const out: Record<string, string> = {};
+    for (const k of CAMPOS_EMPRESA) out[k] = d[k] ? String(d[k]) : "";
+    return out;
+  }
+  if (op === "empresa.get") {
+    if (!esSupervisor) return err("forbidden", 403);
+    return json({ empresa: await datosEmpresa(), puedeEditar: ctx.esAdmin });
+  }
+  if (op === "empresa.save") {
+    if (!ctx.esAdmin) return err("forbidden", 403);
+    const v = validarEmpresa(body.datos);
+    if (!v.ok) return err(v.error!);
+    const up = await sb.from("kv_store").upsert({ key: "empresa::datos", value: JSON.stringify(v.value), shared: false, updated_at: new Date().toISOString() }, { onConflict: "key" });
+    if (up.error) return fallo(up.error);
+    await audit(ctx.actor, "empresa.datos", "empresa", "datos", { razon_social: v.value.razon_social, rut: v.value.rut });
+    return json({ empresa: v.value, puedeEditar: true });
+  }
 
   if (op === "cuentas.list") {
     if (!esSupervisor && !can("leads.propios") && !can("leads.local")) return err("forbidden", 403);

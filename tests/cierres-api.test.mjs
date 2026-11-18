@@ -546,3 +546,27 @@ test("Datos completos del cliente de un lead: dirección y comuna al crear y al 
   const g = await ve(U.e1.token, "leads.get", { id: c1.lead.id });
   assert.equal(g.cliente.nombre, "Clara D. Prueba");
 });
+
+test("Datos de la empresa: el Administrador los edita, el Jefe Local los ve y el contrato de compraventa los usa", async () => {
+  const datos = { razonSocial: "DRIVE FUTURO SPA", rut: "77.123.456-9", domicilio: "Av. Vitacura 1234, oficina 501", comuna: "Vitacura", region: "Metropolitana", ciudad: "Santiago", representante: "Juan Pérez Soto", rutRepresentante: "12.345.678-5", personeria: "la escritura ante el Registro Electrónico de Empresas y Sociedades de fecha 25-05-2022" };
+  assert.equal((await ve(U.jefe.token, "empresa.save", { datos })).status, 403, "el Jefe Local no los modifica");
+  assert.equal((await ve(U.e1.token, "empresa.get", {})).status, 403);
+  assert.equal((await ve(admin, "empresa.save", { datos: { ...datos, rut: "77.123.456-7" } })).error, "rut_empresa_invalido");
+  assert.equal((await ve(admin, "empresa.save", { datos: { ...datos, razonSocial: "" } })).error, "razon_social_requerida");
+  const ok = await ve(admin, "empresa.save", { datos });
+  assert.equal(ok.status, 200, JSON.stringify(ok));
+  const g = await ve(U.jefe.token, "empresa.get", {});
+  assert.equal(g.empresa.razon_social, "DRIVE FUTURO SPA");
+  assert.equal(g.empresa.rut_representante, "12.345.678-5");
+  assert.equal(g.puedeEditar, false);
+
+  // El contrato de compraventa de una venta usa esos datos como «Vendedor».
+  const x = await leadReservado(U.e1.token);
+  await ve(U.e1.token, "clientes.save", { id: x.lead.cliente_id, datos: { nombre: "Comprador Contrato Prueba", telefono: "955500001", rut: "11.111.111-1" } });
+  const c = await cerrar(U.e1.token, x.lead.id, DATOS());
+  const ct = await ve(U.e1.token, "cierres.contrato", { id: c.cierre.id, datos: { chasis: "ABCDE12345F678901", tasacionFiscal: 9000000 } });
+  assert.equal(ct.status, 200, JSON.stringify(ct));
+  assert.equal(ct.contrato.vendedor.razon_social, "DRIVE FUTURO SPA");
+  assert.equal(ct.contrato.vendedor.representante, "Juan Pérez Soto");
+  assert.match(ct.contrato.vendedor.personeria, /Registro Electrónico/);
+});

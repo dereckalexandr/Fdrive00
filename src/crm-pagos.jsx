@@ -398,6 +398,64 @@ export function PagosCompra({ api, compra, avisar, onCambio = () => {} }) {
   );
 }
 
+/** Datos de la empresa vendedora que se imprimen en los contratos: solo el Administrador los modifica; el Jefe Local los ve. */
+export function DatosEmpresa({ api }) {
+  const [v, setV] = useState(0);
+  const [editando, setEditando] = useState(false);
+  const [f, setF] = useState(null);
+  const [msg, setMsg] = useState("");
+  const [ocupado, setOcupado] = useState(false);
+  const { cargando, error, datos, recargar } = useCarga(() => api("empresa.get", {}), [api, v]);
+  if (cargando && !datos) return <Cargando />;
+  if (error && !datos) return <Aviso>{error}</Aviso>;
+  const e = datos.empresa;
+  const abrir = () => {
+    setMsg("");
+    setF({ razonSocial: e.razon_social, rut: e.rut, domicilio: e.domicilio, comuna: e.comuna, region: e.region, ciudad: e.ciudad || "Santiago", representante: e.representante, rutRepresentante: e.rut_representante, personeria: e.personeria });
+    setEditando(true);
+  };
+  const guardar = async () => {
+    setMsg(""); setOcupado(true);
+    try { await api("empresa.save", { datos: f }); setEditando(false); setV((x) => x + 1); await recargar(); } catch (err) { setMsg(mensajeError(err)); }
+    setOcupado(false);
+  };
+  const filas = [["Razón social", e.razon_social], ["RUT", e.rut], ["Domicilio", [e.domicilio, e.comuna, e.region].filter(Boolean).join(", ")], ["Ciudad de firma", e.ciudad], ["Representante legal", [e.representante, e.rut_representante && `RUT ${e.rut_representante}`].filter(Boolean).join(" · ")], ["Personería", e.personeria]];
+  const campo = (k, etiqueta, extra = {}) => <Campo etiqueta={etiqueta} className={extra.ancho ? "md:col-span-3" : ""}><input value={f[k]} maxLength={extra.max || 160} placeholder={extra.ph || ""} onChange={(ev) => setF({ ...f, [k]: ev.target.value })} className={INPUT} /></Campo>;
+  return (
+    <Tarjeta titulo="Datos de la empresa" ayuda="Se imprimen en el contrato de compraventa como «Vendedor». Solo el Administrador puede modificarlos.">
+      {!editando && (
+        <>
+          {!e.razon_social && <p className="text-sm text-amber-700 mb-2">Aún no hay datos cargados: el contrato saldrá con líneas en blanco.</p>}
+          <dl className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1 text-sm mb-3">
+            {filas.map(([k, val]) => <div key={k} className="flex gap-2"><dt className="text-stone-500 min-w-[150px]">{k}</dt><dd className="text-stone-900">{val || "—"}</dd></div>)}
+          </dl>
+          {datos.puedeEditar ? <button onClick={abrir} className={BTN_AMBAR}>Editar datos de la empresa</button> : <p className="text-xs text-stone-500">Solo el Administrador puede modificarlos.</p>}
+        </>
+      )}
+      {editando && f && (
+        <div className="flex flex-col gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {campo("razonSocial", "Razón social *", { max: 120 })}
+            {campo("rut", "RUT de la empresa *", { max: 14 })}
+            {campo("ciudad", "Ciudad donde se firma", { max: 60 })}
+            {campo("domicilio", "Domicilio (calle, número, oficina)")}
+            {campo("comuna", "Comuna", { max: 60 })}
+            {campo("region", "Región", { max: 60, ph: "Metropolitana" })}
+            {campo("representante", "Representante legal", { max: 120 })}
+            {campo("rutRepresentante", "RUT del representante", { max: 14 })}
+            {campo("personeria", "Personería (texto que sigue a «consta de»)", { max: 400, ancho: true, ph: "la escritura ante el Registro Electrónico de Empresas y Sociedades de fecha 25-05-2022" })}
+          </div>
+          <div className="flex gap-2">
+            <button disabled={ocupado} onClick={guardar} className={BTN_PRIMARIO}>{ocupado ? "Guardando…" : "Guardar"}</button>
+            <button onClick={() => setEditando(false)} className={BTN}>Cancelar</button>
+          </div>
+        </div>
+      )}
+      {msg && <p className="text-sm text-rose-600 mt-2">{msg}</p>}
+    </Tarjeta>
+  );
+}
+
 /** Cuentas bancarias de la empresa: solo el Administrador las crea o modifica; el Jefe Local las ve. */
 export function CuentasEmpresa({ api }) {
   const [version, setVersion] = useState(0);

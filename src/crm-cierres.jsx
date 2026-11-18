@@ -14,7 +14,7 @@ import { MODULOS_COMISION, getTramo, etiquetaTramo } from "../supabase/functions
 import { calcularCotizacion, validarCierre, cierreNombre, mesChile, FINANCIERAS } from "../supabase/functions/api/ventas-core.js";
 import { Aprobaciones, topeTasado } from "./crm-cotizaciones.jsx";
 import { buildContratoCompraventaPdf, buildNotaVentaPdf } from "./pdf-report.js";
-import { PagosVenta, CuentasEmpresa, ReservasPorValidar } from "./crm-pagos.jsx";
+import { PagosVenta, CuentasEmpresa, ReservasPorValidar, DatosEmpresa } from "./crm-pagos.jsx";
 import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, fechaCorta, hace, Aviso, Cargando, Tarjeta, Campo, Modal, useCarga, mensajeError } from "./crm-ui.jsx";
 
 export const folioVenta = (n) => `VTA-${String(n || 0).padStart(6, "0")}`;
@@ -388,6 +388,7 @@ export function Ventas({ api, catalogos, abrirLead, version, onCambio }) {
 
   return (
     <>
+      {catalogos.puedeAsignar && <DatosEmpresa api={api} />}
       {catalogos.puedeAsignar && <CuentasEmpresa api={api} />}
       <Tarjeta>
         <div className="flex flex-wrap items-center gap-3">

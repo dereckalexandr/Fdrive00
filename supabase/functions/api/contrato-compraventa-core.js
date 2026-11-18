@@ -8,6 +8,32 @@
  * ----------------------------------------------------------------
  */
 
+import { validarRut, formatearRut } from "./crm-core.js";
+
+/** Campos de la empresa vendedora que se imprimen en los contratos. */
+export const CAMPOS_EMPRESA = ["razon_social", "rut", "domicilio", "comuna", "region", "ciudad", "representante", "rut_representante", "personeria"];
+
+/**
+ * Datos de la empresa que edita el Administrador. Razón social y RUT son obligatorios; el resto puede quedar vacío (el contrato muestra una línea para llenar).
+ * @param input { razonSocial, rut, domicilio, comuna, region, ciudad, representante, rutRepresentante, personeria }
+ */
+export function validarEmpresa(input) {
+  const i = input || {};
+  const t = (x, max) => String(x === null || x === undefined ? "" : x).replace(/\s+/g, " ").trim().slice(0, max);
+  const razon = t(i.razonSocial, 120);
+  if (razon.length < 3) return { ok: false, error: "razon_social_requerida" };
+  if (!validarRut(i.rut)) return { ok: false, error: "rut_empresa_invalido" };
+  const rutRep = t(i.rutRepresentante, 14);
+  if (rutRep && !validarRut(rutRep)) return { ok: false, error: "rut_representante_invalido" };
+  return {
+    ok: true,
+    value: {
+      razon_social: razon, rut: formatearRut(i.rut), domicilio: t(i.domicilio, 160), comuna: t(i.comuna, 60), region: t(i.region, 60), ciudad: t(i.ciudad, 60) || "Santiago",
+      representante: t(i.representante, 120), rut_representante: rutRep ? formatearRut(rutRep) : "", personeria: t(i.personeria, 400),
+    },
+  };
+}
+
 const MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
 const UNIDADES = ["", "UN", "DOS", "TRES", "CUATRO", "CINCO", "SEIS", "SIETE", "OCHO", "NUEVE", "DIEZ", "ONCE", "DOCE", "TRECE", "CATORCE", "QUINCE",
   "DIECISÉIS", "DIECISIETE", "DIECIOCHO", "DIECINUEVE", "VEINTE", "VEINTIÚN", "VEINTIDÓS", "VEINTITRÉS", "VEINTICUATRO", "VEINTICINCO", "VEINTISÉIS", "VEINTISIETE", "VEINTIOCHO", "VEINTINUEVE"];
