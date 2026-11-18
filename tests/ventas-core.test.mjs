@@ -1,3 +1,4 @@
+import { siguienteLlave } from "../supabase/functions/api/ventas-core.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -424,4 +425,12 @@ test("Bono financiamiento en la cotización: solo si el cliente financia, y el d
   for (const pf of [null, 0, 10000000, 11000000]) assert.equal(validarCotizacion({ parteDePago: { tiene: false }, financiamiento: fin }, 10000000, pf).value.precio_final, 10000000, String(pf));
   assert.equal(validarCotizacion({ descuento: 9600000, parteDePago: { tiene: false }, financiamiento: fin }, 10000000, 9500000).error, "descuento_invalido", "el descuento no supera lo que queda tras el bono");
   assert.equal(calcularCotizacion({ precioLista: 10000000, descuento: 0, parteDePago: {}, financiamiento: { quiere: false, bono_financiamiento: 500000 } }).precioFinal, 10000000);
+});
+
+test("siguienteLlave: el correlativo libre más bajo", () => {
+  assert.equal(siguienteLlave([]), 1);
+  assert.equal(siguienteLlave([1, 2, 3]), 4);
+  assert.equal(siguienteLlave([1, 2, 4]), 3);
+  assert.equal(siguienteLlave([2, 3]), 1);
+  assert.equal(siguienteLlave([null, "2", 1]), 3);
 });

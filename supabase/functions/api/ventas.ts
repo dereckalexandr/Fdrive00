@@ -17,7 +17,7 @@ import {
   validarCierre, margenVenta, mesChile, esMes, nombreMes, FINANCIERAS,
   horasDesde, ETAPAS_ABIERTAS, esSinAtender, esDetenido, ultimaActividad, embudoCohorte, rendimientoPorFuente, motivosDePerdida, validarAviso, claseTarea,
   GRUPOS_HOY, clasificarLeadHoy, ordenarHoy, faltaProximaAccion,
-  solicitudDeCanal,
+  solicitudDeCanal, siguienteLlave,
 } from "./ventas-core.js";
 import { tramosEfectivos, calcularProduccion } from "./comisiones-core.js";
 import { enviarAviso, enSegundoPlano, correoActivo } from "./correo.ts";
@@ -394,6 +394,36 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     return { aplica: true, val, docs, cliente: cl, faltantes: faltantesConsignacion({ cliente: cl, docs }) };
   }
 
+  /**
+   * Número de llave: lo lleva el vehículo comprado mientras esté en el inventario (activo y no vendido). Al venderse o archivarse se
+   * libera, y el siguiente vehículo comprado toma el número libre más bajo del local. Si la columna aún no existe, no hace nada.
+   */
+  async function sincronizarLlave(vehiculoId: string) {
+    if (!vehiculoId) return;
+    const vq = await sb.from("vehiculos").select("id, local_id, activo, estado, numero_llave").eq("id", vehiculoId).maybeSingle();
+    if (vq.error || !vq.data) return;
+    const v = vq.data;
+    let lleva = !!v.activo && v.estado !== "vendido" && !!v.local_id;
+    if (lleva && v.numero_llave == null) {
+      const cq = await sb.from("compras").select("id").eq("vehiculo_id", v.id).eq("estado", "comprada");
+      lleva = !cq.error && (cq.data ?? []).length > 0;
+    }
+    if (!lleva) {
+      if (v.numero_llave != null) await sb.from("vehiculos").update({ numero_llave: null }).eq("id", v.id);
+      return;
+    }
+    if (v.numero_llave != null) return;
+    // Dos compras aprobadas a la vez podrían tomar el mismo número: el índice único lo impide y se reintenta.
+    for (let i = 0; i < 4; i++) {
+      const uq = await sb.from("vehiculos").select("id, numero_llave").eq("local_id", v.local_id);
+      if (uq.error) return;
+      const n = siguienteLlave((uq.data ?? []).filter((x: any) => x.id !== v.id && x.numero_llave != null).map((x: any) => x.numero_llave));
+      const up = await sb.from("vehiculos").update({ numero_llave: n }).eq("id", v.id);
+      if (!up.error) return;
+      if (up.error.code !== "23505") return;
+    }
+  }
+
   /** Aprueba una compra: exige los documentos validados (si hay Validadores) y entrega el vehículo al inventario. */
   async function aprobarCompra(c: any): Promise<{ ok: boolean; error?: string; compra?: any }> {
     // Sin todos los datos del vendedor y sus documentos, la compra no se concreta.
@@ -424,6 +454,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     const ahora = new Date().toISOString();
     const { data, error } = await sb.from("compras").update({ estado: "comprada", aprobado_por: userName, aprobado_en: ahora, mes: mesChile(ahora), vehiculo_id: vi.data.id, motivo_rechazo_pago: null, actualizado_en: ahora }).eq("id", c.id).select().single();
     if (error) throw error;
+    await sincronizarLlave(vi.data.id);
     await sb.from("leads").update({ etapa: "ganado", actualizado_en: ahora }).eq("id", c.lead_id);
     await evento(c.lead_id, "compra", `Compra ${folioCompra(c.numero)} aprobada por ${userName}: ${dinero(c.monto_final)}. El vehículo entró al inventario en preparación. Cuenta para la comisión de ${nombreMes(mesChile(ahora))}.`);
     await evento(c.lead_id, "etapa", "Oferta aceptada → Comprado");
@@ -599,6 +630,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       if (antes.estado === "vendido" && (await cierreAprobadoDeVehiculo(antes.id))) v.value.estado = "vendido";
       const { data, error } = await sb.from("vehiculos").update({ ...v.value, actualizado_en: new Date().toISOString() }).eq("id", id).select().single();
       if (error) return error.code === "23505" ? err("patente_duplicada", 409) : fallo(error);
+      if (antes.estado !== data.estado) { await sincronizarLlave(id); const r2 = await sb.from("vehiculos").select("*").eq("id", id).maybeSingle(); if (r2.data) Object.assign(data, r2.data); }
       const cambios: Record<string, unknown> = {};
       for (const k of ["precio_lista", "costo", "estado", "km"]) if (antes[k] !== data[k]) cambios[k] = { antes: antes[k], despues: data[k] };
       await audit(ctx.actor, "vehiculo.editar", "vehiculo", id, { patente: data.patente, cambios });
@@ -615,8 +647,10 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       if (antes.estado === "vendido" && (await cierreAprobadoDeVehiculo(antes.id))) return err("vehiculo_vendido");
       const { data, error } = await sb.from("vehiculos").update({ estado, actualizado_en: new Date().toISOString() }).eq("id", antes.id).select().single();
       if (error) return fallo(error);
+      await sincronizarLlave(antes.id);
+      const r2 = await sb.from("vehiculos").select("*").eq("id", antes.id).maybeSingle();
       await audit(ctx.actor, "vehiculo.estado", "vehiculo", antes.id, { patente: antes.patente, antes: antes.estado, despues: estado });
-      return json({ vehiculo: data });
+      return json({ vehiculo: r2.data || data });
     }
 
     if (op === "inventario.archivar") {
@@ -626,6 +660,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       if (antes.estado === "vendido" && (await cierreAprobadoDeVehiculo(antes.id))) return err("vehiculo_vendido");
       const { error } = await sb.from("vehiculos").update({ activo: false, actualizado_en: new Date().toISOString() }).eq("id", antes.id);
       if (error) return fallo(error);
+      await sincronizarLlave(antes.id);
       await audit(ctx.actor, "vehiculo.archivar", "vehiculo", antes.id, { patente: antes.patente });
       return json({ ok: true });
     }
@@ -2592,6 +2627,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
         const enUso = !veh || !["preparacion", "disponible"].includes(veh.estado) || (rs.data ?? []).some((x: any) => x) || (ci.data ?? []).some((x: any) => x.estado === "pendiente" || x.estado === "aprobada");
         if (enUso) return err("vehiculo_en_uso", 409);
         await sb.from("vehiculos").update({ activo: false, actualizado_en: ahora }).eq("id", c.vehiculo_id);
+        await sincronizarLlave(c.vehiculo_id);
       }
       const { data, error } = await sb.from("compras").update({ estado: "anulada", motivo, actualizado_en: ahora }).eq("id", c.id).select().single();
       if (error) return fallar(error);
@@ -3608,6 +3644,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     }).eq("id", c.id).select().single();
     if (error) throw error;
     await sb.from("vehiculos").update({ estado: "vendido", actualizado_en: ahora }).eq("id", c.vehiculo_id);
+    await sincronizarLlave(c.vehiculo_id);
     // Un vehículo consignado vendido paga comisión al ejecutivo de la consignación: el margen es lo que queda sobre el piso.
     const cons = await sb.from("consignaciones").select("*").eq("vehiculo_id", c.vehiculo_id).eq("estado", "vigente").maybeSingle();
     if (!cons.error && cons.data) {
@@ -3999,6 +4036,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     const { data, error } = await sb.from("cierres").update({ estado: "anulada", motivo_anulacion: motivo, anulado_por: userName, anulado_en: ahora, actualizado_en: ahora }).eq("id", c.id).select().single();
     if (error) return fallo(error);
     await sb.from("vehiculos").update({ estado: "disponible", actualizado_en: ahora }).eq("id", c.vehiculo_id).eq("estado", "vendido");
+    await sincronizarLlave(c.vehiculo_id);
     await sb.from("consignaciones").update({ estado: "vigente", cierre_id: null, precio_venta: null, margen: null, mes: null, vendida_en: null, actualizado_en: ahora }).eq("cierre_id", c.id).eq("estado", "vendida");
     if (c.cotizacion_id) await sb.from("cotizaciones").update({ estado: "vigente", actualizado_en: ahora }).eq("id", c.cotizacion_id).eq("estado", "vendida");
     await sb.from("leads").update({ etapa: "cotizado", actualizado_en: ahora }).eq("id", c.lead_id).eq("etapa", "ganado");

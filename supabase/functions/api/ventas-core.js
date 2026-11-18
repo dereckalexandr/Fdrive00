@@ -80,6 +80,17 @@ export const patenteValida = (p) => /^(?:[A-Z]{4}\d{2}|[A-Z]{2}\d{4})$/.test(nor
 export const soloDigitos = (t) => String(t || "").replace(/\D/g, "");
 
 /* ---------- Vehículos ---------- */
+/**
+ * Número de llave para un vehículo comprado: el correlativo más bajo que esté libre en el local
+ * (los números de los vehículos vendidos o archivados vuelven a quedar disponibles).
+ */
+export function siguienteLlave(usadas) {
+  const set = new Set((usadas || []).map(Number).filter((n) => Number.isInteger(n) && n > 0));
+  let n = 1;
+  while (set.has(n)) n++;
+  return n;
+}
+
 export function validarVehiculo(input) {
   const i = input || {};
   const patente = normalizarPatente(i.patente);

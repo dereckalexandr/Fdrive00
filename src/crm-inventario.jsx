@@ -180,7 +180,8 @@ export function Inventario({ api, onCambio }) {
     const t = q.trim().toLowerCase();
     return datos.vehiculos.filter((v) => {
       if (filtro === "activos" ? v.estado === "vendido" : v.estado !== filtro) return false;
-      return !t || [v.patente, v.marca, v.modelo, v.version, String(v.anio)].some((x) => String(x || "").toLowerCase().includes(t));
+      const llave = v.numero_llave != null ? [`llave ${v.numero_llave}`, String(v.numero_llave)] : [];
+      return !t || [v.patente, v.marca, v.modelo, v.version, String(v.anio), ...llave].some((x) => String(x || "").toLowerCase().includes(t));
     });
   }, [datos, filtro, q]);
 
@@ -202,7 +203,7 @@ export function Inventario({ api, onCambio }) {
     <>
       <Tarjeta>
         <div className="flex flex-col md:flex-row md:items-center gap-3">
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar por patente, marca, modelo o año" className={`${INPUT} md:flex-1`} />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar por patente, marca, modelo, año o N° de llave" className={`${INPUT} md:flex-1`} />
           <select value={filtro} onChange={(e) => setFiltro(e.target.value)} className={`${INPUT} md:w-56`}>
             <option value="activos">Todo (sin vendidos)</option>
             {ESTADOS_VEHICULO.map((e) => <option key={e.id} value={e.id}>{e.nombre} ({cuenta(e.id)})</option>)}
@@ -215,14 +216,19 @@ export function Inventario({ api, onCambio }) {
         <table className="w-full border-collapse text-sm">
           <thead>
             <tr className="text-left text-xs uppercase tracking-wide text-stone-400 border-b border-stone-200">
-              <th className="py-3 px-4">Vehículo</th><th className="py-3 px-4 text-right hidden md:table-cell">Km</th><th className="py-3 px-4 text-right">Precio</th>
+              <th className="py-3 px-4 w-16" title="Número de llave del vehículo comprado">Llave</th><th className="py-3 px-4">Vehículo</th><th className="py-3 px-4 text-right hidden md:table-cell">Km</th><th className="py-3 px-4 text-right">Precio</th>
               {puedeEditar && <th className="py-3 px-4 text-right">Margen</th>}<th className="py-3 px-4">Estado</th><th className="py-3 px-4">{puedeEditar ? "Acciones" : "Revisión"}</th>
             </tr>
           </thead>
           <tbody>
-            {lista.length === 0 && <tr><td colSpan={6} className="py-8 text-center text-stone-500">{datos.vehiculos.length === 0 ? "El inventario está vacío." : "Ningún vehículo coincide con el filtro."}</td></tr>}
+            {lista.length === 0 && <tr><td colSpan={7} className="py-8 text-center text-stone-500">{datos.vehiculos.length === 0 ? "El inventario está vacío." : "Ningún vehículo coincide con el filtro."}</td></tr>}
             {lista.map((v) => (
               <tr key={v.id} className="border-b border-stone-100 align-top">
+                <td className="py-3 px-4">
+                  {v.numero_llave != null
+                    ? <span className="inline-block min-w-[2.5rem] text-center font-mono text-sm font-semibold px-2 py-1 bg-amber-100 text-amber-900 border border-amber-300" title={`Llave N° ${v.numero_llave}`}>🔑 {v.numero_llave}</span>
+                    : <span className="text-stone-300" title="Solo los vehículos comprados llevan número de llave">—</span>}
+                </td>
                 <td className="py-3 px-4">
                   <div className="flex gap-3">
                     {(v.fotos || [])[0] ? <Miniatura vehiculoId={v.id} fotoId={v.fotos[0]} /> : <div className="w-14 h-14 bg-stone-100 border border-stone-200 shrink-0" />}

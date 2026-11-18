@@ -4,7 +4,7 @@ import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { iniciarFuncion, api, nuevaIp, loginAdmin, crm, db, correos, pagarTodo, pagoReserva, pagarCompra } from "./helpers/api-env.mjs";
-import { mesChile } from "../supabase/functions/api/ventas-core.js";
+import { mesChile, siguienteLlave } from "../supabase/functions/api/ventas-core.js";
 import { reglaDocCompra } from "../supabase/functions/api/validaciones-core.js";
 
 const ve = (token, op, extra = {}) => api({ action: "ventas", token, op, ...extra });
@@ -295,6 +295,50 @@ test("Cancelar y anular una compra", async () => {
   assert.equal(vehC.activo, false);
   assert.equal(fila("leads", U.lead1.id).etapa, "reservado");
   assert.equal((await ve(U.c1.token, "comisiones.resumen")).ejecutivos[0].datos.comprasN, 0, "sale de la comisión del mes");
+});
+
+test("Número de llave: el vehículo comprado recibe el correlativo libre más bajo del local; al venderse o archivarse se libera", async () => {
+  const usadas = () => db.tablas.vehiculos.filter((v) => v.local_id === L1 && v.numero_llave != null).map((v) => v.numero_llave);
+  const comprarAprobada = async () => {
+    const { compra } = await comprarHastaPago();
+    pagarCompra(compra.id);
+    const ap = await ve(U.jefe.token, "compras.aprobar", { id: compra.id });
+    assert.equal(ap.status, 200, JSON.stringify(ap));
+    return fila("vehiculos", ap.compra.vehiculo_id);
+  };
+  const esperadaA = siguienteLlave(usadas());
+  const a = await comprarAprobada();
+  assert.equal(a.numero_llave, esperadaA, "toma el número libre más bajo");
+  const b = await comprarAprobada();
+  assert.equal(b.numero_llave, siguienteLlave(usadas().filter((n) => n !== b.numero_llave)));
+  assert.notEqual(a.numero_llave, b.numero_llave, "no se repite en el local");
+
+  // Un vehículo ingresado a mano (no comprado) no lleva número de llave.
+  const manual = await vehiculoVendible();
+  assert.equal(fila("vehiculos", manual.id).numero_llave ?? null, null);
+
+  // Se ve en el inventario.
+  const inv = await ve(U.jefe.token, "inventario.list");
+  assert.equal(inv.vehiculos.find((v) => v.id === a.id).numero_llave, esperadaA);
+
+  // Vendido: la llave queda libre y la toma el próximo vehículo comprado.
+  const vend = await ve(U.jefe.token, "inventario.setEstado", { id: a.id, estado: "vendido" });
+  assert.equal(vend.status, 200, JSON.stringify(vend));
+  assert.equal(fila("vehiculos", a.id).numero_llave, null, "al venderse se libera");
+  const c = await comprarAprobada();
+  assert.equal(c.numero_llave, esperadaA, "el número liberado vuelve a usarse");
+
+  // Si la venta se revierte, el vehículo vuelve con un número libre (el suyo ya lo tomó otro).
+  const vuelve = await ve(U.jefe.token, "inventario.setEstado", { id: a.id, estado: "disponible" });
+  assert.equal(vuelve.status, 200);
+  assert.ok(vuelve.vehiculo.numero_llave > 0);
+  assert.equal(new Set(usadas()).size, usadas().length, "sin números repetidos");
+
+  // Archivado: también se libera.
+  const kb = b.numero_llave;
+  assert.equal((await ve(U.jefe.token, "inventario.archivar", { id: b.id })).status, 200);
+  assert.equal(fila("vehiculos", b.id).numero_llave, null);
+  assert.ok(!usadas().includes(kb));
 });
 
 test("Lead que llega por el sitio web: se asigna a quien compra y se ofrece su tasación", async () => {
