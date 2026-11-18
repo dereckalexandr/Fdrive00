@@ -19,7 +19,11 @@ let contadorCompras = 0;
 let contadorConsig = 0;
 let contadorCampanias = 0;
 let contadorPublicaciones = 0;
+let relojWa = Date.now();
+const marcaWa = () => new Date(++relojWa).toISOString();
 const DEFAULTS = {
+  wa_conversaciones: () => ({ id: randomUUID(), no_leidos: 0, cliente_id: null, lead_id: null, local_id: null, ultimo_mensaje_en: null, ultimo_entrante_en: null, creado_en: marcaWa(), actualizado_en: marcaWa() }),
+  wa_mensajes: () => ({ id: randomUUID(), estado: "recibido", media: null, wamid: null, creado_en: marcaWa() }),
   usuarios: () => ({ id: randomUUID(), comision: {}, activo: true, debe_cambiar_clave: true, roles: [], permisos_extra: { otorgar: [], quitar: [] },
     email: null, telefono: null, local_id: null, ultimo_acceso: null, creado_en: new Date().toISOString() }),
   locales: () => ({ id: randomUUID(), activo: true, direccion: null, creado_en: new Date().toISOString() }),
@@ -48,7 +52,7 @@ const DEFAULTS = {
   tareas: () => ({ id: randomUUID(), hecha: false, hecha_en: null, creado_en: new Date().toISOString() }),
   bitacora: () => ({ id: Math.floor(Math.random() * 1e9), creado_en: new Date().toISOString() }),
 };
-const UNICOS = { vehiculos: ["patente"], usuarios: ["rut"], locales: ["nombre"], roles_permisos: ["rol"], config_negocio: ["clave"], kv_store: ["key"], patentes_consultadas: ["patente"] };
+const UNICOS = { wa_conversaciones: ["telefono"], vehiculos: ["patente"], usuarios: ["rut"], locales: ["nombre"], roles_permisos: ["rol"], config_negocio: ["clave"], kv_store: ["key"], patentes_consultadas: ["patente"] };
 
 /** Convierte un patrón LIKE/ILIKE de SQL (% = cualquier texto, _ = una letra, \ escapa) a una expresión regular. */
 function patronARegex(patron, insensible) {
@@ -66,7 +70,7 @@ function patronARegex(patron, insensible) {
 }
 
 export function crearBaseFalsa() {
-  const tablas = { usuarios: [], locales: [], roles_permisos: [], bitacora: [], config_negocio: [], kv_store: [], vehiculos: [], clientes: [], leads: [], lead_eventos: [], tareas: [], cotizaciones: [], reservas: [], cierres: [], avisos: [], tasaciones: [], inspecciones: [], validaciones: [], validacion_docs: [], anuncios: [], anuncio_portales: [], campanias: [], publicaciones_rrss: [], material_vehiculo: [], compras: [], consignaciones: [], cierre_pagos: [], compra_pagos: [], cuentas_empresa: [], patentes_consultadas: [], alertas_leads: [] };
+  const tablas = { usuarios: [], locales: [], roles_permisos: [], bitacora: [], config_negocio: [], kv_store: [], vehiculos: [], clientes: [], leads: [], lead_eventos: [], tareas: [], cotizaciones: [], reservas: [], cierres: [], avisos: [], tasaciones: [], inspecciones: [], validaciones: [], validacion_docs: [], anuncios: [], anuncio_portales: [], campanias: [], publicaciones_rrss: [], material_vehiculo: [], compras: [], consignaciones: [], cierre_pagos: [], compra_pagos: [], cuentas_empresa: [], wa_conversaciones: [], wa_mensajes: [], patentes_consultadas: [], alertas_leads: [] };
   const consultas = [];
 
   function builder(nombre) {
@@ -187,6 +191,11 @@ export function pagarTodo(cierreId) {
 export const boostr = { llamadas: [], respuestas: {} };
 /** Páginas de referencia del sueldo mínimo (simuladas): dirección → texto de la página, o un número de estado de error. */
 export const paginasMinimo = { llamadas: [], respuestas: {} };
+/**
+ * Graph API de Meta (WhatsApp) simulada. `llamadas`: cada petición { metodo, ruta, cuerpo }. `plantillas`: lo que devuelve message_templates.
+ * `fallarEnvio`: si es un texto, el próximo envío de mensajes responde con ese error. `archivos`: id de media → { mime, bytes }.
+ */
+export const meta = { llamadas: [], plantillas: [], fallarEnvio: "", archivos: {}, n: 0 };
 /** Variables de entorno de la función simulada (las pruebas pueden cambiarlas). */
 export let entorno = {};
 const IP = { n: 1 };
@@ -198,11 +207,12 @@ export const iniciarFuncion = async () => {
   writeFileSync(fake, "export const createClient = () => globalThis.__baseFalsa.cliente;\n");
   const core = pathToFileURL(resolve("supabase/functions/api/crm-core.js")).href;
   let src = readFileSync("supabase/functions/api/index.ts", "utf8");
-  src = src.replace("npm:@supabase/supabase-js@2", pathToFileURL(fake).href).replace("./crm-core.js", core).replace("./ventas.ts", pathToFileURL(resolve("supabase/functions/api/ventas.ts")).href).replace("./publico.ts", pathToFileURL(resolve("supabase/functions/api/publico.ts")).href).replace("./alertas.ts", pathToFileURL(resolve("supabase/functions/api/alertas.ts")).href).replace("./patentes-core.js", pathToFileURL(resolve("supabase/functions/api/patentes-core.js")).href);
+  src = src.replace("npm:@supabase/supabase-js@2", pathToFileURL(fake).href).replace("./crm-core.js", core).replace("./ventas.ts", pathToFileURL(resolve("supabase/functions/api/ventas.ts")).href).replace("./publico.ts", pathToFileURL(resolve("supabase/functions/api/publico.ts")).href).replace("./alertas.ts", pathToFileURL(resolve("supabase/functions/api/alertas.ts")).href).replace("./patentes-core.js", pathToFileURL(resolve("supabase/functions/api/patentes-core.js")).href).replace("./whatsapp.ts", pathToFileURL(resolve("supabase/functions/api/whatsapp.ts")).href);
   const archivo = join(dir, "index.mts");
   writeFileSync(archivo, src);
   globalThis.__baseFalsa = db;
-  const env = { SUPABASE_URL: "http://x", SUPABASE_SERVICE_ROLE_KEY: "k", SESSION_SECRET, ADMIN_EMAIL, ADMIN_PASSWORD_HASH: hashPw(ADMIN_PW), RESEND_API_KEY: "re_prueba", MAIL_FROM: "Drive Futuro <avisos@prueba.cl>", APP_URL: "https://app.prueba.cl", BOOSTR_API_KEY: "clave_prueba", BOOSTR_LIMITE_DIARIO: "5" };
+  const env = { SUPABASE_URL: "http://x", SUPABASE_SERVICE_ROLE_KEY: "k", SESSION_SECRET, ADMIN_EMAIL, ADMIN_PASSWORD_HASH: hashPw(ADMIN_PW), RESEND_API_KEY: "re_prueba", MAIL_FROM: "Drive Futuro <avisos@prueba.cl>", APP_URL: "https://app.prueba.cl", BOOSTR_API_KEY: "clave_prueba", BOOSTR_LIMITE_DIARIO: "5",
+    WA_TOKEN: "EAAprueba", WA_PHONE_NUMBER_ID: "PNID1", WA_WABA_ID: "WABA1", WA_APP_SECRET: "secreto-app-prueba", WA_VERIFY_TOKEN: "verificar-prueba-123" };
   entorno = env;
   // Los avisos por correo no salen a internet: se guardan para revisarlos.
   const fetchReal = globalThis.fetch;
@@ -221,6 +231,26 @@ export const iniciarFuncion = async () => {
       if (r instanceof Error) throw r;
       if (typeof r === "number") return new Response("", { status: r });
       return new Response(r ?? "<html>sin datos</html>", { status: 200 });
+    }
+    if (String(url).startsWith("https://graph.facebook.com/") || String(url).startsWith("https://lookaside.prueba/")) {
+      const u = new URL(String(url));
+      const metodo = (init && init.method) || "GET";
+      let cuerpo = null;
+      if (init && typeof init.body === "string") cuerpo = JSON.parse(init.body);
+      else if (init && init.body && typeof init.body.get === "function") cuerpo = { form: true, type: init.body.get("type"), messaging_product: init.body.get("messaging_product") };
+      meta.llamadas.push({ metodo, ruta: u.pathname, cuerpo, auth: init && init.headers && init.headers.authorization });
+      const ok = (d) => new Response(JSON.stringify(d), { status: 200 });
+      if (u.hostname === "lookaside.prueba") { const a = meta.archivos[u.pathname.slice(1)]; return a ? new Response(a.bytes, { status: 200 }) : new Response("", { status: 404 }); }
+      if (u.pathname.endsWith("/message_templates")) return ok({ data: meta.plantillas });
+      if (u.pathname.endsWith("/media") && metodo === "POST") return ok({ id: "mediasal" + ++meta.n });
+      if (u.pathname.endsWith("/messages") && metodo === "POST") {
+        if (meta.fallarEnvio) { const m = meta.fallarEnvio; meta.fallarEnvio = ""; return new Response(JSON.stringify({ error: { message: m, code: 131047 } }), { status: 400 }); }
+        if (cuerpo && cuerpo.status === "read") return ok({ success: true });
+        return ok({ messaging_product: "whatsapp", contacts: [{ wa_id: cuerpo && cuerpo.to }], messages: [{ id: "wamid.SAL" + ++meta.n }] });
+      }
+      const mid = u.pathname.split("/").pop();
+      if (metodo === "GET" && meta.archivos[mid]) return ok({ url: "https://lookaside.prueba/" + mid, mime_type: meta.archivos[mid].mime, file_size: meta.archivos[mid].bytes.length, id: mid });
+      return new Response(JSON.stringify({ error: { message: "no encontrado", code: 100 } }), { status: 404 });
     }
     if (String(url).startsWith("https://api.resend.com/")) { correos.push(JSON.parse(init.body)); return new Response("{}", { status: 200 }); }
     return fetchReal(url, init);

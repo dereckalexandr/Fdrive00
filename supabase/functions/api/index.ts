@@ -21,6 +21,7 @@ import { ventasOp } from "./ventas.ts";
 import { limiteDiario, limiteWeb } from "./patentes-core.js";
 import { publicOp } from "./publico.ts";
 import { correrAlertas } from "./alertas.ts";
+import { webhookWhatsapp } from "./whatsapp.ts";
 
 const sb = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -566,6 +567,11 @@ async function masterOk(email: unknown, password: unknown) {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
+  // Avisos de WhatsApp (Meta): .../functions/v1/api?whatsapp=1. Se autentican con la firma de Meta (WA_APP_SECRET), no con sesión.
+  if (new URL(req.url).searchParams.has("whatsapp")) {
+    try { return await webhookWhatsapp(req, { sb, audit, rolePermOverrides }); }
+    catch (e) { console.error("whatsapp:", e); return new Response("error", { status: 500 }); }
+  }
   // Chequeo de salud para monitores externos (UptimeRobot y similares): responde 200 solo si la base contesta. No devuelve datos.
   if (req.method === "GET" && new URL(req.url).searchParams.has("health")) {
     const t0 = Date.now();

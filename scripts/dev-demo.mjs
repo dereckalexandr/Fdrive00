@@ -131,6 +131,19 @@ await ve(U.e1.token, "leads.create", { cliente: { nombre: "Doña Marta Silva", t
   if (leads[6]) db.tablas.leads.find((l) => l.id === leads[6].lead.id).creado_en = enH(-3);
 }
 
+// WhatsApp de ejemplo: un número nuevo (crea su lead) y un cliente que ya existe, como si Meta avisara.
+{
+  const { createHmac } = await import("node:crypto");
+  const avisoWa = async (from, nombre, body, haceMin) => {
+    const cuerpo = JSON.stringify({ entry: [{ changes: [{ field: "messages", value: { metadata: { phone_number_id: "PNID1" }, contacts: [{ wa_id: from, profile: { name: nombre } }], messages: [{ from, id: `wamid.demo${from}${haceMin}`, timestamp: String(Math.floor(Date.now() / 1000) - haceMin * 60), type: "text", text: { body } }] } }] }] });
+    const firma = "sha256=" + createHmac("sha256", "secreto-app-prueba").update(cuerpo).digest("hex");
+    await manejar(new Request("http://x/api?whatsapp=1", { method: "POST", headers: { "x-hub-signature-256": firma }, body: cuerpo }));
+  };
+  await avisoWa("56944443333", "Carolina Díaz", "Hola! Vi el Hyundai Tucson en Instagram, ¿aceptan auto en parte de pago?", 42);
+  await avisoWa("56944443333", "Carolina Díaz", "Tengo un Mazda 3 del 2017", 40);
+  await avisoWa("56970000000", "Camila", "Hola, ¿a qué hora puedo pasar a verlo mañana?", 7);
+}
+
 // Servidor de la función simulada (misma dirección que la real: /functions/v1/api).
 crearHttp(async (req, res) => {
   const trozos = [];

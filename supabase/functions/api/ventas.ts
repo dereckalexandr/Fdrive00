@@ -19,6 +19,7 @@ import {
   GRUPOS_HOY, clasificarLeadHoy, ordenarHoy, faltaProximaAccion,
   solicitudDeCanal, siguienteLlave,
 } from "./ventas-core.js";
+import { whatsappOp } from "./whatsapp.ts";
 import { tramosEfectivos, calcularProduccion } from "./comisiones-core.js";
 import { enviarAviso, enSegundoPlano, correoActivo } from "./correo.ts";
 import { LIMITE_POR_MINUTO } from "./patentes-core.js";
@@ -583,6 +584,11 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       financieras: FINANCIERAS, locales, etapas: ETAPAS,
       dias_reserva: c.dias_reserva, vigencia_cotizacion_dias: c.vigencia_cotizacion_dias, condiciones_cotizacion: c.condiciones_cotizacion,
     });
+  }
+
+  /* ---------- WhatsApp Business: bandeja y conversaciones ---------- */
+  if (op.startsWith("wa.")) {
+    return await whatsappOp({ sb, json, err, fallo, audit, actor: ctx.actor, userId, userName, esAdmin: ctx.esAdmin, esSupervisor, localId, puedeVer, puedeTocar, enLotes, evento, usaLeads }, op, body);
   }
 
   /* ---------- inventario ---------- */

@@ -29,6 +29,7 @@ import { Hoy, ProximaAccionModal, RegistrarContactoModal, cuando as cuandoTexto 
 import { Miniatura as MiniaturaVehiculo } from "./crm-inventario.jsx";
 import { ListaLeads } from "./crm-leads-lista.jsx";
 import { SeccionCompra, SeccionConsignacion, ModuloCompras } from "./crm-compras.jsx";
+import { BandejaWhatsapp, SeccionWhatsapp, useCadaTanto } from "./crm-whatsapp.jsx";
 import { etapaDeOperacion, etapasDeTipo, ayudaDeEtapa, tipoLeadNombre, TIPOS_LEAD, validarVehiculoOfrecido } from "../supabase/functions/api/compras-core.js";
 import {
   INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, NavegacionLateral, useGuardado, DatosDelDueno, CamposCondiciones, useCarga, mensajeError, CamposVehiculo, aVehiculoForm,
@@ -166,6 +167,7 @@ function LeadFicha({ api, leadId, catalogos, onCerrar, onCambio, onEditar }) {
         {lead.notas && <p className="text-sm text-stone-600 border-t border-stone-100 pt-2">{lead.notas}</p>}
       </div>
 
+      <SeccionWhatsapp api={api} leadId={lead.id} onCambio={onCambio} />
       {esVenta && <SeccionCotizaciones api={api} lead={lead} datos={datos} catalogos={catalogos} avisar={setMsg} onCambio={async () => { await recargar(); onCambio(); }} />}
       {esVenta && <SeccionTasacion api={api} lead={lead} datos={datos} catalogos={catalogos} avisar={setMsg} onCambio={async () => { await recargar(); onCambio(); }} />}
       {tipoLead === "compra" && <SeccionCompra api={api} lead={lead} datos={datos} operacion={operacion} setOperacion={setOperacion} avisar={setMsg} onCambio={async () => { await recargar(); onCambio(); }} />}
@@ -802,7 +804,7 @@ export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador, 
   const can = (p) => esAdmin || permisos.includes(p);
   const usaLeads = can("leads.propios") || can("leads.local") || can("leads.asignar");
   const [localSel, setLocalSel] = useState("");
-  const [tab, setTab] = useGuardado(esAdmin ? "ventas-admin" : "ventas", usaLeads ? "hoy" : "inventario", ["hoy", "inicio", "leads", "agenda", "ventas", "gestion", "tasaciones", "aprobaciones", "compras", "inspecciones", "fichas", "equipo", "validaciones", "anuncios", "marketing", "inventario", "clientes"]);
+  const [tab, setTab] = useGuardado(esAdmin ? "ventas-admin" : "ventas", usaLeads ? "hoy" : "inventario", ["hoy", "inicio", "leads", "whatsapp", "agenda", "ventas", "gestion", "tasaciones", "aprobaciones", "compras", "inspecciones", "fichas", "equipo", "validaciones", "anuncios", "marketing", "inventario", "clientes"]);
   const [version, setVersion] = useState(0);
   const [leadAbierto, setLeadAbierto] = useState(null);
   const [leadEditando, setLeadEditando] = useState(null);
@@ -819,6 +821,9 @@ export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador, 
   const pend = useCarga(() => (puedeAprobar
     ? Promise.all([api("cotizaciones.pendientes").then((r) => r.pendientes.length).catch(() => 0), api("cierres.list", { estado: "pendiente" }).then((r) => r.cierres.length).catch(() => 0), api("reservas.por_validar", {}).then((r) => r.reservas.length).catch(() => 0)]).then(([a, b, c]) => a + b + c)
     : Promise.resolve(0)), [api, version, puedeAprobar]);
+  // Mensajes de WhatsApp sin leer (insignia en la pestaña y aviso en «Hoy»): se revisa cada 30 segundos.
+  const waNoLeidos = useCarga(() => (usaLeads ? api("wa.resumen", {}).then((r) => r.noLeidos || 0).catch(() => 0) : Promise.resolve(0)), [api, version, usaLeads]);
+  useCadaTanto(waNoLeidos.recargar, 30000, usaLeads);
 
   if (cat.cargando && !cat.datos) return <Cargando />;
   if (cat.error && !cat.datos) return <Aviso>{cat.error}</Aviso>;
@@ -832,7 +837,7 @@ export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador, 
   };
   const puedeCompras = can("compras.operar") || can("consignaciones.operar") || can("leads.asignar");
   const opciones = [];
-  if (usaLeads) opciones.push(["hoy", "Hoy"], ["inicio", "Inicio"], ["leads", "Leads"]);
+  if (usaLeads) opciones.push(["hoy", "Hoy"], ["inicio", "Inicio"], ["leads", "Leads"], ["whatsapp", "WhatsApp", waNoLeidos.datos || 0]);
   if (catalogos.puedeAgenda) opciones.push(["agenda", "Agenda"]);
   if (catalogos.puedeComision) opciones.push(["ventas", "Ventas"]);
   if (puedeAprobar) opciones.push(["gestion", "Gestión"], ["tasaciones", "Tasaciones"], ["aprobaciones", "Aprobaciones", pend.datos || 0]);
@@ -847,7 +852,7 @@ export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador, 
   // Si la pestaña recordada ya no está disponible para esta persona, se usa la primera.
   const tabVigente = opciones.some((o) => o[0] === tab) ? tab : (opciones[0] || [])[0];
   const GRUPOS = [
-    { titulo: "Trabajo diario", ids: ["hoy", "inicio", "leads", "agenda", "clientes", "inventario"] },
+    { titulo: "Trabajo diario", ids: ["hoy", "inicio", "leads", "whatsapp", "agenda", "clientes", "inventario"] },
     { titulo: "Comercial", ids: ["ventas", "gestion", "aprobaciones", "compras", "tasaciones", "inspecciones", "fichas", "equipo"] },
     { titulo: "Operación", ids: ["validaciones", "anuncios", "marketing"] },
   ];
@@ -863,6 +868,12 @@ export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador, 
       )}
       <div className="lg:hidden"><Pestanas valor={tabVigente} onCambio={setTab} opciones={opciones} /></div>
       <ErrorBoundary clave={tabVigente}>
+      {tabVigente === "hoy" && (waNoLeidos.datos || 0) > 0 && (
+        <button type="button" onClick={() => setTab("whatsapp")} className="text-left bg-emerald-50 border border-emerald-200 text-emerald-900 px-4 py-3 text-sm rounded-xl hover:bg-emerald-100">
+          💬 Tienes <b>{waNoLeidos.datos}</b> mensaje{waNoLeidos.datos === 1 ? "" : "s"} de WhatsApp sin leer. <span className="underline">Ir a la bandeja</span>
+        </button>
+      )}
+      {tabVigente === "whatsapp" && <BandejaWhatsapp api={api} abrirLead={setLeadAbierto} locales={locales} onCambio={waNoLeidos.recargar} />}
       {tabVigente === "hoy" && <Hoy api={api} catalogos={catalogos} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
       {tabVigente === "inicio" && <Inicio api={api} catalogos={catalogos} abrirLead={setLeadAbierto} irA={setTab} version={version} onCambio={subir} />}
       {tabVigente === "leads" && <Leads api={api} catalogos={catalogos} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
