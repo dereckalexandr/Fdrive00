@@ -13,3 +13,6 @@ npm-debug.log*
 
 # Respaldos de datos (contienen datos personales: nunca se suben)
 respaldos/
+
+# Capturas personales (no se suben al repositorio)
+capturas/
