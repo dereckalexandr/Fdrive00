@@ -297,7 +297,7 @@ test("Cancelar y anular una compra", async () => {
   assert.equal((await ve(U.c1.token, "comisiones.resumen")).ejecutivos[0].datos.comprasN, 0, "sale de la comisión del mes");
 });
 
-test("Número de llave: el vehículo comprado recibe el correlativo libre más bajo del local; al venderse o archivarse se libera", async () => {
+test("Número de llave: todo vehículo que entra al inventario recibe el correlativo libre más bajo del local; al venderse o archivarse se libera", async () => {
   const usadas = () => db.tablas.vehiculos.filter((v) => v.local_id === L1 && v.numero_llave != null).map((v) => v.numero_llave);
   const comprarAprobada = async () => {
     const { compra } = await comprarHastaPago();
@@ -313,9 +313,11 @@ test("Número de llave: el vehículo comprado recibe el correlativo libre más b
   assert.equal(b.numero_llave, siguienteLlave(usadas().filter((n) => n !== b.numero_llave)));
   assert.notEqual(a.numero_llave, b.numero_llave, "no se repite en el local");
 
-  // Un vehículo ingresado a mano (no comprado) no lleva número de llave.
+  // Un vehículo ingresado a mano también lleva número de llave (el siguiente libre).
+  const libre = siguienteLlave(usadas());
   const manual = await vehiculoVendible();
-  assert.equal(fila("vehiculos", manual.id).numero_llave ?? null, null);
+  assert.equal(manual.numero_llave, libre, "la respuesta trae su número");
+  assert.equal(fila("vehiculos", manual.id).numero_llave, libre);
 
   // Se ve en el inventario.
   const inv = await ve(U.jefe.token, "inventario.list");

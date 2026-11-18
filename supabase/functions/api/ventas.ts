@@ -395,19 +395,15 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
   }
 
   /**
-   * Número de llave: lo lleva el vehículo comprado mientras esté en el inventario (activo y no vendido). Al venderse o archivarse se
-   * libera, y el siguiente vehículo comprado toma el número libre más bajo del local. Si la columna aún no existe, no hace nada.
+   * Número de llave: lo lleva todo vehículo mientras esté en el inventario (activo y no vendido), sea comprado, consignado o ingresado
+   * a mano. Al venderse o archivarse se libera, y el siguiente que entra toma el número libre más bajo del local. Si la columna aún no existe, no hace nada.
    */
   async function sincronizarLlave(vehiculoId: string) {
     if (!vehiculoId) return;
     const vq = await sb.from("vehiculos").select("id, local_id, activo, estado, numero_llave").eq("id", vehiculoId).maybeSingle();
     if (vq.error || !vq.data) return;
     const v = vq.data;
-    let lleva = !!v.activo && v.estado !== "vendido" && !!v.local_id;
-    if (lleva && v.numero_llave == null) {
-      const cq = await sb.from("compras").select("id").eq("vehiculo_id", v.id).eq("estado", "comprada");
-      lleva = !cq.error && (cq.data ?? []).length > 0;
-    }
+    const lleva = !!v.activo && v.estado !== "vendido" && !!v.local_id;
     if (!lleva) {
       if (v.numero_llave != null) await sb.from("vehiculos").update({ numero_llave: null }).eq("id", v.id);
       return;
@@ -471,6 +467,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     const vi = await sb.from("vehiculos").insert({ ...vehiculoDeConsignacion(c), local_id: c.local_id, notas: `Consignado: ${folioConsignacion(c.numero)}` }).select().single();
     if (vi.error) { if (vi.error.code === "23505") return { ok: false, error: "patente_duplicada" }; throw vi.error; }
     const ahora = new Date().toISOString();
+    await sincronizarLlave(vi.data.id);
     const { data, error } = await sb.from("consignaciones").update({ estado: "vigente", vehiculo_id: vi.data.id, activada_en: ahora, vence_en: vencimientoConsignacion(ahora, Number(c.plazo_dias)), actualizado_en: ahora }).eq("id", c.id).select().single();
     if (error) throw error;
     await sb.from("leads").update({ etapa: "ganado", actualizado_en: ahora }).eq("id", c.lead_id);
@@ -616,6 +613,9 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
         if (!local) return err("sin_local");
         const { data, error } = await sb.from("vehiculos").insert({ ...v.value, local_id: local, creado_por: ctx.esAdmin ? null : userId }).select().single();
         if (error) return error.code === "23505" ? err("patente_duplicada", 409) : fallo(error);
+        await sincronizarLlave(data.id);
+        const conLlave = await sb.from("vehiculos").select("*").eq("id", data.id).maybeSingle();
+        if (conLlave.data) Object.assign(data, conLlave.data);
         await audit(ctx.actor, "vehiculo.crear", "vehiculo", data.id, { patente: data.patente, marca: data.marca, modelo: data.modelo });
         await crearValidacion({ tipo: "vehiculo", local_id: local, vehiculo_id: data.id, sujeto: sujetoDeVehiculo(data) });
         return json({ vehiculo: data });
@@ -2845,6 +2845,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
         const { data: veh } = await sb.from("vehiculos").select("id, estado").eq("id", c.vehiculo_id).maybeSingle();
         if (!veh || !["preparacion", "disponible"].includes(veh.estado)) return err("vehiculo_en_uso", 409);
         await sb.from("vehiculos").update({ activo: false, actualizado_en: ahora }).eq("id", c.vehiculo_id);
+        await sincronizarLlave(c.vehiculo_id);
       }
       const { data, error } = await sb.from("consignaciones").update({ estado: "devuelta", motivo, actualizado_en: ahora }).eq("id", c.id).select().single();
       if (error) return fallar(error);

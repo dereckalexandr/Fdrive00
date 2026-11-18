@@ -216,7 +216,7 @@ export function Inventario({ api, onCambio }) {
         <table className="w-full border-collapse text-sm">
           <thead>
             <tr className="text-left text-xs uppercase tracking-wide text-stone-400 border-b border-stone-200">
-              <th className="py-3 px-4 w-16" title="Número de llave del vehículo comprado">Llave</th><th className="py-3 px-4">Vehículo</th><th className="py-3 px-4 text-right hidden md:table-cell">Km</th><th className="py-3 px-4 text-right">Precio</th>
+              <th className="py-3 px-4 w-16" title="Número de llave del vehículo">Llave</th><th className="py-3 px-4">Vehículo</th><th className="py-3 px-4 text-right hidden md:table-cell">Km</th><th className="py-3 px-4 text-right">Precio</th>
               {puedeEditar && <th className="py-3 px-4 text-right">Margen</th>}<th className="py-3 px-4">Estado</th><th className="py-3 px-4">{puedeEditar ? "Acciones" : "Revisión"}</th>
             </tr>
           </thead>
@@ -227,7 +227,7 @@ export function Inventario({ api, onCambio }) {
                 <td className="py-3 px-4">
                   {v.numero_llave != null
                     ? <span className="inline-block min-w-[2.5rem] text-center font-mono text-sm font-semibold px-2 py-1 bg-amber-100 text-amber-900 border border-amber-300" title={`Llave N° ${v.numero_llave}`}>🔑 {v.numero_llave}</span>
-                    : <span className="text-stone-300" title="Solo los vehículos comprados llevan número de llave">—</span>}
+                    : <span className="text-stone-300" title="Los vehículos vendidos o archivados no llevan número de llave">—</span>}
                 </td>
                 <td className="py-3 px-4">
                   <div className="flex gap-3">

@@ -81,7 +81,7 @@ export const soloDigitos = (t) => String(t || "").replace(/\D/g, "");
 
 /* ---------- Vehículos ---------- */
 /**
- * Número de llave para un vehículo comprado: el correlativo más bajo que esté libre en el local
+ * Número de llave para un vehículo del inventario: el correlativo más bajo que esté libre en el local
  * (los números de los vehículos vendidos o archivados vuelven a quedar disponibles).
  */
 export function siguienteLlave(usadas) {
