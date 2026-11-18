@@ -19,8 +19,17 @@ export const MEDIOS_PAGO = [
   { id: "parte_pago", nombre: "Vehículo en parte de pago", requiereCuenta: false, requiereRespaldo: false, requiereReferencia: false, referencia: "Patente del vehículo recibido" },
 ];
 
-const IDS = MEDIOS_PAGO.map((m) => m.id);
+/** Medios con que la empresa le paga al dueño en una compra. Los bancarios (y el cheque) salen de una cuenta de la empresa. */
+export const MEDIOS_PAGO_COMPRA = [
+  { id: "transferencia", nombre: "Transferencia bancaria", requiereCuenta: true, requiereRespaldo: true, requiereReferencia: true, referencia: "N° de operación" },
+  { id: "deposito", nombre: "Depósito bancario", requiereCuenta: true, requiereRespaldo: true, requiereReferencia: true, referencia: "N° de depósito" },
+  { id: "vale_vista", nombre: "Vale vista", requiereCuenta: true, requiereRespaldo: true, requiereReferencia: true, referencia: "N° de vale vista" },
+  { id: "cheque", nombre: "Cheque", requiereCuenta: true, requiereRespaldo: true, requiereReferencia: true, referencia: "N° de cheque" },
+  { id: "efectivo", nombre: "Efectivo", requiereCuenta: false, requiereRespaldo: true, requiereReferencia: false, referencia: "N° de recibo (opcional)" },
+];
+
 export const medioDe = (id) => MEDIOS_PAGO.find((m) => m.id === id) || null;
+export const medioCompraDe = (id) => MEDIOS_PAGO_COMPRA.find((m) => m.id === id) || null;
 export const medioNombre = (id) => (medioDe(id) || { nombre: String(id || "") }).nombre;
 export const MAX_ARCHIVOS_PAGO = 4;
 
@@ -36,9 +45,9 @@ const esFecha = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || "")) && !Number.is
  * Un pago que registra el ejecutivo. `hoy` (AAAA-MM-DD, hora de Chile) pone el tope de la fecha: no puede ser futura.
  * @param input { medio, monto, fechaPago, cuentaId, referencia, notas }
  */
-export function validarPago(input, { hoy } = {}) {
+export function validarPago(input, { hoy, medios = MEDIOS_PAGO } = {}) {
   const i = input || {};
-  const medio = medioDe(String(i.medio || ""));
+  const medio = medios.find((m) => m.id === String(i.medio || "")) || null;
   if (!medio) return { ok: false, error: "medio_pago_invalido" };
   const monto = entero(i.monto, 1, 2_000_000_000);
   if (monto === null || Number.isNaN(monto)) return { ok: false, error: "monto_invalido" };
@@ -80,17 +89,17 @@ export function etiquetaCuenta(c) {
  * @param pagos   filas de cierre_pagos (se ignoran las anuladas)
  * @param precio  precio de venta
  */
-export function resumenPagos(pagos, precio) {
+export function resumenPagos(pagos, precio, medios = MEDIOS_PAGO) {
   const vigentes = (pagos || []).filter((p) => p.estado !== "anulado");
   const total = vigentes.reduce((s, p) => s + Number(p.monto || 0), 0);
-  const sinRespaldo = vigentes.filter((p) => (medioDe(p.medio) || {}).requiereRespaldo && (p.archivos || []).length === 0);
+  const sinRespaldo = vigentes.filter((p) => (medios.find((m) => m.id === p.medio) || {}).requiereRespaldo && (p.archivos || []).length === 0);
   const falta = Number(precio) - total;
   return { vigentes, total, falta: Math.max(0, falta), sobra: Math.max(0, -falta), cuadra: falta === 0, sinRespaldo };
 }
 
 /** ¿Los pagos permiten aprobar la venta? Devuelve { ok } o { ok:false, error }. */
-export function verificarPagos(pagos, precio) {
-  const r = resumenPagos(pagos, precio);
+export function verificarPagos(pagos, precio, medios = MEDIOS_PAGO) {
+  const r = resumenPagos(pagos, precio, medios);
   if (r.vigentes.length === 0) return { ok: false, error: "sin_pagos" };
   if (!r.cuadra) return { ok: false, error: "pagos_no_cuadran" };
   if (r.sinRespaldo.length > 0) return { ok: false, error: "pago_sin_respaldo" };

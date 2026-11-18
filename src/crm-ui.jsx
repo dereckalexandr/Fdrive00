@@ -61,6 +61,7 @@ const MENSAJES = {
   duplicado: "Ya existe un registro con esos datos.",
   vehiculo_sin_precio: "Ese vehículo no tiene precio de lista. Pídele a quien edita el inventario que lo cargue.",
   descuento_invalido: "El descuento no es válido: debe ser un monto entre 0 y el precio de lista.",
+  pago_excede_monto: "Con este pago se supera el monto a pagar al dueño.",
   pago_excede_precio: "La parte de pago más el pie superan el precio final.",
   vehiculo_no_disponible: "Ese vehículo ya no está disponible (puede que otra persona lo haya reservado).",
   cotizacion_pendiente: "El descuento aún no está aprobado por el Jefe Local.",

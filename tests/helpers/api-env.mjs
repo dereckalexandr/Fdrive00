@@ -40,6 +40,7 @@ const DEFAULTS = {
   compras: () => ({ id: randomUUID(), numero: ++contadorCompras, estado: "oferta", vehiculo: {}, motivo: null, monto_final: null, mes: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
   consignaciones: () => ({ id: randomUUID(), numero: ++contadorConsig, estado: "en_validacion", vehiculo: {}, plazo_dias: 90, vence_en: null, motivo: null, cierre_id: null, precio_venta: null, margen: null, mes: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
   cierre_pagos: () => ({ id: randomUUID(), estado: "vigente", archivos: [], cuenta_id: null, cuenta_detalle: null, referencia: null, notas: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
+  compra_pagos: () => ({ id: randomUUID(), estado: "vigente", archivos: [], cuenta_id: null, cuenta_detalle: null, referencia: null, notas: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
   cuentas_empresa: () => ({ id: randomUUID(), activa: true, local_id: null, tipo_cuenta: null, titular: null, rut_titular: null, alias: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
   avisos: () => ({ id: randomUUID(), leido_en: null, creado_en: new Date().toISOString() }),
   cierres: () => ({ id: randomUUID(), numero: ++contadorCierres, estado: "pendiente", mes: null, aprobado_por: null, aprobado_en: null, motivo_rechazo: null, anulado_por: null, anulado_en: null, motivo_anulacion: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
@@ -65,7 +66,7 @@ function patronARegex(patron, insensible) {
 }
 
 export function crearBaseFalsa() {
-  const tablas = { usuarios: [], locales: [], roles_permisos: [], bitacora: [], config_negocio: [], kv_store: [], vehiculos: [], clientes: [], leads: [], lead_eventos: [], tareas: [], cotizaciones: [], reservas: [], cierres: [], avisos: [], tasaciones: [], inspecciones: [], validaciones: [], validacion_docs: [], anuncios: [], anuncio_portales: [], campanias: [], publicaciones_rrss: [], material_vehiculo: [], compras: [], consignaciones: [], cierre_pagos: [], cuentas_empresa: [], patentes_consultadas: [], alertas_leads: [] };
+  const tablas = { usuarios: [], locales: [], roles_permisos: [], bitacora: [], config_negocio: [], kv_store: [], vehiculos: [], clientes: [], leads: [], lead_eventos: [], tareas: [], cotizaciones: [], reservas: [], cierres: [], avisos: [], tasaciones: [], inspecciones: [], validaciones: [], validacion_docs: [], anuncios: [], anuncio_portales: [], campanias: [], publicaciones_rrss: [], material_vehiculo: [], compras: [], consignaciones: [], cierre_pagos: [], compra_pagos: [], cuentas_empresa: [], patentes_consultadas: [], alertas_leads: [] };
   const consultas = [];
 
   function builder(nombre) {
@@ -148,6 +149,18 @@ let handler;
 export let db;
 /** Correos que la función habría enviado (uno por destinatario). */
 export const correos = [];
+
+/** Deja registrado (directo en la base falsa) el pago al dueño que cubre el monto de una compra, para las pruebas que solo necesitan aprobarla. */
+export function pagarCompra(compraId) {
+  const c = db.tablas.compras.find((x) => x.id === compraId);
+  if (!c) throw new Error("pagarCompra: no existe la compra " + compraId);
+  if (db.tablas.compra_pagos.some((p) => p.compra_id === compraId && p.estado !== "anulado")) return;
+  db.tablas.compra_pagos.push({
+    id: randomUUID(), numero: db.tablas.compra_pagos.length + 1, compra_id: c.id, local_id: c.local_id ?? null, medio: "efectivo", monto: Number(c.monto_final ?? c.monto_oferta),
+    fecha_pago: "2026-11-01", estado: "vigente", archivos: [{ id: "archcmp00001", nombre: "recibo.jpg", tipo: "image/jpeg", tam: 1000 }], cuenta_id: null, cuenta_detalle: null,
+    referencia: null, notas: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString(),
+  });
+}
 
 /** El pago de una reserva (efectivo con su respaldo) para las pruebas que solo necesitan reservar. */
 export const pagoReserva = () => ({ medio: "efectivo", fechaPago: new Date().toLocaleDateString("en-CA", { timeZone: "America/Santiago" }), archivos: [{ id: "archres" + randomUUID().slice(0, 8).replace(/-/g, ""), nombre: "recibo.jpg", tipo: "image/jpeg", tam: 1000 }] });

@@ -3,7 +3,7 @@
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { iniciarFuncion, api, nuevaIp, loginAdmin, crm, db, correos, pagarTodo, pagoReserva } from "./helpers/api-env.mjs";
+import { iniciarFuncion, api, nuevaIp, loginAdmin, crm, db, correos, pagarTodo, pagoReserva, pagarCompra } from "./helpers/api-env.mjs";
 import { mesChile } from "../supabase/functions/api/ventas-core.js";
 import { reglaDocCompra } from "../supabase/functions/api/validaciones-core.js";
 
@@ -220,6 +220,7 @@ test("Pago: lo pagado no supera la oferta, y el supervisor lo aprueba (el vehíc
   assert.equal(rp.compra.motivo_rechazo_pago, "Falta el comprobante");
   assert.equal((await sol(PAGO({ montoFinal: 6200000 }))).compra.estado, "pago_pendiente");
 
+  pagarCompra(U.compra1.id);
   const ap = await ve(U.jefe.token, "compras.aprobar", { id: U.compra1.id });
   assert.equal(ap.status, 200, JSON.stringify(ap));
   assert.equal(ap.compra.estado, "comprada");
@@ -263,6 +264,7 @@ test("Patente repetida: no entra un vehículo que ya está activo en el inventar
   await ve(U.c1.token, "compras.responder", { id: o.compra.id, acepta: true });
   await cumplirRequisitos(o.compra.id);
   await ve(U.c1.token, "compras.solicitarPago", { id: o.compra.id, datos: PAGO() });
+  pagarCompra(o.compra.id);
   const ap = await ve(U.jefe.token, "compras.aprobar", { id: o.compra.id });
   assert.equal(ap.error, "patente_duplicada");
   assert.equal(ap.status, 409);
@@ -468,6 +470,7 @@ test("Con Validadores: la compra espera sus documentos; la consignación espera 
     const rv = await ve(U.val.token, "validacion.revisar", { id: val.id, docId: d.id, estado: "aprobado" });
     assert.equal(rv.status, 200, d.clave + " " + JSON.stringify(rv));
   }
+  pagarCompra(compra.id);
   const ap = await ve(U.jefe.token, "compras.aprobar", { id: compra.id });
   assert.equal(ap.status, 200, JSON.stringify(ap));
   // Los documentos del vehículo ya aprobados pasan al vehículo nuevo.
@@ -691,6 +694,7 @@ test("Compra: sin los datos del vendedor y los 11 documentos no se pide el pago,
   // Con Validador en el local, además revisa los documentos.
   assert.equal((await ve(U.val.token, "validacion.tomar", { id: rq.validacionId })).status, 200);
   for (const d of db.tablas.validacion_docs.filter((x) => x.validacion_id === rq.validacionId)) assert.equal((await ve(U.val.token, "validacion.revisar", { id: rq.validacionId, docId: d.id, estado: "aprobado" })).status, 200);
+  pagarCompra(o.compra.id);
   const ap = await ve(U.jefe.token, "compras.aprobar", { id: o.compra.id });
   assert.equal(ap.status, 200, JSON.stringify(ap));
 
@@ -939,4 +943,61 @@ test("Pedir el pago: si el Jefe Local ya aprobó los documentos, no hace falta e
     fila("usuarios", U.vv.id).activo = false;
     db.tablas.validaciones.forEach((v) => { if (!v.enviada_en) v.enviada_en = new Date().toISOString(); });
   }
+});
+
+test("Pagos al dueño en una compra: uno por uno, con la cuenta de la empresa desde la que se pagó y su respaldo; la compra solo se aprueba si cuadran", async () => {
+  const hoyCL = hoy();
+  let n = 0;
+  const arch = () => ({ id: `archcp${String(100000 + ++n)}`, nombre: "comprobante.pdf", tipo: "application/pdf", tam: 50000 });
+  const cta = (await ve(admin, "cuentas.save", { datos: { banco: "Banco de Chile", tipoCuenta: "Cuenta corriente", numeroCuenta: "00112233", alias: "Chile compras" } })).cuenta;
+  const { compra } = await comprarHastaPago();
+  const id = compra.id;
+  assert.equal(compra.monto_final, 5800000);
+  // Los documentos ya están validados: aquí solo se prueban los pagos.
+  db.tablas.validaciones.filter((v) => v.compra_id === id).forEach((v) => { v.estado = "aprobada"; });
+  assert.equal((await ve(U.jefe.token, "compras.aprobar", { id })).error, "sin_pagos", "sin pagos al dueño no se aprueba");
+
+  const lista0 = await ve(U.c1.token, "compras.pagos", { id });
+  assert.equal(lista0.monto, 5800000);
+  assert.equal(lista0.puedeEditar, true);
+  assert.ok(lista0.cuentas.some((c) => c.id === cta.id), "el ejecutivo elige entre las cuentas de la empresa");
+
+  const reg = (token, pago) => ve(token, "compras.pago_registrar", { id, pago });
+  const base = { medio: "transferencia", monto: 3000000, fechaPago: hoyCL, cuentaId: cta.id, referencia: "TRX-5501", archivos: [arch()] };
+  assert.equal((await reg(U.c1.token, { ...base, cuentaId: "" })).error, "cuenta_requerida", "la transferencia exige la cuenta de origen");
+  assert.equal((await reg(U.c1.token, { ...base, medio: "cheque", cuentaId: "", referencia: "CH-1" })).error, "cuenta_requerida", "el cheque sale de una cuenta de la empresa");
+  assert.equal((await reg(U.c1.token, { ...base, medio: "tarjeta" })).error, "medio_pago_invalido", "a un dueño no se le paga con tarjeta");
+  assert.equal((await reg(U.c1.token, { ...base, archivos: [] })).error, "respaldo_requerido");
+  assert.equal((await reg(U.c1.token, { ...base, monto: 9000000 })).error, "pago_excede_monto");
+  assert.equal((await reg(U.c2.token, base)).status, 404, "otro ejecutivo no ve la compra");
+
+  const p1 = await reg(U.c1.token, base);
+  assert.equal(p1.status, 200, JSON.stringify(p1));
+  assert.equal(p1.pago.medio_nombre, "Transferencia bancaria");
+  assert.match(p1.pago.cuenta, /Chile compras/);
+  assert.equal((await ve(U.jefe.token, "compras.aprobar", { id })).error, "pagos_no_cuadran");
+
+  const mal = await reg(U.c1.token, { medio: "efectivo", monto: 1000000, fechaPago: hoyCL, archivos: [arch()] });
+  assert.equal(mal.status, 200, JSON.stringify(mal));
+  assert.equal((await ve(U.c1.token, "compras.pago_anular", { id, pagoId: mal.pago.id, motivo: "Se pagó por vale vista" })).status, 200);
+  assert.equal((await reg(U.c1.token, { medio: "vale_vista", monto: 2800000, fechaPago: hoyCL, cuentaId: cta.id, referencia: "VV-7788", archivos: [arch()] })).status, 200);
+  const r = await ve(U.c1.token, "compras.pagos", { id });
+  assert.equal(r.resumen.total, 5800000);
+  assert.equal(r.resumen.cuadra, true);
+
+  const ap = await ve(U.jefe.token, "compras.aprobar", { id });
+  assert.equal(ap.status, 200, JSON.stringify(ap));
+  assert.equal(ap.compra.estado, "comprada");
+  assert.equal((await reg(U.c1.token, base)).error, "compra_estado_invalido", "comprada: ya no se agregan pagos");
+  assert.equal((await ve(U.c1.token, "compras.pagos", { id })).puedeEditar, false);
+
+  // La nota de compra detalla cada pago con la cuenta de origen.
+  const nota = (await ve(U.c1.token, "compras.nota", { id })).nota;
+  assert.equal(nota.detalle_pagos.length, 2, "los anulados no salen");
+  const vv = nota.detalle_pagos.find((p) => p.medio_nombre === "Vale vista");
+  assert.equal(vv.monto, 2800000);
+  assert.match(vv.cuenta, /Chile compras/);
+  assert.equal(vv.referencia, "VV-7788");
+  const { buildNotaCompraPdf } = await import("../src/pdf-report.js");
+  assert.equal(String.fromCharCode(...buildNotaCompraPdf(nota, { fmt: (v) => `$${v}` }).slice(0, 5)), "%PDF-");
 });

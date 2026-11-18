@@ -7,7 +7,7 @@
  * ----------------------------------------------------------------
  */
 import React, { useState } from "react";
-import { MEDIOS_PAGO, medioDe, MAX_ARCHIVOS_PAGO } from "../supabase/functions/api/pagos-core.js";
+import { MEDIOS_PAGO, MEDIOS_PAGO_COMPRA, medioDe, MAX_ARCHIVOS_PAGO } from "../supabase/functions/api/pagos-core.js";
 import { claveArchivo, MAX_BYTES_ARCHIVO } from "../supabase/functions/api/validaciones-core.js";
 import { compressImage, makePhotoId } from "./photos.js";
 import { InputDinero } from "./campo-dinero.jsx";
@@ -26,8 +26,8 @@ const leerComoDataUrl = (file) => new Promise((resolve, reject) => {
 export const FORM_VACIO = { medio: "transferencia", monto: "", fechaPago: hoyISO(), cuentaId: "", referencia: "", notas: "" };
 
 /** ¿Están todos los datos de un pago? (monto solo si el formulario lo pide). */
-export function pagoListo(f, archivos, { conMonto = true } = {}) {
-  const medio = medioDe(f.medio);
+export function pagoListo(f, archivos, { conMonto = true, medios = MEDIOS_PAGO } = {}) {
+  const medio = medios.find((m) => m.id === f.medio) || null;
   return !!medio && (!conMonto || Number(f.monto) > 0) && !!f.fechaPago && (!medio.requiereCuenta || !!f.cuentaId)
     && (!medio.requiereReferencia || f.referencia.trim().length >= 3) && (!medio.requiereRespaldo || archivos.length > 0);
 }
@@ -54,8 +54,8 @@ export const metaRespaldos = (archivos) => archivos.map(({ id, nombre, tipo, tam
  * Los campos de un pago: medio, monto (opcional), fecha, cuenta de la empresa (si fue por banco), referencia, nota y respaldos.
  * El que lo usa guarda el estado (f y archivos) y decide qué hacer al enviar.
  */
-export function CamposPago({ f, setF, archivos, setArchivos, cuentas, avisar, conMonto = true, ayudaMonto }) {
-  const medio = medioDe(f.medio);
+export function CamposPago({ f, setF, archivos, setArchivos, cuentas, avisar, conMonto = true, ayudaMonto, medios = MEDIOS_PAGO, etiquetaCuenta = "¿En qué cuenta de la empresa se pagó? *" }) {
+  const medio = medios.find((m) => m.id === f.medio) || medios[0];
   const elegirArchivos = async (ev) => {
     const lista = Array.from(ev.target.files || []);
     ev.target.value = "";
@@ -77,12 +77,12 @@ export function CamposPago({ f, setF, archivos, setArchivos, cuentas, avisar, co
     <>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <Campo etiqueta="Medio de pago *">
-          <select value={f.medio} onChange={(e) => setF({ ...f, medio: e.target.value, cuentaId: "" })} className={INPUT}>{MEDIOS_PAGO.map((m) => <option key={m.id} value={m.id}>{m.nombre}</option>)}</select>
+          <select value={f.medio} onChange={(e) => setF({ ...f, medio: e.target.value, cuentaId: "" })} className={INPUT}>{medios.map((m) => <option key={m.id} value={m.id}>{m.nombre}</option>)}</select>
         </Campo>
         {conMonto && <Campo etiqueta="Monto ($) *" ayuda={ayudaMonto}><InputDinero value={f.monto} onChange={(e) => setF({ ...f, monto: e.target.value })} className={INPUT} /></Campo>}
         <Campo etiqueta="Fecha del pago *"><input type="date" value={f.fechaPago} max={hoyISO()} onChange={(e) => setF({ ...f, fechaPago: e.target.value })} className={INPUT} /></Campo>
         {medio.requiereCuenta && (
-          <Campo etiqueta="¿En qué cuenta de la empresa se pagó? *" ayuda={cuentas.length === 0 ? "No hay cuentas registradas: pídele al Administrador que las agregue." : undefined} className="md:col-span-2">
+          <Campo etiqueta={etiquetaCuenta} ayuda={cuentas.length === 0 ? "No hay cuentas registradas: pídele al Administrador que las agregue." : undefined} className="md:col-span-2">
             <select value={f.cuentaId} onChange={(e) => setF({ ...f, cuentaId: e.target.value })} className={INPUT}>
               <option value="">Elige la cuenta…</option>
               {cuentas.map((c) => <option key={c.id} value={c.id}>{c.etiqueta}</option>)}
@@ -304,6 +304,96 @@ export function ReservasPorValidar({ api, version = 0, onCambio = () => {}, abri
           <PagoReserva api={api} reserva={r} puedeValidar puedeCorregir={false} onCambio={cambio} avisar={setMsg} />
         </div>
       ))}
+    </div>
+  );
+}
+
+/**
+ * Pagos que la empresa le hace al dueño en una compra: cada uno con su medio, monto, fecha, la cuenta de la empresa DESDE la que se pagó,
+ * la referencia y el respaldo. La compra se aprueba solo cuando suman el monto a pagar. Con la compra concretada quedan de solo lectura.
+ */
+export function PagosCompra({ api, compra, avisar, onCambio = () => {} }) {
+  const [version, setVersion] = useState(0);
+  const [anulando, setAnulando] = useState("");
+  const [motivo, setMotivo] = useState("");
+  const [ocupado, setOcupado] = useState(false);
+  const [f, setF] = useState({ ...FORM_VACIO, monto: "" });
+  const [archivos, setArchivos] = useState([]);
+  const { cargando, error, datos, recargar } = useCarga(() => api("compras.pagos", { id: compra.id }), [api, compra.id, compra.estado, compra.monto_final, version]);
+  if (cargando && !datos) return <Cargando />;
+  if (error && !datos) return <Aviso>{error}</Aviso>;
+  const vigentes = datos.pagos.filter((p) => p.estado !== "anulado");
+  const anulados = datos.pagos.filter((p) => p.estado === "anulado");
+  const r = datos.resumen;
+  const cambio = async () => { await recargar(); setVersion((v) => v + 1); onCambio(); };
+  const registrar = async () => {
+    avisar(""); setOcupado(true);
+    let subidos = [];
+    try {
+      subidos = await subirRespaldos(compra.id, archivos);
+      const medio = MEDIOS_PAGO_COMPRA.find((m) => m.id === f.medio);
+      await api("compras.pago_registrar", { id: compra.id, pago: { ...f, monto: Number(f.monto || r.falta), cuentaId: medio.requiereCuenta ? f.cuentaId : "", archivos: metaRespaldos(archivos) } });
+      setArchivos([]); setF({ ...FORM_VACIO, monto: "" });
+      await cambio();
+    } catch (e) { await limpiarRespaldos(compra.id, subidos); avisar(mensajeError(e)); }
+    setOcupado(false);
+  };
+  const anular = async (p) => {
+    avisar(""); setOcupado(true);
+    try { await api("compras.pago_anular", { id: compra.id, pagoId: p.id, motivo }); setAnulando(""); setMotivo(""); await cambio(); } catch (e) { avisar(mensajeError(e)); }
+    setOcupado(false);
+  };
+  const montoForm = f.monto === "" && r.falta > 0 ? { ...f, monto: String(r.falta) } : f;
+
+  return (
+    <div className="flex flex-col gap-2 border-t border-stone-100 pt-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-xs uppercase tracking-wide text-stone-500">Pagos al dueño</p>
+        <span className={`text-xs px-2 py-0.5 ${r.cuadra ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
+          {r.cuadra ? `Cuadran: ${clp(r.total)}` : r.sobra > 0 ? `Sobran ${clp(r.sobra)}` : `Registrado ${clp(r.total)} de ${clp(datos.monto)} · faltan ${clp(r.falta)}`}
+        </span>
+        {!datos.montoDefinido && <span className="text-xs text-stone-500">(monto de la oferta; al pedir la aprobación se fija el monto final)</span>}
+        {r.sinRespaldo > 0 && <span className="text-xs px-2 py-0.5 bg-rose-100 text-rose-800">{r.sinRespaldo} pago(s) sin respaldo</span>}
+      </div>
+      {vigentes.length === 0 && <p className="text-xs text-stone-500">Aún no hay pagos registrados. La compra se aprueba cuando los pagos suman el monto a pagar y cada uno trae su respaldo.</p>}
+      {vigentes.length > 0 && (
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-xs">
+            <thead><tr className="text-left uppercase tracking-wide text-stone-400 border-b border-stone-200"><th className="py-1.5 pr-3">Fecha</th><th className="pr-3">Medio</th><th className="pr-3">Desde la cuenta</th><th className="pr-3">Referencia</th><th className="pr-3">Respaldo</th><th className="text-right">Monto</th><th></th></tr></thead>
+            <tbody>
+              {vigentes.map((p) => (
+                <tr key={p.id} className="border-b border-stone-100 align-top">
+                  <td className="py-1.5 pr-3 whitespace-nowrap">{fechaCorta(p.fecha_pago)}</td>
+                  <td className="pr-3">{p.medio_nombre}</td>
+                  <td className="pr-3">{p.cuenta || "—"}</td>
+                  <td className="pr-3">{p.referencia || "—"}</td>
+                  <td className="pr-3">{(p.archivos || []).map((a) => (
+                    <button key={a.id} type="button" onClick={() => abrirArchivo(compra.id, a)} className="text-sky-700 hover:underline mr-2 whitespace-nowrap">{a.tipo === "application/pdf" ? "📄" : "🖼"} {a.nombre.length > 18 ? `${a.nombre.slice(0, 16)}…` : a.nombre}</button>
+                  ))}</td>
+                  <td className="text-right font-mono whitespace-nowrap">{clp(p.monto)}</td>
+                  <td className="text-right pl-2">{datos.puedeEditar && <button disabled={ocupado} onClick={() => { setAnulando(p.id); setMotivo(""); }} className="text-rose-600 hover:underline">Anular</button>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {anulando && (
+        <div className="flex flex-wrap items-center gap-2">
+          <input value={motivo} onChange={(e) => setMotivo(e.target.value)} placeholder="Motivo de la anulación" className={`${INPUT} md:w-72`} />
+          <button disabled={ocupado || motivo.trim().length < 3} onClick={() => anular(vigentes.find((p) => p.id === anulando))} className={BTN_PRIMARIO}>Anular pago</button>
+          <button onClick={() => setAnulando("")} className={BTN}>Cancelar</button>
+        </div>
+      )}
+      {anulados.length > 0 && <p className="text-xs text-stone-400">{anulados.length} pago(s) anulado(s): {anulados.map((p) => `${clp(p.monto)} (${p.medio_nombre})`).join(", ")}.</p>}
+      {datos.puedeEditar && r.falta > 0 && (
+        <div className="border border-stone-200 bg-stone-50 p-3 flex flex-col gap-3">
+          <p className="text-xs uppercase tracking-wide text-stone-500">Registrar un pago al dueño</p>
+          <CamposPago f={montoForm} setF={setF} archivos={archivos} setArchivos={setArchivos} cuentas={datos.cuentas} avisar={avisar} medios={MEDIOS_PAGO_COMPRA}
+            etiquetaCuenta="¿Desde qué cuenta de la empresa se pagó? *" ayudaMonto={`Falta ${clp(r.falta)}`} />
+          <div><button disabled={ocupado || !pagoListo(montoForm, archivos, { medios: MEDIOS_PAGO_COMPRA })} onClick={registrar} className={BTN_AMBAR}>{ocupado ? "Guardando…" : "Registrar pago"}</button></div>
+        </div>
+      )}
     </div>
   );
 }

@@ -487,6 +487,15 @@ export function buildNotaCompraPdf(n, { fmt }) {
   pdf.sectionBar("Pago");
   pdf.totalLine("Monto pagado al vendedor", fmt(n.monto_final), { big: true });
   pdf.fields([["MEDIO DE PAGO", n.medio_pago], ["FECHA DE PAGO", n.fecha_pago ? fechaLarga(String(n.fecha_pago).slice(0, 10)) : ""]]);
+  // Cada pago al dueño: fecha, medio, cuenta de la empresa desde la que se pagó, referencia y cuántos respaldos tiene.
+  if ((n.detalle_pagos || []).length) {
+    pdf.sectionBar("Detalle de cada pago al vendedor");
+    for (const p of n.detalle_pagos) {
+      const partes = [p.fecha_pago ? fechaLarga(String(p.fecha_pago).slice(0, 10)) : "", p.medio_nombre, p.cuenta ? `desde ${p.cuenta}` : "", p.referencia ? `ref. ${p.referencia}` : "", p.respaldos ? `${p.respaldos} respaldo${p.respaldos === 1 ? "" : "s"}` : ""].filter(Boolean);
+      const etiqueta = partes.join(" · ");
+      pdf.totalLine(etiqueta.length > 88 ? `${etiqueta.slice(0, 85)}...` : etiqueta, fmt(p.monto), { bold: false });
+    }
+  }
   const f = (d) => (d ? fechaLarga(String(d).slice(0, 10)) : "");
   pdf.sectionBar("Documentos con vencimiento");
   pdf.fields([

@@ -19,6 +19,7 @@ import { COMUNAS_CHILE } from "../supabase/functions/api/comunas-chile.js";
 import { topeDeOferta } from "../supabase/functions/api/tasaciones-core.js";
 import { ValidacionDetalle } from "./crm-validaciones.jsx";
 import { buildNotaCompraPdf, buildComprobanteConsignacionPdf, buildContratoConsignacionPdf } from "./pdf-report.js";
+import { PagosCompra } from "./crm-pagos.jsx";
 import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, hace, Aviso, Cargando, Tarjeta, Campo, Pestanas, useCarga, mensajeError, DatosDelDueno, CuentaBancaria } from "./crm-ui.jsx";
 
 const COLOR_COMPRA = { oferta: "bg-amber-100 text-amber-800", aceptada: "bg-sky-100 text-sky-800", pago_pendiente: "bg-violet-100 text-violet-800", comprada: "bg-emerald-100 text-emerald-800", rechazada: "bg-stone-200 text-stone-600", anulada: "bg-stone-200 text-stone-600", cancelada: "bg-stone-200 text-stone-600" };
@@ -252,6 +253,7 @@ function Compra({ api, c, puedeOperar, puedeAprobar, cerrado, onCambio, avisar }
         </div>
       )}
 
+      {["aceptada", "pago_pendiente", "comprada"].includes(c.estado) && <PagosCompra api={api} compra={c} avisar={avisar} onCambio={onCambio} />}
       {modo === "pago" && (
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end border-t border-stone-100 pt-3">
           <Campo etiqueta="Monto a pagar ($)" ayuda={`Hasta ${clp(c.monto_oferta)}`}><InputDinero value={pago.montoFinal} onChange={(e) => setPago({ ...pago, montoFinal: e.target.value })} className={`${INPUT} font-mono`} /></Campo>

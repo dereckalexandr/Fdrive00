@@ -50,7 +50,7 @@ import {
   filaDoc, reglaDocCompra as reglaDoc, archivoPermitidoParaDoc, validarDatosDoc, validarDatosCliente, faltantesCompra, faltantesConsignacion, esChecklistCompraActual, validarCuentaBancaria, DOCS_COMPRA, DOCS_CONSIGNACION, TIPOS_CON_REGLAS,
 } from "./validaciones-core.js";
 import { validarContratoCompraventa } from "./contrato-compraventa-core.js";
-import { validarPago, validarCuentaEmpresa, etiquetaCuenta, resumenPagos, verificarPagos, medioNombre, medioDe, MAX_ARCHIVOS_PAGO } from "./pagos-core.js";
+import { validarPago, validarCuentaEmpresa, etiquetaCuenta, resumenPagos, verificarPagos, medioNombre, medioDe, MAX_ARCHIVOS_PAGO, MEDIOS_PAGO_COMPRA, medioCompraDe } from "./pagos-core.js";
 import {
   folioInspeccion, VEREDICTOS, validarSolicitudInspeccion, validarReprogramacion, validarResultadoInspeccion, claveEsDe,
   validarTransicionInspeccion, resolverLugar, idDeClave, ordenarAgenda, hayChoque, metricasInspector, colaInspecciones,
@@ -412,6 +412,9 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       const vq = await sb.from("validaciones").select("*").eq("compra_id", c.id);
       valCompra = (vq.data ?? []).find((x: any) => x.estado === "aprobada") || null;
     }
+    // Los pagos al dueño deben sumar el monto final y traer su respaldo (si la tabla de pagos aún no existe, no se exige).
+    const pagosC = await pagosDeCompra(c.id);
+    if (pagosC) { const vp = verificarPagos(pagosC, c.monto_final, MEDIOS_PAGO_COMPRA); if (!vp.ok) return { ok: false, error: vp.error }; }
     const { data: tas } = c.tasacion_id ? await sb.from("tasaciones").select("*").eq("id", c.tasacion_id).maybeSingle() : { data: null };
     const vv = vehiculoDeCompra(c, tas);
     const dup = await sb.from("vehiculos").select("id").eq("patente", vv.patente).eq("activo", true);
@@ -2280,6 +2283,8 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       });
     };
     const compraDetalle = async (c: any) => ({ compra: (await enriquecerCompras([c]))[0], puedeAprobar: esSupervisor, puedeOperar: opera });
+    const conMedioCompra = (p: any) => ({ ...p, medio_nombre: (medioCompraDe(p.medio) || { nombre: p.medio }).nombre, cuenta: p.cuenta_detalle ? etiquetaCuenta(p.cuenta_detalle) : "" });
+    const pagosEditables = (c: any) => c.estado === "aceptada" || c.estado === "pago_pendiente";
 
     if (op === "compras.list") {
       const vista = String(body.vista ?? "");
@@ -2364,6 +2369,9 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
           permiso: { vence_en: reg("permiso_circulacion").vence_en ?? null, precio: reg("permiso_circulacion").precio ?? null },
           revision_tecnica: { vence_en: reg("revision_tecnica").vence_en ?? null }, soap: { vence_en: reg("soap").vence_en ?? null },
           documentos: r.aplica ? DOCS_COMPRA.map((d) => d.nombre) : [],
+          detalle_pagos: ((await pagosDeCompra(c.id)) ?? []).filter((p: any) => p.estado !== "anulado").map(conMedioCompra).map((p: any) => ({
+            medio_nombre: p.medio_nombre, monto: Number(p.monto), fecha_pago: p.fecha_pago, cuenta: p.cuenta, referencia: p.referencia || "", respaldos: (p.archivos ?? []).length,
+          })),
         },
       });
     }
@@ -2461,10 +2469,70 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       if (esSupervisor) {
         const ap = await aprobarCompra(data);
         if (ap.ok) return json(await compraDetalle(ap.compra));
-        if (ap.error !== "validacion_pendiente") return err(ap.error!, 409);
+        if (!["validacion_pendiente", "sin_pagos", "pagos_no_cuadran", "pago_sin_respaldo"].includes(ap.error!)) return err(ap.error!, 409);
       }
       return json(await compraDetalle(data));
     }
+    /* ---------- pagos al dueño (uno por uno, con la cuenta de la empresa desde la que se pagó y su respaldo) ---------- */
+
+    if (op === "compras.pagos") {
+      const c = await cargarCompra(String(body.id ?? ""));
+      if (!c || !veCompra(c)) return err("no_existe", 404);
+      const pagos = (await pagosDeCompra(c.id)) ?? [];
+      const puedeEditar = pagosEditables(c) && (esSupervisor || (opera && c.ejecutivo_id === userId));
+      const r = resumenPagos(pagos, montoAPagar(c), MEDIOS_PAGO_COMPRA);
+      return json({
+        pagos: pagos.map(conMedioCompra), puedeEditar, monto: montoAPagar(c), montoDefinido: c.monto_final != null,
+        resumen: { total: r.total, falta: r.falta, sobra: r.sobra, cuadra: r.cuadra, sinRespaldo: r.sinRespaldo.length },
+        cuentas: puedeEditar ? (await cuentasDelLocal(c.local_id, true)).map(conEtiqueta) : [],
+      });
+    }
+
+    if (op === "compras.pago_registrar") {
+      const c = await cargarCompra(String(body.id ?? ""));
+      if (!c || !veCompra(c)) return err("no_existe", 404);
+      if (!esSupervisor && !(opera && c.ejecutivo_id === userId)) return err("forbidden", 403);
+      if (!pagosEditables(c)) return err("compra_estado_invalido", 409);
+      const hoy = new Date().toLocaleDateString("en-CA", { timeZone: "America/Santiago" });
+      const v = validarPago(body.pago, { hoy, medios: MEDIOS_PAGO_COMPRA });
+      if (!v.ok) return err(v.error!);
+      const medio = medioCompraDe(v.value.medio)!;
+      let cuenta: any = null;
+      if (medio.requiereCuenta) {
+        cuenta = (await cuentasDelLocal(c.local_id, true)).find((x: any) => x.id === v.value.cuenta_id) ?? null;
+        if (!cuenta) return err("cuenta_invalida");
+      }
+      const ar = archivosDePago(body.pago?.archivos, c.id, medio);
+      if (ar.error) return err(ar.error);
+      const previos = (await pagosDeCompra(c.id)) ?? [];
+      if (resumenPagos(previos, montoAPagar(c), MEDIOS_PAGO_COMPRA).total + v.value.monto > montoAPagar(c)) return err("pago_excede_monto", 409);
+      const ins = await sb.from("compra_pagos").insert({
+        ...v.value, compra_id: c.id, local_id: c.local_id, archivos: ar.archivos, registrado_por: userName,
+        cuenta_detalle: cuenta ? { banco: cuenta.banco, tipo_cuenta: cuenta.tipo_cuenta, numero_cuenta: cuenta.numero_cuenta, alias: cuenta.alias } : null,
+      }).select().single();
+      if (ins.error) return fallar(ins.error);
+      await evento(c.lead_id, "compra", `${userName} registró un pago al dueño de ${dinero(v.value.monto)} (${medio.nombre}${cuenta ? `, desde la cuenta ${etiquetaCuenta(cuenta)}` : ""}) de la compra ${folioCompra(c.numero)}`);
+      await audit(ctx.actor, "compra.pago_registrar", "compra", c.id, { numero: c.numero, medio: v.value.medio, monto: v.value.monto, cuenta_id: v.value.cuenta_id });
+      return json({ pago: conMedioCompra(ins.data) });
+    }
+
+    if (op === "compras.pago_anular") {
+      const c = await cargarCompra(String(body.id ?? ""));
+      if (!c || !veCompra(c)) return err("no_existe", 404);
+      if (!esSupervisor && !(opera && c.ejecutivo_id === userId)) return err("forbidden", 403);
+      if (!pagosEditables(c)) return err("compra_estado_invalido", 409);
+      const motivo = String(body.motivo ?? "").trim().slice(0, 200);
+      if (motivo.length < 3) return err("motivo_requerido");
+      const p = ((await pagosDeCompra(c.id)) ?? []).find((x: any) => x.id === String(body.pagoId ?? ""));
+      if (!p || p.estado === "anulado") return err("no_existe", 404);
+      const ahora = new Date().toISOString();
+      const up = await sb.from("compra_pagos").update({ estado: "anulado", anulado_por: userName, anulado_en: ahora, motivo_anulacion: motivo, actualizado_en: ahora }).eq("id", p.id);
+      if (up.error) return fallar(up.error);
+      await evento(c.lead_id, "compra", `${userName} anuló un pago al dueño de ${dinero(p.monto)} de la compra ${folioCompra(c.numero)}: ${motivo}`);
+      await audit(ctx.actor, "compra.pago_anular", "compra", c.id, { numero: c.numero, pago: p.id, monto: p.monto, motivo });
+      return json({ ok: true });
+    }
+
     if (op === "compras.aprobar") {
       if (!esSupervisor) return err("forbidden", 403);
       const c = await cargarCompra(String(body.id ?? ""));
@@ -3646,7 +3714,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     return (data ?? []).filter((c: any) => (!soloActivas || c.activa !== false) && (!c.local_id || !local || c.local_id === local))
       .sort((a: any, b: any) => etiquetaCuenta(a).localeCompare(etiquetaCuenta(b)));
   }
-  const conEtiqueta = (c: any) => ({ ...c, etiqueta: etiquetaCuenta(c) });
+  function conEtiqueta(c: any) { return { ...c, etiqueta: etiquetaCuenta(c) }; }
 
   if (op === "cuentas.list") {
     if (!esSupervisor && !can("leads.propios") && !can("leads.local")) return err("forbidden", 403);
@@ -3676,6 +3744,14 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     return json({ cuenta: conEtiqueta(ins.data) });
   }
 
+  /** Pagos que la empresa le hizo al dueño en una compra (vacío si la tabla aún no existe). */
+  async function pagosDeCompra(compraId: string) {
+    const { data, error } = await sb.from("compra_pagos").select("*").eq("compra_id", compraId);
+    if (error) { if (ctx.isMissingTable(error)) return null; throw error; }
+    return (data ?? []).sort((a: any, b: any) => String(a.fecha_pago).localeCompare(String(b.fecha_pago)) || String(a.creado_en).localeCompare(String(b.creado_en)));
+  }
+  /** Lo que se le paga al dueño: el monto final si ya se pidió el pago; si no, la oferta aceptada. */
+  function montoAPagar(c: any) { return Number(c.monto_final ?? c.monto_oferta); }
   async function pagosDeCierre(cierreId: string) {
     const { data, error } = await sb.from("cierre_pagos").select("*").eq("cierre_id", cierreId);
     if (error) { if (ctx.isMissingTable(error)) return []; throw error; }
