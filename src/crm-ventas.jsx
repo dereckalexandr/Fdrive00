@@ -70,16 +70,16 @@ function TareaFila({ api, t, puedeEditar, accion, clienteConCorreo = true }) {
   });
   return (
     <li className="flex flex-col gap-1.5 py-1">
-      <div className={`flex items-center gap-3 text-sm ${color}`}>
+      <div className={`flex flex-wrap items-center gap-x-3 gap-y-1 text-sm ${color}`}>
         <input type="checkbox" checked={!!t.hecha && !t.cancelada} disabled={!!t.cancelada || !puedeEditar} onChange={(e) => accion(() => api("tareas.hecha", { id: t.id, hecha: e.target.checked }))} aria-label="Marcar como hecha" />
-        <span className={`flex-1 ${t.hecha || t.cancelada ? "line-through" : ""}`}>{t.titulo}</span>
+        <span className={`flex-1 min-w-[8rem] ${t.hecha || t.cancelada ? "line-through" : ""}`}>{t.titulo}</span>
         {t.cancelada && <span className="text-[11px] px-1.5 py-0.5 bg-stone-200 text-stone-600 no-underline" title={t.motivo_cancelacion || ""}>Cancelada</span>}
         {t.reprogramada_en && abierta && <span className="text-[11px] text-sky-700">Reprogramada</span>}
         <span className="text-xs whitespace-nowrap">{fechaHora(t.vence_en)}</span>
         {abierta && puedeEditar && !modo && (
-          <span className="flex gap-2 text-xs">
-            <button type="button" onClick={() => { setModo("reprogramar"); setAviso(null); }} className="text-sky-700 hover:underline">Reprogramar</button>
-            <button type="button" onClick={() => { setModo("cancelar"); setAviso(null); }} className="text-rose-600 hover:underline">Cancelar</button>
+          <span className="flex gap-3 text-xs w-full md:w-auto pl-7 md:pl-0">
+            <button type="button" onClick={() => { setModo("reprogramar"); setAviso(null); }} className="text-sky-700 hover:underline font-medium">Reprogramar</button>
+            <button type="button" onClick={() => { setModo("cancelar"); setAviso(null); }} className="text-rose-600 hover:underline font-medium">Cancelar</button>
           </span>
         )}
       </div>
