@@ -9,6 +9,7 @@ import { permisoDeTipo, grupoDeReparto } from "./compras-core.js";
 import { validarVehiculoTasacion, folioTasacion as folioTas } from "./tasaciones-core.js";
 import { sugerirAviso } from "./anuncios-core.js";
 import { enviarAviso, enSegundoPlano, correoActivo, enviarInvitacionVisita } from "./correo.ts";
+import { googleConfigurado, crearVisitaGoogle } from "./google-calendar.ts";
 import { consultarPatente } from "./patentes.ts";
 import { LIMITE_WEB_IP_HORA, normalizarPatente, patenteValida } from "./patentes-core.js";
 import { folioInspeccion } from "./inspecciones-core.js";
@@ -409,7 +410,25 @@ export async function publicOp(ctx: CtxPublico, body: any): Promise<Response> {
     }
     // Visita pedida por el sitio: si dejó su correo, recibe la invitación para su calendario. Con la tarea creada, el evento usa su
     // identificador: si el ejecutivo la reprograma o la cancela, el calendario del cliente se actualiza en vez de duplicarse.
-    if (s.tipo === "visita" && s.contacto.email && correoActivo()) {
+    if (s.tipo === "visita" && s.contacto.email && googleConfigurado()) {
+      // Con el Google Calendar de la empresa conectado, Google envía la invitación (Gmail, Outlook y Apple la reconocen).
+      const lq = await sb.from("locales").select("direccion").eq("id", local).maybeSingle();
+      const lugar = String((lq.data && lq.data.direccion) || cfg.sitio_direccion || "").trim();
+      const empresa = String(cfg.sitio_nombre || "Drive Futuro");
+      const ej = asignado ? (await sb.from("usuarios").select("nombre, email").eq("id", asignado.id).maybeSingle()).data : null;
+      await enSegundoPlano((async () => {
+        try {
+          const id = await crearVisitaGoogle({
+            titulo: `Visita a ${empresa}`, inicio: new Date(s.fechaHora).toISOString(), lugar: lugar || undefined, tareaId: tareaVisita ? tareaVisita.id : undefined,
+            descripcion: [vehTexto ? `Para ver el ${vehTexto}.` : "", ej ? `Te atiende: ${ej.nombre}` : "", lugar ? `Dirección: ${lugar}` : ""].filter(Boolean).join("\n"),
+            cliente: { nombre: s.contacto.nombre, email: s.contacto.email }, ejecutivo: ej ? { nombre: ej.nombre, email: ej.email } : null,
+          });
+          if (tareaVisita) await sb.from("tareas").update({ invitacion_enviada: true, google_event_id: id }).eq("id", tareaVisita.id);
+        } catch (e) {
+          await ctx.audit({ tipo: "sistema", nombre: "Sitio web" }, "aviso.fallido", "aviso", undefined, { asunto: "Google Calendar", error: String((e as any)?.message ?? e).slice(0, 300) });
+        }
+      })());
+    } else if (s.tipo === "visita" && s.contacto.email && correoActivo()) {
       const lq = await sb.from("locales").select("direccion").eq("id", local).maybeSingle();
       const lugar = String((lq.data && lq.data.direccion) || cfg.sitio_direccion || "").trim();
       await enSegundoPlano(enviarInvitacionVisita({

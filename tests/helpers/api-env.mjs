@@ -196,6 +196,11 @@ export const paginasMinimo = { llamadas: [], respuestas: {} };
  * `fallarEnvio`: si es un texto, el próximo envío de mensajes responde con ese error. `archivos`: id de media → { mime, bytes }.
  */
 export const meta = { llamadas: [], plantillas: [], fallarEnvio: "", archivos: {}, n: 0 };
+/**
+ * Google (OAuth y Calendar API) simulado. `llamadas`: { metodo, url, cuerpo, auth }. `eventos`: id → evento vigente.
+ * `fallar`: si es un número, la próxima llamada a Calendar responde con ese estado de error.
+ */
+export const google = { llamadas: [], eventos: {}, fallar: 0, n: 0, tokens: 0 };
 /** Variables de entorno de la función simulada (las pruebas pueden cambiarlas). */
 export let entorno = {};
 const IP = { n: 1 };
@@ -231,6 +236,24 @@ export const iniciarFuncion = async () => {
       if (r instanceof Error) throw r;
       if (typeof r === "number") return new Response("", { status: r });
       return new Response(r ?? "<html>sin datos</html>", { status: 200 });
+    }
+    if (String(url).startsWith("https://oauth2.googleapis.com/token")) {
+      google.tokens++;
+      google.llamadas.push({ metodo: "POST", url: String(url), cuerpo: String(init.body) });
+      return new Response(JSON.stringify({ access_token: `ya29.prueba${google.tokens}`, expires_in: 3599, token_type: "Bearer" }), { status: 200 });
+    }
+    if (String(url).startsWith("https://www.googleapis.com/calendar/v3/")) {
+      const u = new URL(String(url));
+      const metodo = (init && init.method) || "GET";
+      const cuerpo = init && typeof init.body === "string" ? JSON.parse(init.body) : null;
+      google.llamadas.push({ metodo, url: String(url), ruta: u.pathname, query: Object.fromEntries(u.searchParams), cuerpo, auth: init && init.headers && init.headers.authorization });
+      if (google.fallar) { const st = google.fallar; google.fallar = 0; return new Response(JSON.stringify({ error: { code: st, message: "falla simulada" } }), { status: st }); }
+      const partes = u.pathname.split("/");
+      const id = partes[partes.length - 1];
+      if (metodo === "POST") { const nuevo = { ...cuerpo, id: `evt${++google.n}`, status: "confirmed" }; google.eventos[nuevo.id] = nuevo; return new Response(JSON.stringify(nuevo), { status: 200 }); }
+      if (metodo === "PATCH") { if (!google.eventos[id]) return new Response(JSON.stringify({ error: { code: 404, message: "Not Found" } }), { status: 404 }); Object.assign(google.eventos[id], cuerpo); return new Response(JSON.stringify(google.eventos[id]), { status: 200 }); }
+      if (metodo === "DELETE") { if (google.eventos[id]) google.eventos[id].status = "cancelled"; return new Response(null, { status: 204 }); }
+      return new Response("{}", { status: 404 });
     }
     if (String(url).startsWith("https://graph.facebook.com/") || String(url).startsWith("https://lookaside.prueba/")) {
       const u = new URL(String(url));

@@ -2,7 +2,7 @@
 // y los formularios del CRM exigen su correo.
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
-import { iniciarFuncion, api, nuevaIp, loginAdmin, crm, db, correos } from "./helpers/api-env.mjs";
+import { iniciarFuncion, api, nuevaIp, loginAdmin, crm, db, correos, entorno, google } from "./helpers/api-env.mjs";
 import { armarIcs, enlaceGoogleCalendar, enlacesOutlook, textoFechaVisita, escaparIcs, plegarIcs, fechaIcs } from "../supabase/functions/api/calendario-core.js";
 import { validarCliente } from "../supabase/functions/api/ventas-core.js";
 
@@ -192,4 +192,53 @@ test("Cancelar una visita: sale de la agenda sin contar como cumplida y el clien
   const cl = await ve(U.e1.token, "tareas.cancelar", { id: ll.tarea.id });
   assert.equal(cl.invitacion, null);
   assert.equal(correos.length, n0);
+});
+
+test("Con Google Calendar conectado: Google invita al cliente, y al reprogramar o cancelar actualiza su calendario", async () => {
+  Object.assign(entorno, { GOOGLE_CLIENT_ID: "cliente.apps.googleusercontent.com", GOOGLE_CLIENT_SECRET: "secreto", GOOGLE_REFRESH_TOKEN: "1//token" });
+  try {
+    const l = await ve(U.e1.token, "leads.create", { exigirCorreo: true, cliente: { nombre: "Olga Outlook", telefono: "966660000", email: "olga@hotmail.com" }, lead: { tipo: "venta", fuente: "Llamada" } });
+    const antesCorreos = correos.length;
+    const t = await ve(U.e1.token, "tareas.create", { leadId: l.lead.id, titulo: "Visita para ver el Tucson", tipo: "visita", venceEn: manana11() });
+    assert.equal(t.status, 200, JSON.stringify(t));
+    assert.equal(t.invitacion, "enviada");
+    assert.equal(correos.slice(antesCorreos).filter((c) => c.to[0] === "olga@hotmail.com").length, 0, "no sale correo por Resend: invita Google");
+    const crear = google.llamadas.filter((x) => x.metodo === "POST" && x.ruta && x.ruta.endsWith("/calendars/primary/events")).pop();
+    assert.equal(crear.query.sendUpdates, "all", "Google le envía la invitación");
+    assert.match(crear.auth, /^Bearer ya29\.prueba/);
+    assert.deepEqual(crear.cuerpo.attendees.map((a) => a.email), ["olga@hotmail.com", "e1@empresa.cl"], "cliente y ejecutivo invitados");
+    assert.equal(crear.cuerpo.start.timeZone, "America/Santiago");
+    assert.equal(Date.parse(crear.cuerpo.end.dateTime) - Date.parse(crear.cuerpo.start.dateTime), 3_600_000);
+    assert.equal(crear.cuerpo.location, "Av. Las Condes 1234, Las Condes");
+    assert.match(crear.cuerpo.description, /Visita para ver el Tucson/);
+    const fila = db.tablas.tareas.find((x) => x.id === t.tarea.id);
+    assert.ok(fila.google_event_id, "guarda el id del evento");
+    assert.equal(fila.invitacion_enviada, true);
+
+    // Reprogramar: se mueve el MISMO evento.
+    const nueva = new Date(Date.parse(manana11()) + 86_400_000).toISOString();
+    const r = await ve(U.e1.token, "tareas.reprogramar", { id: t.tarea.id, venceEn: nueva });
+    assert.equal(r.invitacion, "enviada");
+    const mover = google.llamadas.filter((x) => x.metodo === "PATCH").pop();
+    assert.ok(mover.ruta.endsWith(`/events/${fila.google_event_id}`));
+    assert.equal(mover.query.sendUpdates, "all");
+    assert.equal(new Date(google.eventos[fila.google_event_id].start.dateTime).toISOString(), nueva);
+
+    // Cancelar: Google lo quita del calendario del cliente.
+    const c = await ve(U.e1.token, "tareas.cancelar", { id: t.tarea.id });
+    assert.equal(c.invitacion, "enviada");
+    assert.equal(google.eventos[fila.google_event_id].status, "cancelled");
+    assert.equal(google.llamadas.filter((x) => x.metodo === "DELETE").pop().query.sendUpdates, "all");
+    assert.equal(correos.slice(antesCorreos).filter((m) => m.to[0] === "olga@hotmail.com").length, 0);
+    assert.ok(db.tablas.lead_eventos.some((e) => e.lead_id === l.lead.id && /Google Calendar/.test(e.detalle)));
+
+    // Si Google falla, la visita se agenda igual y el CRM avisa.
+    google.fallar = 500;
+    const f = await ve(U.e1.token, "tareas.create", { leadId: l.lead.id, titulo: "Otra visita", tipo: "visita", venceEn: manana11() });
+    assert.equal(f.status, 200);
+    assert.equal(f.invitacion, "fallida");
+    assert.ok(db.tablas.bitacora.some((b) => b.accion === "aviso.fallido" && b.detalle.asunto === "Google Calendar"));
+  } finally {
+    delete entorno.GOOGLE_CLIENT_ID; delete entorno.GOOGLE_CLIENT_SECRET; delete entorno.GOOGLE_REFRESH_TOKEN;
+  }
 });

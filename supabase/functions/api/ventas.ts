@@ -20,6 +20,7 @@ import {
   solicitudDeCanal, siguienteLlave,
 } from "./ventas-core.js";
 import { whatsappOp } from "./whatsapp.ts";
+import { googleConfigurado, crearVisitaGoogle, moverVisitaGoogle, cancelarVisitaGoogle } from "./google-calendar.ts";
 import { tramosEfectivos, calcularProduccion } from "./comisiones-core.js";
 import { enviarAviso, enSegundoPlano, correoActivo, enviarInvitacionVisita } from "./correo.ts";
 import { LIMITE_POR_MINUTO } from "./patentes-core.js";
@@ -3267,15 +3268,40 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     try {
       const cli = lead.cliente_id ? (await sb.from("clientes").select("nombre, email").eq("id", lead.cliente_id).maybeSingle()).data : null;
       if (!cli || !cli.email) return "sin_correo";
-      if (!correoActivo()) return "correo_inactivo";
       const [cfg, loc, eje] = await Promise.all([
         configNegocio(),
         sb.from("locales").select("nombre, direccion").eq("id", tarea.local_id).maybeSingle(),
         tarea.asignado_a ? sb.from("usuarios").select("nombre, email").eq("id", tarea.asignado_a).maybeSingle() : Promise.resolve({ data: null }),
       ]);
       const lugar = String((loc.data && loc.data.direccion) || cfg.sitio_direccion || "").trim();
+      const empresa = String(cfg.sitio_nombre || "Drive Futuro");
+
+      // Con el Google Calendar de la empresa conectado, Google envía la invitación (y sus cambios o la cancelación).
+      // Una visita cuya invitación salió por correo antes de conectar Google se cancela por correo, como antes.
+      if (googleConfigurado() && !(modo === "cancelada" && !tarea.google_event_id)) {
+        try {
+          const visita = {
+            titulo: `Visita a ${empresa}`, inicio: tarea.vence_en, lugar: lugar || undefined, tareaId: tarea.id,
+            descripcion: [tarea.titulo, eje.data ? `Te atiende: ${eje.data.nombre}` : "", lugar ? `Dirección: ${lugar}` : ""].filter(Boolean).join("\n"),
+            cliente: { nombre: cli.nombre, email: cli.email }, ejecutivo: eje.data ? { nombre: eje.data.nombre, email: eje.data.email } : null,
+          };
+          let eventoId = tarea.google_event_id || "";
+          if (modo === "cancelada") await cancelarVisitaGoogle(eventoId);
+          else if (eventoId) await moverVisitaGoogle(eventoId, visita);
+          else eventoId = await crearVisitaGoogle(visita);
+          if (modo !== "cancelada") await sb.from("tareas").update({ invitacion_enviada: true, google_event_id: eventoId }).eq("id", tarea.id);
+          const que = modo === "cancelada" ? "Visita cancelada en Google Calendar (aviso al cliente)" : modo === "cambio" ? "Visita actualizada en Google Calendar (nueva hora)" : "Invitación de Google Calendar enviada";
+          await evento(lead.id, "nota", `${que} a ${cli.email}`);
+          return "enviada";
+        } catch (e) {
+          await audit(ctx.actor, "aviso.fallido", "aviso", undefined, { asunto: "Google Calendar", error: String((e as any)?.message ?? e).slice(0, 300) });
+          return "fallida";
+        }
+      }
+
+      if (!correoActivo()) return "correo_inactivo";
       const enviados = await enviarInvitacionVisita({
-        uid: `visita-${tarea.id}@drivefuturo`, para: cli.email, nombreCliente: cli.nombre, inicio: tarea.vence_en, empresa: String(cfg.sitio_nombre || "Drive Futuro"),
+        uid: `visita-${tarea.id}@drivefuturo`, para: cli.email, nombreCliente: cli.nombre, inicio: tarea.vence_en, empresa,
         lugar: lugar || undefined, ejecutivo: eje.data ? eje.data.nombre : undefined, correoEjecutivo: eje.data ? eje.data.email || undefined : undefined,
         modo, secuencia: Number(tarea.invitacion_seq) || 0, inicioAnterior,
       }, (error) => audit(ctx.actor, "aviso.fallido", "aviso", undefined, { asunto: "invitación de visita", error }));
@@ -3868,7 +3894,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
   }
   if (op === "empresa.get") {
     if (!esSupervisor) return err("forbidden", 403);
-    return json({ empresa: await datosEmpresa(), puedeEditar: ctx.esAdmin });
+    return json({ empresa: await datosEmpresa(), puedeEditar: ctx.esAdmin, calendarioGoogle: googleConfigurado() });
   }
   if (op === "empresa.save") {
     if (!ctx.esAdmin) return err("forbidden", 403);

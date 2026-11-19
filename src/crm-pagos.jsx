@@ -429,6 +429,7 @@ export function DatosEmpresa({ api }) {
           <dl className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1 text-sm mb-3">
             {filas.map(([k, val]) => <div key={k} className="flex gap-2"><dt className="text-stone-500 min-w-[150px]">{k}</dt><dd className="text-stone-900">{val || "—"}</dd></div>)}
           </dl>
+          <p className="text-xs text-stone-600 mb-2">Invitaciones de visita: {datos.calendarioGoogle ? <span className="text-emerald-700 font-medium">✓ Google Calendar conectado (Google invita al cliente y actualiza su calendario)</span> : <span className="text-amber-700">por correo (Google Calendar aún no está conectado)</span>}</p>
           {datos.puedeEditar ? <button onClick={abrir} className={BTN_AMBAR}>Editar datos de la empresa</button> : <p className="text-xs text-stone-500">Solo el Administrador puede modificarlos.</p>}
         </>
       )}
