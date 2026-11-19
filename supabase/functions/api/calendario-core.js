@@ -80,6 +80,26 @@ export function enlaceGoogleCalendar({ inicio, duracionMin, titulo, descripcion,
   return `https://calendar.google.com/calendar/render?${p.toString()}`;
 }
 
+/**
+ * Enlaces que abren Outlook con la visita lista para guardar. Outlook no reconoce como cita una invitación que llega solo como
+ * archivo adjunto (necesita una parte «text/calendar» dentro del correo, que el servicio de envío no permite), así que se ofrecen
+ * estos botones: cuentas personales (Outlook.com, Hotmail, Live) y cuentas de trabajo o colegio (Microsoft 365).
+ */
+export function enlacesOutlook({ inicio, duracionMin, titulo, descripcion, lugar }) {
+  const ini = new Date(inicio).toISOString();
+  const p = new URLSearchParams({
+    path: "/calendar/action/compose", rru: "addevent", subject: String(titulo || ""),
+    startdt: ini.replace(/\.\d{3}Z$/, "Z"), enddt: masMinutos(ini, duracionMin || DURACION_VISITA_MIN).replace(/\.\d{3}Z$/, "Z"),
+  });
+  if (descripcion) p.set("body", String(descripcion));
+  if (lugar) p.set("location", String(lugar));
+  const q = p.toString();
+  return {
+    personal: `https://outlook.live.com/calendar/0/deeplink/compose?${q}`,
+    trabajo: `https://outlook.office.com/calendar/0/deeplink/compose?${q}`,
+  };
+}
+
 /** «jueves 20 de noviembre a las 11:00», en la hora de Chile. */
 export function textoFechaVisita(iso) {
   const d = new Date(iso);

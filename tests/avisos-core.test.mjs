@@ -29,3 +29,11 @@ test("Plantilla: HTML escapado, texto plano y enlace solo si es http(s)", () => 
   assert.ok(!sin.html.includes("href="));
   assert.ok(!sin.texto.includes("javascript"));
 });
+
+test("Plantilla de correo: varios botones (solo http/https)", () => {
+  const m = plantillaCorreo({ titulo: "t", lineas: ["x"], enlace: "https://a.cl", enlaceTexto: "Uno", otrosEnlaces: [{ url: "https://b.cl", texto: "Dos" }, { url: "javascript:alert(1)", texto: "Malo" }, { url: "https://c.cl", texto: "" }] });
+  assert.ok(m.html.includes('href="https://a.cl"') && m.html.includes(">Uno</a>"));
+  assert.ok(m.html.includes('href="https://b.cl"') && m.html.includes(">Dos</a>"));
+  assert.ok(!m.html.includes("javascript") && !m.html.includes("Malo") && !m.html.includes("c.cl"));
+  assert.ok(m.texto.includes("Uno: https://a.cl\nDos: https://b.cl"));
+});

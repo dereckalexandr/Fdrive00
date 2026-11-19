@@ -1,7 +1,7 @@
 // Envío de avisos por correo con Resend. Si no está configurado (RESEND_API_KEY), no hace nada: los avisos son un extra,
 // nunca deben frenar ni hacer fallar una operación del CRM.
 import { destinatariosValidos, limpiarAsunto, plantillaCorreo } from "./avisos-core.js";
-import { armarIcs, enlaceGoogleCalendar, textoFechaVisita, aBase64Utf8, DURACION_VISITA_MIN } from "./calendario-core.js";
+import { armarIcs, enlaceGoogleCalendar, enlacesOutlook, textoFechaVisita, aBase64Utf8, DURACION_VISITA_MIN } from "./calendario-core.js";
 
 export const correoActivo = () => !!Deno.env.get("RESEND_API_KEY");
 
@@ -12,6 +12,8 @@ type Aviso = {
   enlaceExterno?: string; pie?: string; responderA?: string; adjuntos?: Adjunto[];
   /** Sin botón (los correos a clientes nunca llevan el enlace a la plataforma). */
   sinEnlace?: boolean;
+  /** Botones adicionales (por ejemplo, agregar la visita a Outlook). */
+  otrosEnlaces?: { url: string; texto: string }[];
 };
 
 /** Envía un aviso a cada destinatario por separado (nadie ve las direcciones de los demás). Devuelve cuántos salieron. */
@@ -24,7 +26,7 @@ export async function enviarAviso(a: Aviso, alFallar?: (motivo: string) => Promi
   const desde = Deno.env.get("MAIL_FROM") || "Drive Futuro <onboarding@resend.dev>";
   const base = (Deno.env.get("APP_URL") || "").replace(/\/+$/, "");
   const enlace = a.sinEnlace ? "" : a.enlaceExterno ? a.enlaceExterno : base ? base + (a.ruta ?? "/plataforma") : "";
-  const { html, texto } = plantillaCorreo({ titulo: a.titulo, lineas: a.lineas, enlace, ...(a.enlaceTexto ? { enlaceTexto: a.enlaceTexto } : {}), ...(a.pie ? { pie: a.pie } : {}) });
+  const { html, texto } = plantillaCorreo({ titulo: a.titulo, lineas: a.lineas, enlace, ...(a.enlaceTexto ? { enlaceTexto: a.enlaceTexto } : {}), ...(a.pie ? { pie: a.pie } : {}), ...(a.otrosEnlaces ? { otrosEnlaces: a.otrosEnlaces } : {}) });
   const responder = a.responderA && destinatariosValidos([a.responderA])[0];
   let enviados = 0;
   for (const destino of para) {
@@ -91,9 +93,11 @@ export async function enviarInvitacionVisita(v: {
       cambio
         ? "Adjuntamos la invitación actualizada: al abrirla, tu calendario cambia la hora de la visita."
         : "Adjuntamos la invitación para tu calendario. Si necesitas cambiar el día o la hora, responde este correo.",
+      "¿Usas Outlook o Hotmail? Pulsa «Agregar a Outlook» para guardarla en tu calendario.",
     ],
     enlaceExterno: enlaceGoogleCalendar({ inicio: v.inicio, duracionMin: DURACION_VISITA_MIN, titulo, descripcion, lugar: v.lugar }),
     enlaceTexto: "Agregar a Google Calendar", pie: v.empresa, responderA: v.correoEjecutivo, adjuntos: [adjunto],
+    otrosEnlaces: (() => { const o = enlacesOutlook({ inicio: v.inicio, duracionMin: DURACION_VISITA_MIN, titulo, descripcion, lugar: v.lugar }); return [{ url: o.personal, texto: "Agregar a Outlook (Hotmail / Outlook.com)" }, { url: o.trabajo, texto: "Agregar a Outlook (cuenta de trabajo)" }]; })(),
   }, alFallar);
 }
 

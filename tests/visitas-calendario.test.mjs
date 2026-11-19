@@ -3,7 +3,7 @@
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { iniciarFuncion, api, nuevaIp, loginAdmin, crm, db, correos } from "./helpers/api-env.mjs";
-import { armarIcs, enlaceGoogleCalendar, textoFechaVisita, escaparIcs, plegarIcs, fechaIcs } from "../supabase/functions/api/calendario-core.js";
+import { armarIcs, enlaceGoogleCalendar, enlacesOutlook, textoFechaVisita, escaparIcs, plegarIcs, fechaIcs } from "../supabase/functions/api/calendario-core.js";
 import { validarCliente } from "../supabase/functions/api/ventas-core.js";
 
 const ve = (token, op, extra = {}) => api({ action: "ventas", token, op, ...extra });
@@ -55,6 +55,19 @@ test("Enlace de Google Calendar y fecha en hora de Chile", () => {
   assert.equal(u.searchParams.get("dates"), "20261120T140000Z/20261120T150000Z");
   assert.equal(u.searchParams.get("location"), "Av. Las Condes 1234");
   assert.match(textoFechaVisita("2026-11-20T14:00:00.000Z"), /^viernes 20 de noviembre a las 11:00$/);
+
+  // Outlook: abre el calendario con la visita lista para guardar (cuentas personales y de trabajo).
+  const o = enlacesOutlook({ inicio: "2026-11-20T14:00:00.000Z", titulo: "Visita", lugar: "Av. Las Condes 1234", descripcion: "Te atiende: Eva" });
+  for (const [url, host] of [[o.personal, "outlook.live.com"], [o.trabajo, "outlook.office.com"]]) {
+    const x = new URL(url);
+    assert.equal(x.hostname, host);
+    assert.equal(x.searchParams.get("rru"), "addevent");
+    assert.equal(x.searchParams.get("startdt"), "2026-11-20T14:00:00Z");
+    assert.equal(x.searchParams.get("enddt"), "2026-11-20T15:00:00Z");
+    assert.equal(x.searchParams.get("subject"), "Visita");
+    assert.equal(x.searchParams.get("location"), "Av. Las Condes 1234");
+    assert.equal(x.searchParams.get("body"), "Te atiende: Eva");
+  }
 });
 
 test("Formularios del CRM: el correo del cliente es obligatorio", async () => {
@@ -91,6 +104,9 @@ test("Agendar una visita: el cliente recibe la invitación de calendario por cor
   assert.equal(c.reply_to, "e1@empresa.cl", "las respuestas le llegan al ejecutivo");
   assert.match(c.html, /calendar\.google\.com\/calendar\/render/);
   assert.match(c.html, /Agregar a Google Calendar/);
+  assert.ok(c.html.includes("https://outlook.live.com/calendar/0/deeplink/compose?"), "botón para Outlook.com / Hotmail");
+  assert.ok(c.html.includes("https://outlook.office.com/calendar/0/deeplink/compose?"), "botón para Outlook de trabajo");
+  assert.ok(c.text.includes("Agregar a Outlook (Hotmail / Outlook.com): https://outlook.live.com/"));
   assert.match(c.html, /Av\. Las Condes 1234/);
   const adj = c.attachments[0];
   assert.equal(adj.filename, "invitacion.ics");
