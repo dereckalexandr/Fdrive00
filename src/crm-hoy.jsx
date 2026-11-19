@@ -10,7 +10,7 @@ import React, { useState } from "react";
 import { GRUPOS_HOY, TIPOS_TAREA, TIPOS_CONTACTO } from "../supabase/functions/api/ventas-core.js";
 import { etapaNombre } from "../supabase/functions/api/ventas-core.js";
 import { etapaDeOperacion } from "../supabase/functions/api/compras-core.js";
-import { INPUT, BTN, BTN_AMBAR, BTN_PRIMARIO, Aviso, Cargando, Campo, Modal, useCarga, mensajeError, apiPorDefecto, hace } from "./crm-ui.jsx";
+import { mensajeInvitacion, INPUT, BTN, BTN_AMBAR, BTN_PRIMARIO, Aviso, Cargando, Campo, Modal, useCarga, mensajeError, apiPorDefecto, hace } from "./crm-ui.jsx";
 
 const soloDigitos = (s) => String(s || "").replace(/\D/g, "");
 const waNumero = (tel) => { const d = soloDigitos(tel); return d.length === 9 ? `56${d}` : d; };
@@ -55,7 +55,9 @@ export function ProximaAccionModal({ api = apiPorDefecto, leadId, cliente = "el 
   const agendar = async (datos) => {
     setOcupado(true); setError("");
     try {
-      await api("tareas.create", { leadId, titulo: datos.titulo, tipo: datos.tipo, venceEn: new Date(datos.venceEn).toISOString() });
+      const r = await api("tareas.create", { leadId, titulo: datos.titulo, tipo: datos.tipo, venceEn: new Date(datos.venceEn).toISOString() });
+      const inv = mensajeInvitacion(r && r.invitacion);
+      if (inv && !inv.ok) window.alert(inv.texto);
       if (onAgendada) await onAgendada();
       onCerrar();
     } catch (e) { setError(mensajeError(e)); setOcupado(false); }

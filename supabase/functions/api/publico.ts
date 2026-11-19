@@ -8,7 +8,7 @@ import { elegirAsignado } from "./ventas-core.js";
 import { permisoDeTipo, grupoDeReparto } from "./compras-core.js";
 import { validarVehiculoTasacion, folioTasacion as folioTas } from "./tasaciones-core.js";
 import { sugerirAviso } from "./anuncios-core.js";
-import { enviarAviso, enSegundoPlano, correoActivo } from "./correo.ts";
+import { enviarAviso, enSegundoPlano, correoActivo, enviarInvitacionVisita } from "./correo.ts";
 import { consultarPatente } from "./patentes.ts";
 import { LIMITE_WEB_IP_HORA, normalizarPatente, patenteValida } from "./patentes-core.js";
 import { folioInspeccion } from "./inspecciones-core.js";
@@ -404,6 +404,16 @@ export async function publicOp(ctx: CtxPublico, body: any): Promise<Response> {
     // Visita: queda en la agenda del ejecutivo.
     if (s.tipo === "visita" && asignado) {
       await sb.from("tareas").insert({ lead_id: lead.id, asignado_a: asignado.id, local_id: local, titulo: `Visita pedida por el sitio web: ${vehTexto}`.slice(0, 120), tipo: "visita", vence_en: s.fechaHora });
+    }
+    // Visita pedida por el sitio: si dejó su correo, recibe la invitación para su calendario.
+    if (s.tipo === "visita" && s.contacto.email && correoActivo()) {
+      const lq = await sb.from("locales").select("direccion").eq("id", local).maybeSingle();
+      const lugar = String((lq.data && lq.data.direccion) || cfg.sitio_direccion || "").trim();
+      await enSegundoPlano(enviarInvitacionVisita({
+        uid: `visita-web-${lead.id}@drivefuturo`, para: s.contacto.email, nombreCliente: s.contacto.nombre, inicio: new Date(s.fechaHora).toISOString(),
+        empresa: String(cfg.sitio_nombre || "Drive Futuro"), lugar: lugar || undefined, ejecutivo: asignado ? asignado.nombre : undefined,
+        detalle: vehTexto ? `Para ver el ${vehTexto}.` : undefined,
+      }, (error) => ctx.audit({ tipo: "sistema", nombre: "Sitio web" }, "aviso.fallido", "aviso", undefined, { asunto: "invitación de visita", error })));
     }
     // Renovar: la tasación de SU auto queda en la cola de los Tasadores, ligada al lead (al completarse, fija el valor en parte de pago).
     let tasacionWeb: { numero: number; auto: string } | null = null;

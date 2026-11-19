@@ -305,11 +305,11 @@ export function InspeccionDetalle({ api, id, onCerrar, onCambio, onRealizar, onV
             <Campo etiqueta="Nombre del dueño *"><input value={lc.nombre} maxLength={120} onChange={(e) => setLc({ ...lc, nombre: e.target.value })} className={INPUT} /></Campo>
             <Campo etiqueta="Teléfono *"><input value={lc.telefono} maxLength={20} onChange={(e) => setLc({ ...lc, telefono: e.target.value })} className={INPUT} /></Campo>
             <Campo etiqueta="Kilometraje *"><input inputMode="numeric" value={lc.km} onChange={(e) => setLc({ ...lc, km: e.target.value.replace(/\D/g, "") })} className={INPUT} /></Campo>
-            <Campo etiqueta="Correo (opcional)"><input type="email" value={lc.email} maxLength={120} onChange={(e) => setLc({ ...lc, email: e.target.value })} className={INPUT} /></Campo>
+            <Campo etiqueta="Correo *"><input type="email" value={lc.email} maxLength={120} onChange={(e) => setLc({ ...lc, email: e.target.value })} className={INPUT} /></Campo>
             <Campo etiqueta="RUT (opcional)"><input value={lc.rut} maxLength={14} onChange={(e) => setLc({ ...lc, rut: e.target.value })} className={INPUT} /></Campo>
           </div>
           {msg.texto && /lead de compra abierto/.test(msg.texto) && <label className="text-sm text-stone-700 flex items-center gap-2"><input type="checkbox" checked={lc.duplicado} onChange={(e) => setLc({ ...lc, duplicado: e.target.checked })} />Crear de todas formas</label>}
-          <div><button disabled={ocupado || lc.nombre.trim().length < 3 || lc.telefono.replace(/\D/g, "").length < 8 || !lc.km} onClick={() => accion("inspecciones.crear_lead", { km: Number(lc.km), confirmarDuplicado: lc.duplicado || undefined, cliente: { nombre: lc.nombre, telefono: lc.telefono, email: lc.email || undefined, rut: lc.rut || undefined } }, "Lead de compra creado y ligado a esta inspección. Búscalo en el tablero de compras.")} className={BTN_PRIMARIO}>Crear el lead</button></div>
+          <div><button disabled={ocupado || lc.nombre.trim().length < 3 || lc.telefono.replace(/\D/g, "").length < 8 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(lc.email.trim()) || !lc.km} onClick={() => accion("inspecciones.crear_lead", { exigirCorreo: true, km: Number(lc.km), confirmarDuplicado: lc.duplicado || undefined, cliente: { nombre: lc.nombre, telefono: lc.telefono, email: lc.email.trim(), rut: lc.rut || undefined } }, "Lead de compra creado y ligado a esta inspección. Búscalo en el tablero de compras.")} className={BTN_PRIMARIO}>Crear el lead</button></div>
         </div>
       )}
       {modo === "cancelar" && (

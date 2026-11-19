@@ -32,7 +32,7 @@ import { SeccionCompra, SeccionConsignacion, ModuloCompras } from "./crm-compras
 import { BandejaWhatsapp, SeccionWhatsapp, useCadaTanto } from "./crm-whatsapp.jsx";
 import { etapaDeOperacion, etapasDeTipo, ayudaDeEtapa, tipoLeadNombre, TIPOS_LEAD, validarVehiculoOfrecido } from "../supabase/functions/api/compras-core.js";
 import {
-  INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, NavegacionLateral, useGuardado, DatosDelDueno, CamposCondiciones, useCarga, mensajeError, CamposVehiculo, aVehiculoForm,
+  INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, mensajeInvitacion, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, NavegacionLateral, useGuardado, DatosDelDueno, CamposCondiciones, useCarga, mensajeError, CamposVehiculo, aVehiculoForm,
 } from "./crm-ui.jsx";
 
 const COLOR_ETAPA = {
@@ -57,13 +57,14 @@ function NuevaTarea({ api, leadId, onCreada }) {
   const [tipo, setTipo] = useState("llamada");
   const [cuando, setCuando] = useState(aInputFecha(enDias(1)));
   const [error, setError] = useState("");
+  const [aviso, setAviso] = useState(null);
   const [enviando, setEnviando] = useState(false);
   const crear = async () => {
-    setError("");
+    setError(""); setAviso(null);
     const v = validarTarea({ titulo, tipo, venceEn: cuando });
     if (!v.ok) { setError(mensajeError({ message: v.error })); return; }
     setEnviando(true);
-    try { await api("tareas.create", { leadId, titulo, tipo, venceEn: new Date(cuando).toISOString() }); setTitulo(""); onCreada(); }
+    try { const r = await api("tareas.create", { leadId, titulo, tipo, venceEn: new Date(cuando).toISOString() }); setTitulo(""); setAviso(mensajeInvitacion(r && r.invitacion)); onCreada(); }
     catch (e) { setError(mensajeError(e)); }
     setEnviando(false);
   };
@@ -82,6 +83,8 @@ function NuevaTarea({ api, leadId, onCreada }) {
         <button type="button" onClick={() => setCuando(aInputFecha(enDias(7)))} className={BTN}>En 1 semana</button>
         <button onClick={crear} disabled={enviando} className={`${BTN_PRIMARIO} ml-auto`}>Agendar</button>
       </div>
+      {tipo === "visita" && !aviso && <p className="text-xs text-stone-500">Al agendar una visita, el cliente recibe por correo la invitación para agregarla a su calendario (Google Calendar, Outlook o Apple).</p>}
+      {aviso && <p className={`text-sm ${aviso.ok ? "text-emerald-700" : "text-amber-700"}`}>{aviso.texto}</p>}
       {error && <p className="text-sm text-rose-600">{error}</p>}
     </div>
   );
@@ -275,6 +278,7 @@ function FormLead({ api, catalogos, lead, onCerrar, onGuardado }) {
   const soloCliente = !!lead && solicitudDeCanal(lead);
   const [clienteEd, setClienteEd] = useState(() => (clienteActual ? { nombre: clienteActual.nombre || "", rut: clienteActual.rut || "", telefono: clienteActual.telefono || "", email: clienteActual.email || "", direccion: clienteActual.direccion || "", comuna: clienteActual.comuna || "" } : null));
   const [elegido, setElegido] = useState(null);
+  const [correoElegido, setCorreoElegido] = useState("");
   const tiposLead = catalogos.tiposLead && catalogos.tiposLead.length ? catalogos.tiposLead : ["venta"];
   const [tipo, setTipo] = useState(lead ? lead.tipo || "venta" : tiposLead[0]);
   const [vo, setVo] = useState(() => aVehiculoForm(lead ? lead.vehiculo_ofrecido : null));
@@ -311,20 +315,22 @@ function FormLead({ api, catalogos, lead, onCerrar, onGuardado }) {
     const v = validarLead(datosLead());
     if (!v.ok) { setError(mensajeError({ message: v.error })); return; }
     if (tipo !== "venta") { const o = validarVehiculoOfrecido(vo); if (!o.ok) { setError(mensajeError({ message: o.error })); return; } }
+    // El correo del cliente es obligatorio: con él recibe la invitación de calendario de sus visitas.
     if (!editando && !elegido) {
-      const c = validarCliente(cliente);
+      const c = validarCliente(cliente, { exigirCorreo: true });
       if (!c.ok) { setError(mensajeError({ message: c.error })); return; }
     }
+    if (!editando && elegido && !elegido.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correoElegido.trim())) { setError(mensajeError({ message: correoElegido.trim() ? "email_invalido" : "correo_requerido" })); return; }
     if (editando && clienteEd) {
-      const c = validarCliente(clienteEd);
+      const c = validarCliente(clienteEd, { exigirCorreo: true });
       if (!c.ok) { setError(mensajeError({ message: c.error })); return; }
     }
     setGuardando(true);
     try {
-      if (editando && clienteEd && clienteActual) await api("clientes.save", { id: clienteActual.id, datos: clienteEd });
+      if (editando && clienteEd && clienteActual) await api("clientes.save", { id: clienteActual.id, datos: clienteEd, exigirCorreo: true });
       if (editando && soloCliente) { onGuardado(); setGuardando(false); return; }
       if (editando) await api("leads.update", { id: lead.id, lead: datosLead() });
-      else await api("leads.create", { cliente: elegido ? { id: elegido.id } : cliente, lead: datosLead(), asignarA: catalogos.puedeAsignar ? asignarA : undefined });
+      else await api("leads.create", { cliente: elegido ? { id: elegido.id } : cliente, correoCliente: elegido && !elegido.email ? correoElegido.trim() : undefined, exigirCorreo: true, lead: datosLead(), asignarA: catalogos.puedeAsignar ? asignarA : undefined });
       onGuardado();
     } catch (e) { setError(mensajeError(e)); }
     setGuardando(false);
@@ -344,9 +350,15 @@ function FormLead({ api, catalogos, lead, onCerrar, onGuardado }) {
           {elegido ? (
             <div className="flex items-center gap-3 text-sm">
               <span className="flex-1"><strong>{elegido.nombre}</strong> · {elegido.telefono || elegido.email}</span>
-              <button onClick={() => setElegido(null)} className={BTN}>Cambiar</button>
+              <button onClick={() => { setElegido(null); setCorreoElegido(""); }} className={BTN}>Cambiar</button>
             </div>
-          ) : (
+          ) : null}
+          {elegido && !elegido.email && (
+            <Campo etiqueta="Correo del cliente *" ayuda="Este cliente no tiene correo: agrégalo para enviarle la invitación de sus visitas.">
+              <input type="email" value={correoElegido} onChange={(e) => setCorreoElegido(e.target.value)} className={INPUT} />
+            </Campo>
+          )}
+          {!elegido && (
             <>
               <input value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="¿Ya es cliente? Busca por nombre, RUT o teléfono" className={`${INPUT} mb-2`} />
               {coincidencias.length > 0 && (
@@ -361,7 +373,7 @@ function FormLead({ api, catalogos, lead, onCerrar, onGuardado }) {
                 <Campo etiqueta="Nombre completo"><input value={cliente.nombre} onChange={(e) => setCliente({ ...cliente, nombre: e.target.value })} className={INPUT} /></Campo>
                 <Campo etiqueta="RUT (opcional)"><input value={cliente.rut} onChange={(e) => setCliente({ ...cliente, rut: e.target.value })} className={`${INPUT} font-mono`} /></Campo>
                 <Campo etiqueta="Teléfono"><input value={cliente.telefono} onChange={(e) => setCliente({ ...cliente, telefono: e.target.value })} className={INPUT} placeholder="+56 9 1234 5678" /></Campo>
-                <Campo etiqueta="Correo"><input type="email" value={cliente.email} onChange={(e) => setCliente({ ...cliente, email: e.target.value })} className={INPUT} /></Campo>
+                <Campo etiqueta="Correo *"><input type="email" value={cliente.email} onChange={(e) => setCliente({ ...cliente, email: e.target.value })} className={INPUT} /></Campo>
                 <Campo etiqueta="Dirección (opcional)"><input value={cliente.direccion} maxLength={160} onChange={(e) => setCliente({ ...cliente, direccion: e.target.value })} className={INPUT} /></Campo>
                 <Campo etiqueta="Comuna (opcional)">
                   <select value={cliente.comuna} onChange={(e) => setCliente({ ...cliente, comuna: e.target.value })} className={INPUT}>
@@ -380,7 +392,7 @@ function FormLead({ api, catalogos, lead, onCerrar, onGuardado }) {
             <Campo etiqueta="Nombre completo *"><input value={clienteEd.nombre} onChange={(e) => setClienteEd({ ...clienteEd, nombre: e.target.value })} className={INPUT} /></Campo>
             <Campo etiqueta="RUT"><input value={clienteEd.rut} onChange={(e) => setClienteEd({ ...clienteEd, rut: e.target.value })} className={`${INPUT} font-mono`} /></Campo>
             <Campo etiqueta="Teléfono"><input value={clienteEd.telefono} onChange={(e) => setClienteEd({ ...clienteEd, telefono: e.target.value })} className={INPUT} /></Campo>
-            <Campo etiqueta="Correo"><input type="email" value={clienteEd.email} onChange={(e) => setClienteEd({ ...clienteEd, email: e.target.value })} className={INPUT} /></Campo>
+            <Campo etiqueta="Correo *"><input type="email" value={clienteEd.email} onChange={(e) => setClienteEd({ ...clienteEd, email: e.target.value })} className={INPUT} /></Campo>
             <Campo etiqueta="Dirección"><input value={clienteEd.direccion} maxLength={160} placeholder="Calle y número, depto." onChange={(e) => setClienteEd({ ...clienteEd, direccion: e.target.value })} className={INPUT} /></Campo>
             <Campo etiqueta="Comuna">
               <select value={clienteEd.comuna} onChange={(e) => setClienteEd({ ...clienteEd, comuna: e.target.value })} className={INPUT}>

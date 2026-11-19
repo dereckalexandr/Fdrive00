@@ -177,6 +177,7 @@ const MENSAJES = {
   razon_social_requerida: "Escribe la razón social de la empresa.",
   rut_empresa_invalido: "El RUT de la empresa no es válido.",
   rut_representante_invalido: "El RUT del representante no es válido.",
+  correo_requerido: "Escribe el correo del cliente: se usa para enviarle la invitación de sus visitas.",
   correo_empresa_invalido: "El correo de contacto no es válido.",
   chasis_invalido: "Escribe el número de chasis (VIN) del vehículo.",
   tasacion_fiscal_invalida: "Escribe la tasación fiscal del vehículo (la que figura en el certificado del Registro Civil o el SII).",
@@ -244,6 +245,16 @@ const MENSAJES = {
   "Failed to fetch": "No se pudo conectar con el servidor. Revisa tu conexión e inténtalo de nuevo.",
   tramos_invalidos: "Los tramos no son válidos: no pueden superponerse y solo el último puede quedar sin tope.",
 };
+/** Qué pasó con la invitación de calendario al agendar una visita (respuesta de tareas.create). */
+export function mensajeInvitacion(invitacion) {
+  return {
+    enviada: { ok: true, texto: "Visita agendada: se envió la invitación al correo del cliente para que la agregue a su calendario." },
+    sin_correo: { ok: false, texto: "Visita agendada, pero el cliente no tiene correo: agrégalo con «Editar datos» para enviarle la invitación de calendario." },
+    correo_inactivo: { ok: false, texto: "Visita agendada. El envío de correos no está configurado, así que no se envió la invitación al cliente." },
+    fallida: { ok: false, texto: "Visita agendada, pero no se pudo enviar la invitación por correo. Avísale al cliente por otro medio." },
+  }[invitacion] || null;
+}
+
 export const mensajeError = (e) => MENSAJES[e && e.message] || `No se pudo completar la operación. Inténtalo de nuevo.${e && e.detalle ? ` (Detalle técnico: ${e.detalle})` : e && e.message ? ` (código: ${e.message}${e.status ? `, ${e.status}` : ""})` : ""}`;
 
 export function Aviso({ tipo = "error", children }) {

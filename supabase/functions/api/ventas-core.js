@@ -135,7 +135,11 @@ export function ocultarCosto(vehiculo, puedeVerCosto) {
 }
 
 /* ---------- Clientes ---------- */
-export function validarCliente(input) {
+/**
+ * Datos de un cliente. `exigirCorreo`: los formularios del CRM (lead de venta, compra o consignación) piden el correo,
+ * que se usa para enviarle la invitación de calendario de sus visitas.
+ */
+export function validarCliente(input, { exigirCorreo = false } = {}) {
   const i = input || {};
   // Dirección y comuna son opcionales; solo se incluyen si vienen en la petición (así editar otros datos no los borra).
   const extra = {};
@@ -157,6 +161,7 @@ export function validarCliente(input) {
   const email = texto(i.email, 80).toLowerCase();
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, error: "email_invalido" };
   if (!telefono && !email) return { ok: false, error: "contacto_requerido" };
+  if (exigirCorreo && !email) return { ok: false, error: "correo_requerido" };
   return { ok: true, value: { nombre, rut, telefono: telefono || null, email: email || null, notas: texto(i.notas, 500) || null, ...extra } };
 }
 

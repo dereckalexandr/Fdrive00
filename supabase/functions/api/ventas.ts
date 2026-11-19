@@ -21,7 +21,7 @@ import {
 } from "./ventas-core.js";
 import { whatsappOp } from "./whatsapp.ts";
 import { tramosEfectivos, calcularProduccion } from "./comisiones-core.js";
-import { enviarAviso, enSegundoPlano, correoActivo } from "./correo.ts";
+import { enviarAviso, enSegundoPlano, correoActivo, enviarInvitacionVisita } from "./correo.ts";
 import { LIMITE_POR_MINUTO } from "./patentes-core.js";
 import { consultarPatente } from "./patentes.ts";
 
@@ -2895,7 +2895,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
   }
 
   if (op === "clientes.save") {
-    const v = validarCliente(body.datos);
+    const v = validarCliente(body.datos, { exigirCorreo: body.exigirCorreo === true });
     if (!v.ok) return err(v.error!);
     const id = body.id ? String(body.id) : "";
     if (!id) {
@@ -3016,13 +3016,24 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     if (!camp.ok) return err("campania_invalida");
 
     // Cliente: uno existente del mismo local, o uno nuevo (si trae RUT que ya existe, se reutiliza).
+    // Los formularios del CRM exigen el correo del cliente (para la invitación de calendario de sus visitas).
+    const exigirCorreo = b.exigirCorreo === true;
     let cliente: any = null;
     if (b.cliente?.id) {
       const { data } = await sb.from("clientes").select("*").eq("id", String(b.cliente.id)).maybeSingle();
       if (!data || data.local_id !== local) return err("cliente_invalido");
       cliente = data;
+      // Cliente existente sin correo: el formulario lo pide y se guarda en su ficha.
+      if (exigirCorreo && !cliente.email) {
+        const correo = String(b.correoCliente ?? "").trim().toLowerCase().slice(0, 80);
+        if (!correo) return err("correo_requerido");
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)) return err("email_invalido");
+        const up = await sb.from("clientes").update({ email: correo }).eq("id", cliente.id).select().single();
+        if (up.error) return fallo(up.error);
+        cliente = up.data;
+      }
     } else {
-      const c = validarCliente(b.cliente);
+      const c = validarCliente(b.cliente, { exigirCorreo });
       if (!c.ok) return err(c.error!);
       if (c.value.rut) {
         const { data } = await sb.from("clientes").select("*").eq("local_id", local).eq("rut", c.value.rut).maybeSingle();
@@ -3247,6 +3258,33 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
   }
 
   /* ---------- tareas ---------- */
+  /**
+   * Envía al cliente la invitación de calendario de una visita. Devuelve «enviada», «sin_correo» (el cliente no tiene correo),
+   * «correo_inactivo» (el envío de correos no está configurado) o «fallida». Nunca hace fallar la tarea.
+   */
+  async function invitarAVisita(tarea: any, lead: any): Promise<string> {
+    try {
+      const cli = lead.cliente_id ? (await sb.from("clientes").select("nombre, email").eq("id", lead.cliente_id).maybeSingle()).data : null;
+      if (!cli || !cli.email) return "sin_correo";
+      if (!correoActivo()) return "correo_inactivo";
+      const [cfg, loc, eje] = await Promise.all([
+        configNegocio(),
+        sb.from("locales").select("nombre, direccion").eq("id", tarea.local_id).maybeSingle(),
+        tarea.asignado_a ? sb.from("usuarios").select("nombre, email").eq("id", tarea.asignado_a).maybeSingle() : Promise.resolve({ data: null }),
+      ]);
+      const lugar = String((loc.data && loc.data.direccion) || cfg.sitio_direccion || "").trim();
+      const enviados = await enviarInvitacionVisita({
+        uid: `visita-${tarea.id}@drivefuturo`, para: cli.email, nombreCliente: cli.nombre, inicio: tarea.vence_en, empresa: String(cfg.sitio_nombre || "Drive Futuro"),
+        lugar: lugar || undefined, ejecutivo: eje.data ? eje.data.nombre : undefined, correoEjecutivo: eje.data ? eje.data.email || undefined : undefined,
+      }, (error) => audit(ctx.actor, "aviso.fallido", "aviso", undefined, { asunto: "invitación de visita", error }));
+      if (enviados > 0) { await evento(lead.id, "nota", `Invitación de calendario enviada a ${cli.email}`); return "enviada"; }
+      return "fallida";
+    } catch (e) {
+      console.error("invitarAVisita:", String((e as any)?.message ?? e));
+      return "fallida";
+    }
+  }
+
   if (op === "tareas.list") {
     if (!can("agenda.usar") && !esSupervisor) return err("forbidden", 403);
     const todas = body.todas === true && veTodoElLocal;
@@ -3279,7 +3317,10 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     }).select().single();
     if (error) return fallo(error);
     if (lead) await evento(lead.id, "nota", `Tarea agendada: ${v.value.titulo}`);
-    return json({ tarea: data });
+    // Visita a la sucursal: el cliente recibe la invitación para su calendario (Google Calendar, Outlook o Apple).
+    let invitacion: string | null = null;
+    if (lead && v.value.tipo === "visita") invitacion = await invitarAVisita(data, lead);
+    return json({ tarea: data, invitacion });
   }
 
   if (op === "tareas.hecha") {
