@@ -178,6 +178,8 @@ const MENSAJES = {
   rut_empresa_invalido: "El RUT de la empresa no es válido.",
   rut_representante_invalido: "El RUT del representante no es válido.",
   correo_requerido: "Escribe el correo del cliente: se usa para enviarle la invitación de sus visitas.",
+  tarea_cerrada: "Esa tarea ya está hecha o cancelada.",
+  fecha_pasada: "Elige una fecha y hora que todavía no hayan pasado.",
   correo_empresa_invalido: "El correo de contacto no es válido.",
   chasis_invalido: "Escribe el número de chasis (VIN) del vehículo.",
   tasacion_fiscal_invalida: "Escribe la tasación fiscal del vehículo (la que figura en el certificado del Registro Civil o el SII).",
@@ -245,13 +247,22 @@ const MENSAJES = {
   "Failed to fetch": "No se pudo conectar con el servidor. Revisa tu conexión e inténtalo de nuevo.",
   tramos_invalidos: "Los tramos no son válidos: no pueden superponerse y solo el último puede quedar sin tope.",
 };
-/** Qué pasó con la invitación de calendario al agendar una visita (respuesta de tareas.create). */
-export function mensajeInvitacion(invitacion) {
+/**
+ * Qué pasó con la invitación de calendario de una visita (respuesta de tareas.create / reprogramar / cancelar).
+ * `modo`: «nueva» (agendada), «cambio» (reprogramada) o «cancelada».
+ */
+export function mensajeInvitacion(invitacion, modo = "nueva") {
+  const que = { nueva: "Visita agendada", cambio: "Visita reprogramada", cancelada: "Visita cancelada" }[modo] || "Visita agendada";
+  const ok = {
+    nueva: "Visita agendada: se envió la invitación al correo del cliente para que la agregue a su calendario.",
+    cambio: "Visita reprogramada: el cliente recibió la nueva hora por correo y su calendario se actualizará.",
+    cancelada: "Visita cancelada: el cliente recibió el aviso por correo y la visita se quitará de su calendario.",
+  }[modo];
   return {
-    enviada: { ok: true, texto: "Visita agendada: se envió la invitación al correo del cliente para que la agregue a su calendario." },
-    sin_correo: { ok: false, texto: "Visita agendada, pero el cliente no tiene correo: agrégalo con «Editar datos» para enviarle la invitación de calendario." },
-    correo_inactivo: { ok: false, texto: "Visita agendada. El envío de correos no está configurado, así que no se envió la invitación al cliente." },
-    fallida: { ok: false, texto: "Visita agendada, pero no se pudo enviar la invitación por correo. Avísale al cliente por otro medio." },
+    enviada: { ok: true, texto: ok },
+    sin_correo: { ok: false, texto: modo === "nueva" ? `${que}, pero el cliente no tiene correo: agrégalo con «Editar datos» para enviarle la invitación de calendario.` : `${que}, pero el cliente no tiene correo: avísale por teléfono o WhatsApp.` },
+    correo_inactivo: { ok: false, texto: `${que}. El envío de correos no está configurado, así que no se le avisó al cliente.` },
+    fallida: { ok: false, texto: `${que}, pero no se pudo avisar al cliente por correo. Avísale por otro medio.` },
   }[invitacion] || null;
 }
 

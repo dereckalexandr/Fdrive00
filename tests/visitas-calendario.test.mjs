@@ -112,3 +112,68 @@ test("Agendar una visita: el cliente recibe la invitación de calendario por cor
   assert.equal(ts.invitacion, "sin_correo");
   n++;
 });
+
+test("Reprogramar una visita: mismo evento con la nueva hora (secuencia mayor); el calendario del cliente se actualiza", async () => {
+  const l = await ve(U.e1.token, "leads.create", { exigirCorreo: true, cliente: { nombre: "Rita Cambio", telefono: "944440000", email: "rita@mail.cl" }, lead: { tipo: "venta", fuente: "Llamada" } });
+  const t = await ve(U.e1.token, "tareas.create", { leadId: l.lead.id, titulo: "Visita", tipo: "visita", venceEn: manana11() });
+  assert.equal(t.invitacion, "enviada");
+  assert.equal(db.tablas.tareas.find((x) => x.id === t.tarea.id).invitacion_enviada, true);
+
+  const nueva = new Date(Date.parse(manana11()) + 2 * 86_400_000 + 3_600_000).toISOString(); // dos días después, 12:00
+  assert.equal((await ve(U.e1.token, "tareas.reprogramar", { id: t.tarea.id, venceEn: "2020-01-01T10:00:00Z" })).error, "fecha_pasada");
+  assert.equal((await ve(U.e1.token, "tareas.reprogramar", { id: t.tarea.id, venceEn: "mañana" })).error, "fecha_invalida");
+  const antes = correos.length;
+  const r = await ve(U.e1.token, "tareas.reprogramar", { id: t.tarea.id, venceEn: nueva });
+  assert.equal(r.status, 200, JSON.stringify(r));
+  assert.equal(r.invitacion, "enviada");
+  assert.equal(r.tarea.vence_en, nueva);
+  assert.ok(r.tarea.reprogramada_en);
+  const c = correos.slice(antes).find((x) => x.to[0] === "rita@mail.cl");
+  assert.match(c.subject, /Cambio de horario de tu visita/);
+  assert.match(c.html, /antes: .+ a las 11:00/);
+  const ics = Buffer.from(c.attachments[0].content, "base64").toString("utf8").replace(/\r\n /g, "");
+  assert.match(ics, new RegExp(`UID:visita-${t.tarea.id}@drivefuturo`), "mismo evento");
+  assert.match(ics, /SEQUENCE:1/);
+  assert.match(ics, /METHOD:REQUEST/);
+  assert.match(ics, new RegExp(`DTSTART:${nueva.replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z")}`));
+  assert.ok(db.tablas.lead_eventos.some((e) => e.lead_id === l.lead.id && /Tarea reprogramada/.test(e.detalle)));
+});
+
+test("Cancelar una visita: sale de la agenda sin contar como cumplida y el cliente recibe la cancelación", async () => {
+  const l = await ve(U.e1.token, "leads.create", { exigirCorreo: true, cliente: { nombre: "Cata Cancela", telefono: "955550000", email: "cata@mail.cl" }, lead: { tipo: "compra", fuente: "Llamada", vehiculoOfrecido: { patente: "CCDD22", marca: "Kia", modelo: "Rio", anio: 2019, km: 50000 } } });
+  assert.equal(l.status, 200, JSON.stringify(l));
+  const t = await ve(U.e1.token, "tareas.create", { leadId: l.lead.id, titulo: "Visita para tasar", tipo: "visita", venceEn: manana11() });
+  assert.equal(t.invitacion, "enviada", "también en leads de compra");
+  const antes = correos.length;
+  const c = await ve(U.e1.token, "tareas.cancelar", { id: t.tarea.id, motivo: "El cliente vendió el auto" });
+  assert.equal(c.status, 200, JSON.stringify(c));
+  assert.equal(c.invitacion, "enviada");
+  const fila = db.tablas.tareas.find((x) => x.id === t.tarea.id);
+  assert.equal(fila.cancelada, true);
+  assert.equal(fila.hecha, true, "sale de las listas de pendientes");
+  assert.equal(fila.hecha_en, null, "no cuenta como tarea cumplida");
+  assert.equal(fila.motivo_cancelacion, "El cliente vendió el auto");
+  const m = correos.slice(antes).find((x) => x.to[0] === "cata@mail.cl");
+  assert.match(m.subject, /Visita cancelada/);
+  assert.doesNotMatch(m.html, /vendió el auto/, "el motivo interno no se le envía al cliente");
+  assert.doesNotMatch(m.html, /plataforma/, "sin enlace a la plataforma");
+  const ics = Buffer.from(m.attachments[0].content, "base64").toString("utf8").replace(/\r\n /g, "");
+  assert.match(ics, /METHOD:CANCEL/);
+  assert.match(ics, /STATUS:CANCELLED/);
+  assert.match(ics, new RegExp(`UID:visita-${t.tarea.id}@drivefuturo`));
+  assert.match(ics, /SEQUENCE:1/);
+  assert.equal(m.attachments[0].filename, "cancelacion.ics");
+
+  // Cerrada: ya no se reprograma, cancela ni marca.
+  assert.equal((await ve(U.e1.token, "tareas.cancelar", { id: t.tarea.id })).error, "tarea_cerrada");
+  assert.equal((await ve(U.e1.token, "tareas.reprogramar", { id: t.tarea.id, venceEn: manana11() })).error, "tarea_cerrada");
+  assert.equal((await ve(U.e1.token, "tareas.hecha", { id: t.tarea.id, hecha: false })).error, "tarea_cerrada");
+  assert.ok(!(await ve(U.e1.token, "tareas.list")).tareas.some((x) => x.id === t.tarea.id), "no aparece en la agenda");
+
+  // Una llamada se cancela sin correo al cliente; una visita sin invitación previa tampoco envía nada.
+  const ll = await ve(U.e1.token, "tareas.create", { leadId: l.lead.id, titulo: "Llamar", tipo: "llamada", venceEn: manana11() });
+  const n0 = correos.length;
+  const cl = await ve(U.e1.token, "tareas.cancelar", { id: ll.tarea.id });
+  assert.equal(cl.invitacion, null);
+  assert.equal(correos.length, n0);
+});

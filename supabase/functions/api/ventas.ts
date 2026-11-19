@@ -3261,8 +3261,9 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
   /**
    * Envía al cliente la invitación de calendario de una visita. Devuelve «enviada», «sin_correo» (el cliente no tiene correo),
    * «correo_inactivo» (el envío de correos no está configurado) o «fallida». Nunca hace fallar la tarea.
+   * `modo`: «nueva», «cambio» (reprogramada: mismo evento con la nueva hora) o «cancelada» (quita el evento de su calendario).
    */
-  async function invitarAVisita(tarea: any, lead: any): Promise<string> {
+  async function invitarAVisita(tarea: any, lead: any, modo: "nueva" | "cambio" | "cancelada" = "nueva", inicioAnterior?: string): Promise<string> {
     try {
       const cli = lead.cliente_id ? (await sb.from("clientes").select("nombre, email").eq("id", lead.cliente_id).maybeSingle()).data : null;
       if (!cli || !cli.email) return "sin_correo";
@@ -3276,8 +3277,14 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       const enviados = await enviarInvitacionVisita({
         uid: `visita-${tarea.id}@drivefuturo`, para: cli.email, nombreCliente: cli.nombre, inicio: tarea.vence_en, empresa: String(cfg.sitio_nombre || "Drive Futuro"),
         lugar: lugar || undefined, ejecutivo: eje.data ? eje.data.nombre : undefined, correoEjecutivo: eje.data ? eje.data.email || undefined : undefined,
+        modo, secuencia: Number(tarea.invitacion_seq) || 0, inicioAnterior,
       }, (error) => audit(ctx.actor, "aviso.fallido", "aviso", undefined, { asunto: "invitación de visita", error }));
-      if (enviados > 0) { await evento(lead.id, "nota", `Invitación de calendario enviada a ${cli.email}`); return "enviada"; }
+      if (enviados > 0) {
+        if (modo !== "cancelada") await sb.from("tareas").update({ invitacion_enviada: true }).eq("id", tarea.id);
+        const que = modo === "cancelada" ? "Cancelación de la visita enviada" : modo === "cambio" ? "Invitación actualizada (nueva hora) enviada" : "Invitación de calendario enviada";
+        await evento(lead.id, "nota", `${que} a ${cli.email}`);
+        return "enviada";
+      }
       return "fallida";
     } catch (e) {
       console.error("invitarAVisita:", String((e as any)?.message ?? e));
@@ -3323,10 +3330,59 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     return json({ tarea: data, invitacion });
   }
 
+  /** Tarea del local que esta persona puede modificar (la suya, o cualquiera si es supervisor). */
+  async function tareaModificable(id: string): Promise<{ t?: any; resp?: Response }> {
+    const { data: t } = await scoped(sb.from("tareas").select("*").eq("id", id)).maybeSingle();
+    if (!t) return { resp: err("no_existe", 404) };
+    if (!esSupervisor && t.asignado_a !== userId) return { resp: err("forbidden", 403) };
+    return { t };
+  }
+
+  // Reprogramar: nueva fecha y hora. Si es una visita, el cliente recibe la invitación actualizada (su calendario cambia la hora).
+  if (op === "tareas.reprogramar") {
+    const { t, resp } = await tareaModificable(String(body.id ?? ""));
+    if (resp) return resp;
+    if (t.hecha || t.cancelada) return err("tarea_cerrada");
+    const ms = Date.parse(String(body.venceEn ?? ""));
+    if (!Number.isFinite(ms)) return err("fecha_invalida");
+    if (ms < Date.now() - 5 * 60_000) return err("fecha_pasada");
+    const nueva = new Date(ms).toISOString();
+    if (nueva === new Date(t.vence_en).toISOString()) return err("sin_cambio");
+    const ahora = new Date().toISOString();
+    const { data, error } = await sb.from("tareas").update({ vence_en: nueva, reprogramada_en: ahora, invitacion_seq: (Number(t.invitacion_seq) || 0) + 1 }).eq("id", t.id).select().single();
+    if (error) return fallo(error);
+    const fmt = (iso: string) => new Date(iso).toLocaleString("es-CL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "America/Santiago" });
+    if (t.lead_id) await evento(t.lead_id, "nota", `Tarea reprogramada: ${t.titulo} (${fmt(t.vence_en)} → ${fmt(nueva)})`);
+    let invitacion: string | null = null;
+    if (t.tipo === "visita" && t.lead_id) {
+      const { data: lead } = await sb.from("leads").select("*").eq("id", t.lead_id).maybeSingle();
+      // Si ya tenía invitación, va la actualización del mismo evento; si no (antes no tenía correo), la invitación nueva.
+      if (lead) invitacion = await invitarAVisita(data, lead, t.invitacion_enviada ? "cambio" : "nueva", t.invitacion_enviada ? t.vence_en : undefined);
+    }
+    return json({ tarea: data, invitacion });
+  }
+
+  // Cancelar: la tarea sale de la agenda sin contar como cumplida. Si era una visita con invitación, el cliente recibe la cancelación.
+  if (op === "tareas.cancelar") {
+    const { t, resp } = await tareaModificable(String(body.id ?? ""));
+    if (resp) return resp;
+    if (t.hecha || t.cancelada) return err("tarea_cerrada");
+    const motivo = String(body.motivo ?? "").trim().slice(0, 200);
+    const { data, error } = await sb.from("tareas").update({ cancelada: true, hecha: true, hecha_en: null, motivo_cancelacion: motivo || null, invitacion_seq: (Number(t.invitacion_seq) || 0) + 1 }).eq("id", t.id).select().single();
+    if (error) return fallo(error);
+    if (t.lead_id) await evento(t.lead_id, "nota", `Tarea cancelada: ${t.titulo}${motivo ? ` (${motivo})` : ""}`);
+    let invitacion: string | null = null;
+    if (t.tipo === "visita" && t.lead_id && t.invitacion_enviada) {
+      const { data: lead } = await sb.from("leads").select("*").eq("id", t.lead_id).maybeSingle();
+      if (lead) invitacion = await invitarAVisita(data, lead, "cancelada");
+    }
+    return json({ tarea: data, invitacion, pedirProximaAccion: t.lead_id ? await pedirProximaAccion(t.lead_id) : false });
+  }
+
   if (op === "tareas.hecha") {
-    const { data: t } = await scoped(sb.from("tareas").select("*").eq("id", String(body.id ?? ""))).maybeSingle();
-    if (!t) return err("no_existe", 404);
-    if (!esSupervisor && t.asignado_a !== userId) return err("forbidden", 403);
+    const { t, resp } = await tareaModificable(String(body.id ?? ""));
+    if (resp) return resp;
+    if (t.cancelada) return err("tarea_cerrada");
     const hecha = body.hecha !== false;
     const { data, error } = await sb.from("tareas").update({ hecha, hecha_en: hecha ? new Date().toISOString() : null }).eq("id", t.id).select().single();
     if (error) return fallo(error);

@@ -49,6 +49,61 @@ function aInputFecha(d) {
 }
 const enDias = (dias, hora = 10) => { const d = new Date(); d.setDate(d.getDate() + dias); d.setHours(hora, 0, 0, 0); return d; };
 
+/**
+ * Una tarea del lead: marcar como hecha, reprogramar (nueva fecha y hora) o cancelar. En una visita, el cliente recibe
+ * por correo la invitación actualizada o la cancelación, y su calendario se ajusta solo.
+ */
+function TareaFila({ api, t, puedeEditar, accion, clienteConCorreo = true }) {
+  const [modo, setModo] = useState(""); // "" | reprogramar | cancelar
+  const [cuando, setCuando] = useState(() => aInputFecha(new Date(t.vence_en)));
+  const [motivo, setMotivo] = useState("");
+  const [aviso, setAviso] = useState(null);
+  const abierta = !t.hecha && !t.cancelada;
+  const esVisita = t.tipo === "visita";
+  const color = t.cancelada || t.hecha ? "text-stone-400" : claseTarea(t.vence_en) === "vencida" ? "text-rose-700" : "text-stone-800";
+  const ejecutar = (op, extra, modoInv) => accion(async () => {
+    setAviso(null);
+    const r = await api(op, { id: t.id, ...extra });
+    setModo("");
+    setAviso(mensajeInvitacion(r && r.invitacion, modoInv));
+    return r;
+  });
+  return (
+    <li className="flex flex-col gap-1.5 py-1">
+      <div className={`flex items-center gap-3 text-sm ${color}`}>
+        <input type="checkbox" checked={!!t.hecha && !t.cancelada} disabled={!!t.cancelada || !puedeEditar} onChange={(e) => accion(() => api("tareas.hecha", { id: t.id, hecha: e.target.checked }))} aria-label="Marcar como hecha" />
+        <span className={`flex-1 ${t.hecha || t.cancelada ? "line-through" : ""}`}>{t.titulo}</span>
+        {t.cancelada && <span className="text-[11px] px-1.5 py-0.5 bg-stone-200 text-stone-600 no-underline" title={t.motivo_cancelacion || ""}>Cancelada</span>}
+        {t.reprogramada_en && abierta && <span className="text-[11px] text-sky-700">Reprogramada</span>}
+        <span className="text-xs whitespace-nowrap">{fechaHora(t.vence_en)}</span>
+        {abierta && puedeEditar && !modo && (
+          <span className="flex gap-2 text-xs">
+            <button type="button" onClick={() => { setModo("reprogramar"); setAviso(null); }} className="text-sky-700 hover:underline">Reprogramar</button>
+            <button type="button" onClick={() => { setModo("cancelar"); setAviso(null); }} className="text-rose-600 hover:underline">Cancelar</button>
+          </span>
+        )}
+      </div>
+      {modo === "reprogramar" && (
+        <div className="flex flex-wrap items-center gap-2 pl-7">
+          <input type="datetime-local" value={cuando} onChange={(e) => setCuando(e.target.value)} className={`${INPUT} md:w-60`} />
+          <button type="button" onClick={() => ejecutar("tareas.reprogramar", { venceEn: new Date(cuando).toISOString() }, "cambio")} className={BTN_PRIMARIO}>Guardar nueva hora</button>
+          <button type="button" onClick={() => setModo("")} className={BTN}>Volver</button>
+          {esVisita && <p className="w-full text-xs text-stone-500">{clienteConCorreo ? "El cliente recibirá la nueva hora por correo y su calendario se actualizará." : "El cliente no tiene correo: avísale la nueva hora por teléfono o WhatsApp."}</p>}
+        </div>
+      )}
+      {modo === "cancelar" && (
+        <div className="flex flex-wrap items-center gap-2 pl-7">
+          <input value={motivo} maxLength={200} onChange={(e) => setMotivo(e.target.value)} placeholder="Motivo (opcional, no se le envía al cliente)" className={`${INPUT} md:w-80`} />
+          <button type="button" onClick={() => ejecutar("tareas.cancelar", { motivo }, "cancelada")} className={BTN_PRIMARIO}>{esVisita ? "Cancelar la visita" : "Cancelar la tarea"}</button>
+          <button type="button" onClick={() => setModo("")} className={BTN}>Volver</button>
+          {esVisita && t.invitacion_enviada && <p className="w-full text-xs text-stone-500">El cliente recibirá la cancelación por correo y la visita se quitará de su calendario.</p>}
+        </div>
+      )}
+      {aviso && <p className={`pl-7 text-xs ${aviso.ok ? "text-emerald-700" : "text-amber-700"}`}>{aviso.texto}</p>}
+    </li>
+  );
+}
+
 /* =========================================================
    FICHA DE UN LEAD
 ========================================================= */
@@ -234,12 +289,7 @@ function LeadFicha({ api, leadId, catalogos, onCerrar, onCambio, onEditar }) {
         <div className="bg-white border border-stone-200 p-4">
           <p className="text-sm text-stone-700 mb-2">Tareas</p>
           <ul className="flex flex-col gap-1">
-            {tareas.map((t) => (
-              <li key={t.id} className={`flex items-center gap-3 text-sm ${t.hecha ? "text-stone-400 line-through" : claseTarea(t.vence_en) === "vencida" ? "text-rose-700" : "text-stone-800"}`}>
-                <input type="checkbox" checked={t.hecha} onChange={(e) => accion(() => api("tareas.hecha", { id: t.id, hecha: e.target.checked }))} />
-                <span className="flex-1">{t.titulo}</span><span className="text-xs">{fechaHora(t.vence_en)}</span>
-              </li>
-            ))}
+            {tareas.map((t) => <TareaFila key={t.id} api={api} t={t} puedeEditar={puedeEditar} accion={accion} clienteConCorreo={!!(cliente && cliente.email)} />)}
           </ul>
         </div>
       )}

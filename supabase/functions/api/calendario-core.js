@@ -36,19 +36,21 @@ const correoDe = (s) => { const m = /<([^>]+)>/.exec(String(s || "")); return (m
 
 /**
  * Invitación iCalendar de una visita.
- * @param v { uid, inicio (ISO), duracionMin?, titulo, descripcion?, lugar?, organizador: { nombre, email }, invitado: { nombre, email }, secuencia?, ahora? }
+ * @param v { uid, inicio (ISO), duracionMin?, titulo, descripcion?, lugar?, organizador: { nombre, email }, invitado: { nombre, email }, secuencia?, metodo? ("REQUEST" | "CANCEL"), ahora? }
  */
 export function armarIcs(v) {
   const inicio = new Date(v.inicio).toISOString();
   const fin = masMinutos(inicio, v.duracionMin || DURACION_VISITA_MIN);
   const org = v.organizador || {};
   const inv = v.invitado || {};
+  // CANCEL (con el mismo UID y una secuencia mayor) quita el evento del calendario del invitado.
+  const cancelar = v.metodo === "CANCEL";
   const lineas = [
     "BEGIN:VCALENDAR",
     "PRODID:-//Drive Futuro//CRM//ES",
     "VERSION:2.0",
     "CALSCALE:GREGORIAN",
-    "METHOD:REQUEST",
+    `METHOD:${cancelar ? "CANCEL" : "REQUEST"}`,
     "BEGIN:VEVENT",
     `UID:${v.uid}`,
     `DTSTAMP:${fechaIcs(v.ahora || new Date().toISOString())}`,
@@ -59,14 +61,10 @@ export function armarIcs(v) {
     ...(v.lugar ? [`LOCATION:${escaparIcs(v.lugar)}`] : []),
     `ORGANIZER;CN=${escaparIcs(org.nombre || "")}:mailto:${correoDe(org.email)}`,
     `ATTENDEE;CN=${escaparIcs(inv.nombre || "")};ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=FALSE:mailto:${correoDe(inv.email)}`,
-    "STATUS:CONFIRMED",
+    `STATUS:${cancelar ? "CANCELLED" : "CONFIRMED"}`,
     `SEQUENCE:${Number(v.secuencia) || 0}`,
     "TRANSP:OPAQUE",
-    "BEGIN:VALARM",
-    "TRIGGER:-PT2H",
-    "ACTION:DISPLAY",
-    `DESCRIPTION:${escaparIcs(v.titulo)}`,
-    "END:VALARM",
+    ...(cancelar ? [] : ["BEGIN:VALARM", "TRIGGER:-PT2H", "ACTION:DISPLAY", `DESCRIPTION:${escaparIcs(v.titulo)}`, "END:VALARM"]),
     "END:VEVENT",
     "END:VCALENDAR",
   ];
