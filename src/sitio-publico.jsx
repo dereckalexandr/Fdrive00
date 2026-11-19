@@ -7,7 +7,7 @@
  *
  * No necesita iniciar sesión. Habla con la misma función de Supabase (acción «public»), que valida todo, limita los envíos
  * por IP y por teléfono y solo entrega una lista cerrada de datos de cada vehículo (nunca la patente ni el costo).
- * Direcciones: «/» catálogo · «/vehiculo/<id>» detalle · «/vender» vender o consignar · «/plataforma» ingreso del personal.
+ * Direcciones: «/» catálogo · «/vehiculo/<id>» detalle · «/vender» vender o consignar · «/privacidad» política de privacidad · «/plataforma» ingreso del personal.
  * ----------------------------------------------------------------
  */
 import React, { useState, useEffect, useMemo, useRef } from "react";
@@ -15,6 +15,7 @@ import { InputDinero } from "./campo-dinero.jsx";
 import { PLAZOS_FINANCIAMIENTO, PAISES } from "../supabase/functions/api/publico-core.js";
 import { camposDesdePatente } from "./datos-patente.js";
 import { llamar, textoError } from "./publico-api.js";
+import Privacidad from "./sitio-privacidad.jsx";
 
 const clp = (n) => `$${Math.round(Number(n)).toLocaleString("es-CL")}`;
 /** El precio que se destaca: el de financiamiento si el vehículo lo tiene; si no, el de lista. */
@@ -82,7 +83,7 @@ function Marco({ empresa, ir, children }) {
       <footer className="bg-stone-900 text-stone-400 text-xs">
         <div className="max-w-6xl mx-auto px-4 md:px-6 py-6 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
           <p>{(empresa && empresa.nombre) || "Drive Futuro"}{empresa && empresa.direccion ? ` · ${empresa.direccion}` : ""}</p>
-          <p>Los precios y la disponibilidad pueden cambiar sin aviso. <a href="/plataforma" className="underline hover:text-white">Acceso del personal</a></p>
+          <p>Los precios y la disponibilidad pueden cambiar sin aviso. <a href="/privacidad" onClick={(e) => { e.preventDefault(); ir("/privacidad"); }} className="underline hover:text-white">Política de privacidad</a> · <a href="/plataforma" className="underline hover:text-white">Acceso del personal</a></p>
         </div>
       </footer>
     </div>
@@ -206,7 +207,7 @@ function Formulario({ tipo, vehiculo, locales = [], empresa, onCerrar }) {
       </label>
       {verPrivacidad && (
         <p className="text-xs text-stone-600 bg-stone-100 p-3">
-          Usamos tu nombre, teléfono, correo y lo que nos cuentes solo para responder esta solicitud y contactarte sobre ella. No los vendemos ni los compartimos con terceros ajenos a la operación (por ejemplo, la financiera, si tú pides financiamiento). Puedes pedirnos ver, corregir o borrar tus datos escribiéndonos por WhatsApp o en el local.
+          Usamos tu nombre, teléfono, correo y lo que nos cuentes solo para responder esta solicitud y contactarte sobre ella. No los vendemos ni los compartimos con terceros ajenos a la operación (por ejemplo, la financiera, si tú pides financiamiento). Puedes pedirnos ver, corregir o borrar tus datos escribiéndonos por WhatsApp o en el local. <a href="/privacidad" target="_blank" rel="noreferrer" className="underline">Política de privacidad completa</a>.
         </p>
       )}
       {estado.error && <p className="text-sm text-rose-700 bg-rose-50 border border-rose-200 px-3 py-2" role="alert">{estado.error}</p>}
@@ -395,7 +396,8 @@ export default function SitioPublico() {
   const m = ruta.match(/^\/vehiculo\/([A-Za-z0-9-]{10,60})\/?$/);
   return (
     <Marco empresa={empresa} ir={ir}>
-      {ruta.replace(/\/$/, "") === "/vender" ? <Vender locales={locales} empresa={empresa} ir={ir} />
+      {ruta.replace(/\/$/, "") === "/privacidad" ? <Privacidad />
+        : ruta.replace(/\/$/, "") === "/vender" ? <Vender locales={locales} empresa={empresa} ir={ir} />
         : m ? <Detalle id={m[1]} ir={ir} locales={locales} />
         : estado.cargando ? <p className="max-w-6xl mx-auto px-4 py-10 text-stone-600">Cargando vehículos…</p>
         : estado.error ? <p className="max-w-6xl mx-auto px-4 py-10 text-stone-700">{estado.error}</p>

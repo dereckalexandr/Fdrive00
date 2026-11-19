@@ -411,7 +411,7 @@ export function DatosEmpresa({ api }) {
   const e = datos.empresa;
   const abrir = () => {
     setMsg("");
-    setF({ razonSocial: e.razon_social, rut: e.rut, domicilio: e.domicilio, comuna: e.comuna, region: e.region, ciudad: e.ciudad || "Santiago", representante: e.representante, rutRepresentante: e.rut_representante, personeria: e.personeria });
+    setF({ razonSocial: e.razon_social, rut: e.rut, domicilio: e.domicilio, comuna: e.comuna, region: e.region, ciudad: e.ciudad || "Santiago", representante: e.representante, rutRepresentante: e.rut_representante, personeria: e.personeria, correo: e.correo || "" });
     setEditando(true);
   };
   const guardar = async () => {
@@ -419,10 +419,10 @@ export function DatosEmpresa({ api }) {
     try { await api("empresa.save", { datos: f }); setEditando(false); setV((x) => x + 1); await recargar(); } catch (err) { setMsg(mensajeError(err)); }
     setOcupado(false);
   };
-  const filas = [["Razón social", e.razon_social], ["RUT", e.rut], ["Domicilio", [e.domicilio, e.comuna, e.region].filter(Boolean).join(", ")], ["Ciudad de firma", e.ciudad], ["Representante legal", [e.representante, e.rut_representante && `RUT ${e.rut_representante}`].filter(Boolean).join(" · ")], ["Personería", e.personeria]];
+  const filas = [["Razón social", e.razon_social], ["RUT", e.rut], ["Domicilio", [e.domicilio, e.comuna, e.region].filter(Boolean).join(", ")], ["Ciudad de firma", e.ciudad], ["Representante legal", [e.representante, e.rut_representante && `RUT ${e.rut_representante}`].filter(Boolean).join(" · ")], ["Personería", e.personeria], ["Correo de contacto", e.correo]];
   const campo = (k, etiqueta, extra = {}) => <Campo etiqueta={etiqueta} className={extra.ancho ? "md:col-span-3" : ""}><input value={f[k]} maxLength={extra.max || 160} placeholder={extra.ph || ""} onChange={(ev) => setF({ ...f, [k]: ev.target.value })} className={INPUT} /></Campo>;
   return (
-    <Tarjeta titulo="Datos de la empresa" ayuda="Se imprimen en el contrato de compraventa como «Vendedor». Solo el Administrador puede modificarlos.">
+    <Tarjeta titulo="Datos de la empresa" ayuda="Se imprimen en el contrato de compraventa como «Vendedor» y aparecen como responsable en la política de privacidad del sitio (/privacidad). Solo el Administrador puede modificarlos.">
       {!editando && (
         <>
           {!e.razon_social && <p className="text-sm text-amber-700 mb-2">Aún no hay datos cargados: el contrato saldrá con líneas en blanco.</p>}
@@ -443,6 +443,7 @@ export function DatosEmpresa({ api }) {
             {campo("region", "Región", { max: 60, ph: "Metropolitana" })}
             {campo("representante", "Representante legal", { max: 120 })}
             {campo("rutRepresentante", "RUT del representante", { max: 14 })}
+            {campo("correo", "Correo de contacto (política de privacidad)", { max: 120, ph: "contacto@empresa.cl" })}
             {campo("personeria", "Personería (texto que sigue a «consta de»)", { max: 400, ancho: true, ph: "la escritura ante el Registro Electrónico de Empresas y Sociedades de fecha 25-05-2022" })}
           </div>
           <div className="flex gap-2">

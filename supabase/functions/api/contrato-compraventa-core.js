@@ -11,7 +11,7 @@
 import { validarRut, formatearRut } from "./crm-core.js";
 
 /** Campos de la empresa vendedora que se imprimen en los contratos. */
-export const CAMPOS_EMPRESA = ["razon_social", "rut", "domicilio", "comuna", "region", "ciudad", "representante", "rut_representante", "personeria"];
+export const CAMPOS_EMPRESA = ["razon_social", "rut", "domicilio", "comuna", "region", "ciudad", "representante", "rut_representante", "personeria", "correo"];
 
 /**
  * Datos de la empresa que edita el Administrador. Razón social y RUT son obligatorios; el resto puede quedar vacío (el contrato muestra una línea para llenar).
@@ -25,11 +25,13 @@ export function validarEmpresa(input) {
   if (!validarRut(i.rut)) return { ok: false, error: "rut_empresa_invalido" };
   const rutRep = t(i.rutRepresentante, 14);
   if (rutRep && !validarRut(rutRep)) return { ok: false, error: "rut_representante_invalido" };
+  const correo = t(i.correo, 120).toLowerCase();
+  if (correo && !/^[^s@]+@[^s@]+.[^s@]{2,}$/.test(correo)) return { ok: false, error: "correo_empresa_invalido" };
   return {
     ok: true,
     value: {
       razon_social: razon, rut: formatearRut(i.rut), domicilio: t(i.domicilio, 160), comuna: t(i.comuna, 60), region: t(i.region, 60), ciudad: t(i.ciudad, 60) || "Santiago",
-      representante: t(i.representante, 120), rut_representante: rutRep ? formatearRut(rutRep) : "", personeria: t(i.personeria, 400),
+      representante: t(i.representante, 120), rut_representante: rutRep ? formatearRut(rutRep) : "", personeria: t(i.personeria, 400), correo,
     },
   };
 }

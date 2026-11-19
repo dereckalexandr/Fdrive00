@@ -177,6 +177,7 @@ const MENSAJES = {
   razon_social_requerida: "Escribe la razón social de la empresa.",
   rut_empresa_invalido: "El RUT de la empresa no es válido.",
   rut_representante_invalido: "El RUT del representante no es válido.",
+  correo_empresa_invalido: "El correo de contacto no es válido.",
   chasis_invalido: "Escribe el número de chasis (VIN) del vehículo.",
   tasacion_fiscal_invalida: "Escribe la tasación fiscal del vehículo (la que figura en el certificado del Registro Civil o el SII).",
   kilometraje_invalido: "El kilometraje no es válido.",

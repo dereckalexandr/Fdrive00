@@ -185,6 +185,19 @@ export async function publicOp(ctx: CtxPublico, body: any): Promise<Response> {
   const datosEmpresa = (c: any) => ({ nombre: c.sitio_nombre, whatsapp: c.sitio_whatsapp, direccion: c.sitio_direccion, tasaMensual: c.tasa_mensual_web });
 
   /* ---------- catálogo ---------- */
+  // Política de privacidad: quién es el responsable (datos públicos de la empresa: razón social, RUT, domicilio y correo de contacto).
+  if (op === "privacidad") {
+    const cfg = await config();
+    const g = await sb.from("kv_store").select("value").eq("key", "empresa::datos").maybeSingle();
+    let e: any = {};
+    try { e = g.data && g.data.value ? JSON.parse(g.data.value) : {}; } catch { e = {}; }
+    const s = (x: unknown) => (x ? String(x) : "");
+    return json({
+      sitio: cfg.sitio_nombre, whatsapp: cfg.sitio_whatsapp, direccion: cfg.sitio_direccion,
+      responsable: { razon_social: s(e.razon_social), rut: s(e.rut), domicilio: s(e.domicilio), comuna: s(e.comuna), region: s(e.region), correo: s(e.correo) },
+    });
+  }
+
   if (op === "catalogo") {
     const [vq, lq, cfg] = await Promise.all([
       sb.from("vehiculos").select("id, marca, modelo, version, anio, km, color, transmision, combustible, precio_lista, precio_financiamiento, estado, activo, fotos, local_id, creado_en").eq("activo", true).in("estado", ESTADOS_VISIBLES).order("creado_en", { ascending: false }),
