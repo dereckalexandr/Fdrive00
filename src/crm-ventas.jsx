@@ -621,7 +621,7 @@ function TarjetaLead({ lead, cliente, vehiculo, asignado, marca = {}, proxima, m
       )}
 
       {abierto && (
-        <div className="flex items-center gap-1 mt-2" onClick={(e) => e.stopPropagation()}>
+        <div className="flex flex-wrap items-center gap-1 mt-2" onClick={(e) => e.stopPropagation()}>
           {tel && <a href={`tel:${tel}`} onClick={parar(() => onAccion("llamada"))} className="px-2 py-1 text-xs border border-stone-200 rounded-lg hover:bg-stone-50" title="Llamar">📞</a>}
           {tel && <a href={`https://wa.me/${waNumero(tel)}`} target="_blank" rel="noreferrer" onClick={parar(() => onAccion("whatsapp"))} className="px-2 py-1 text-xs border border-stone-200 rounded-lg hover:bg-stone-50" title="WhatsApp">💬</a>}
           <button type="button" onClick={parar(() => onAccion("nota"))} className="px-2 py-1 text-xs border border-stone-200 rounded-lg hover:bg-stone-50" title="Registrar nota o contacto">📝</button>
@@ -715,7 +715,7 @@ function Leads({ api, catalogos, abrirLead, version, onCambio }) {
           const auto = (ETAPAS.find((e) => e.id === id) || {}).automatica || ["tasacion", "contrato", "documentos"].includes(id);
           const nombre = etapaDeOperacion(tipo, id, etapaNombre(id));
           return (
-            <div key={id} className={`bg-stone-50 border border-stone-200 border-t-4 rounded-xl w-full md:w-[270px] md:shrink-0 ${COLOR_ETAPA[id]} ${sobre === id ? "ring-2 ring-amber-400" : ""}`}
+            <div key={id} className={`bg-stone-50 border border-stone-200 border-t-4 rounded-xl w-full md:w-[270px] md:shrink-0 xl:w-auto xl:flex-1 xl:shrink xl:min-w-[245px] ${COLOR_ETAPA[id]} ${sobre === id ? "ring-2 ring-amber-400" : ""}`}
               onDragOver={(e) => { e.preventDefault(); setSobre(id); }} onDragLeave={() => setSobre("")}
               onDrop={(e) => { e.preventDefault(); setSobre(""); const lead = delTipo.find((l) => l.id === e.dataTransfer.getData("text/plain")); if (lead) mover(lead, id); }}>
               <div className="px-3 py-2 flex items-center justify-between gap-2" title={ayudaDeEtapa(tipo, id)}>

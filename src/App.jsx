@@ -1590,20 +1590,20 @@ function AdminDashboard({ onExit }) {
   return (
     <div className="min-h-screen bg-stone-100 pb-16">
       <div className="bg-stone-900 text-stone-100">
-        <div className="max-w-6xl mx-auto px-4 md:px-6 py-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div className="marco-crm py-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
             <p className="text-xs uppercase tracking-widest text-stone-400 mb-1">Panel administrador</p>
             <h1 className="font-serif text-2xl md:text-3xl">Administración de la plataforma</h1>
           </div>
           <button onClick={onExit} className="self-start md:self-auto border border-stone-700 px-3 py-1.5 text-sm text-stone-300 hover:bg-stone-800">Salir</button>
         </div>
-        <div className="pestanas-scroll max-w-6xl mx-auto px-4 md:px-6 py-2 flex gap-1 border-t border-white/10 overflow-x-auto whitespace-nowrap">
+        <div className="pestanas-scroll marco-crm py-2 flex gap-1 border-t border-white/10 overflow-x-auto whitespace-nowrap">
           {PESTANAS_CRM.map(([id, texto]) => (
             <button key={id} onClick={() => setTab(id)} className={`px-3.5 py-2 text-sm rounded-lg shrink-0 ${tab === id ? "bg-white/15 text-amber-300 font-medium" : "text-stone-300 hover:text-white hover:bg-white/10"}`}>{texto}</button>
           ))}
         </div>
       </div>
-      <div className="max-w-6xl mx-auto px-4 md:px-6 mt-8 flex flex-col gap-6">
+      <div className="marco-crm mt-8 flex flex-col gap-6">
         <AdminCrmPanel tab={tab} renderEstimador={(p) => <TasacionCompra {...p} />} renderFichas={() => <FichasEquipo />} />
       </div>
     </div>
@@ -1722,7 +1722,7 @@ function AppRoutes() {
     return (
       <div className="min-h-screen bg-stone-100 pb-16">
         <div className="bg-stone-900 text-stone-100">
-          <div className="max-w-6xl mx-auto px-6 py-6 flex items-center justify-between gap-4">
+          <div className="marco-crm py-6 flex items-center justify-between gap-4">
             <div>
               <p className="text-xs uppercase tracking-widest text-stone-400 mb-1">{me.nombre}{me.local ? ` · ${me.local.nombre}` : ""}</p>
               <h1 className="font-serif text-2xl md:text-3xl">Mi dashboard</h1>
@@ -1730,7 +1730,7 @@ function AppRoutes() {
             <button onClick={() => setScreen("estacion")} className="border border-stone-700 px-3 py-1.5 text-sm text-stone-300 hover:bg-stone-800">Volver</button>
           </div>
         </div>
-        <div className="max-w-6xl mx-auto px-6 mt-6"><ModuloVentas permisos={me.permisos} renderEstimador={(p) => <TasacionCompra {...p} />} renderFichas={() => <FichasEquipo />} /></div>
+        <div className="marco-crm mt-6"><ModuloVentas permisos={me.permisos} renderEstimador={(p) => <TasacionCompra {...p} />} renderFichas={() => <FichasEquipo />} /></div>
       </div>
     );
   }
@@ -1739,7 +1739,7 @@ function AppRoutes() {
     return (
       <div className="min-h-screen bg-stone-100 pb-16">
         <div className="bg-stone-900 text-stone-100">
-          <div className="max-w-6xl mx-auto px-6 py-6 flex items-center justify-between gap-4">
+          <div className="marco-crm py-6 flex items-center justify-between gap-4">
             <div>
               <p className="text-xs uppercase tracking-widest text-stone-400 mb-1">{me.nombre}{me.local ? ` · ${me.local.nombre}` : ""}</p>
               <h1 className="font-serif text-2xl md:text-3xl">Marketing y RRSS</h1>
@@ -1747,7 +1747,7 @@ function AppRoutes() {
             <button onClick={() => setScreen("estacion")} className="border border-stone-700 px-3 py-1.5 text-sm text-stone-300 hover:bg-stone-800">Volver</button>
           </div>
         </div>
-        <div className="max-w-6xl mx-auto px-6 mt-6"><ModuloMarketing permisos={me.permisos} /></div>
+        <div className="marco-crm mt-6"><ModuloMarketing permisos={me.permisos} /></div>
       </div>
     );
   }
@@ -1756,7 +1756,7 @@ function AppRoutes() {
     return (
       <div className="min-h-screen bg-stone-100 pb-16">
         <div className="bg-stone-900 text-stone-100">
-          <div className="max-w-6xl mx-auto px-6 py-6 flex items-center justify-between gap-4">
+          <div className="marco-crm py-6 flex items-center justify-between gap-4">
             <div>
               <p className="text-xs uppercase tracking-widest text-stone-400 mb-1">{me.nombre}{me.local ? ` · ${me.local.nombre}` : ""}</p>
               <h1 className="font-serif text-2xl md:text-3xl">Avisos</h1>
@@ -1764,7 +1764,7 @@ function AppRoutes() {
             <button onClick={() => setScreen("estacion")} className="border border-stone-700 px-3 py-1.5 text-sm text-stone-300 hover:bg-stone-800">Volver</button>
           </div>
         </div>
-        <div className="max-w-6xl mx-auto px-6 mt-6"><ModuloAnuncios permisos={me.permisos} /></div>
+        <div className="marco-crm mt-6"><ModuloAnuncios permisos={me.permisos} /></div>
       </div>
     );
   }
@@ -1773,7 +1773,7 @@ function AppRoutes() {
     return (
       <div className="min-h-screen bg-stone-100 pb-16">
         <div className="bg-stone-900 text-stone-100">
-          <div className="max-w-6xl mx-auto px-6 py-6 flex items-center justify-between gap-4">
+          <div className="marco-crm py-6 flex items-center justify-between gap-4">
             <div>
               <p className="text-xs uppercase tracking-widest text-stone-400 mb-1">{me.nombre}{me.local ? ` · ${me.local.nombre}` : ""}</p>
               <h1 className="font-serif text-2xl md:text-3xl">Validaciones</h1>
@@ -1781,7 +1781,7 @@ function AppRoutes() {
             <button onClick={() => setScreen("estacion")} className="border border-stone-700 px-3 py-1.5 text-sm text-stone-300 hover:bg-stone-800">Volver</button>
           </div>
         </div>
-        <div className="max-w-6xl mx-auto px-6 mt-6"><ModuloValidaciones permisos={me.permisos} /></div>
+        <div className="marco-crm mt-6"><ModuloValidaciones permisos={me.permisos} /></div>
       </div>
     );
   }
@@ -1790,7 +1790,7 @@ function AppRoutes() {
     return (
       <div className="min-h-screen bg-stone-100 pb-16">
         <div className="bg-stone-900 text-stone-100">
-          <div className="max-w-6xl mx-auto px-6 py-6 flex items-center justify-between gap-4">
+          <div className="marco-crm py-6 flex items-center justify-between gap-4">
             <div>
               <p className="text-xs uppercase tracking-widest text-stone-400 mb-1">{me.nombre}{me.local ? ` · ${me.local.nombre}` : ""}</p>
               <h1 className="font-serif text-2xl md:text-3xl">Tasaciones</h1>
@@ -1798,7 +1798,7 @@ function AppRoutes() {
             <button onClick={() => setScreen("estacion")} className="border border-stone-700 px-3 py-1.5 text-sm text-stone-300 hover:bg-stone-800">Volver</button>
           </div>
         </div>
-        <div className="max-w-6xl mx-auto px-6 mt-6"><ModuloTasaciones permisos={me.permisos} renderEstimador={(p) => <TasacionCompra {...p} />} /></div>
+        <div className="marco-crm mt-6"><ModuloTasaciones permisos={me.permisos} renderEstimador={(p) => <TasacionCompra {...p} />} /></div>
       </div>
     );
   }

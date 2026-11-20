@@ -21,6 +21,19 @@ body {
   /* Títulos: peso y espaciado de una interfaz moderna. */
   .font-serif { font-weight: 600; letter-spacing: -0.015em; }
 
+  /* Marco de las pantallas del CRM: usa el ancho del monitor (laptop o escritorio) con un tope para pantallas
+     ultra anchas, y márgenes laterales que crecen con la pantalla. */
+  .marco-crm {
+    width: 100%;
+    max-width: 1920px;
+    margin-left: auto;
+    margin-right: auto;
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+  @media (min-width: 768px) { .marco-crm { padding-left: 1.5rem; padding-right: 1.5rem; } }
+  @media (min-width: 1536px) { .marco-crm { padding-left: 2.5rem; padding-right: 2.5rem; } }
+
   /* Controles de formulario y botones. */
   button,
   select,
