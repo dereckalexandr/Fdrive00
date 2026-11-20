@@ -67,7 +67,7 @@ function Marco({ empresa, ir, children }) {
   return (
     <div className="min-h-screen bg-stone-50 text-stone-900 flex flex-col">
       <header className="bg-stone-900 text-stone-100">
-        <div className="max-w-6xl mx-auto px-4 md:px-6 py-4 flex items-center justify-between gap-4">
+        <div className="marco-crm py-4 flex items-center justify-between gap-4">
           <a href="/" onClick={(e) => { e.preventDefault(); ir("/"); }} className="flex items-center gap-2.5 font-serif text-xl md:text-2xl">
             <span className="w-9 h-9 rounded-xl bg-amber-500 text-stone-900 text-sm font-bold flex items-center justify-center">{String((empresa && empresa.nombre) || "Drive Futuro").split(/s+/).slice(0, 2).map((x) => x[0]).join("").toUpperCase()}</span>
             {(empresa && empresa.nombre) || "Drive Futuro"}
@@ -81,7 +81,7 @@ function Marco({ empresa, ir, children }) {
       </header>
       <main className="flex-1">{children}</main>
       <footer className="bg-stone-900 text-stone-400 text-xs">
-        <div className="max-w-6xl mx-auto px-4 md:px-6 py-6 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+        <div className="marco-crm py-6 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
           <p>{(empresa && empresa.nombre) || "Drive Futuro"}{empresa && empresa.direccion ? ` · ${empresa.direccion}` : ""}</p>
           <p>Los precios y la disponibilidad pueden cambiar sin aviso. <a href="/privacidad" onClick={(e) => { e.preventDefault(); ir("/privacidad"); }} className="underline hover:text-white">Política de privacidad</a> · <a href="/plataforma" className="underline hover:text-white">Acceso del personal</a></p>
         </div>
@@ -279,13 +279,13 @@ function Catalogo({ datos, ir }) {
   return (
     <>
       <section className="bg-stone-900 text-stone-100">
-        <div className="max-w-6xl mx-auto px-4 md:px-6 py-10 md:py-14">
+        <div className="marco-crm py-10 md:py-14">
           <h1 className="font-serif text-3xl md:text-5xl leading-tight max-w-2xl">Tu próximo auto, con respaldo y financiamiento a tu medida</h1>
           <p className="text-stone-300 mt-3 max-w-xl text-sm md:text-base">Vehículos revisados e inspeccionados. Consulta, agenda una visita o cotiza tu cuota en minutos.</p>
           <div className="flex flex-wrap gap-2 mt-6"><a href="/vender" onClick={(e) => { e.preventDefault(); ir("/vender"); }} className={BTN}>Vende o consigna tu auto</a></div>
         </div>
       </section>
-      <section className="max-w-6xl mx-auto px-4 md:px-6 py-6 flex flex-col gap-5">
+      <section className="marco-crm py-6 flex flex-col gap-5">
         <div className="bg-white border border-stone-200 p-3 md:p-4 grid grid-cols-2 md:grid-cols-6 gap-3">
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar marca o modelo" className={`${INPUT} col-span-2`} aria-label="Buscar" />
           <select value={marca} onChange={(e) => setMarca(e.target.value)} className={INPUT} aria-label="Marca"><option value="">Todas las marcas</option>{marcas.map((m) => <option key={m}>{m}</option>)}</select>
@@ -297,7 +297,7 @@ function Catalogo({ datos, ir }) {
         {lista.length === 0 ? (
           <div className="bg-white border border-stone-200 p-10 text-center text-stone-600">{datos.vehiculos.length === 0 ? "Pronto tendremos nuevos vehículos. Escríbenos y te avisamos." : "No hay vehículos con esos filtros. Prueba quitando alguno."}</div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-5">{lista.map((v) => <Tarjeta key={v.id} v={v} ir={ir} />)}</div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 min-[1800px]:grid-cols-5 gap-4 md:gap-5">{lista.map((v) => <Tarjeta key={v.id} v={v} ir={ir} />)}</div>
         )}
       </section>
     </>
@@ -318,9 +318,9 @@ function Detalle({ id, ir, locales }) {
       .catch((e) => vivo && setEstado({ cargando: false, error: e.status === 404 ? "Este vehículo ya no está disponible." : textoError(e), datos: null }));
     return () => { vivo = false; };
   }, [id]);
-  if (estado.cargando) return <p className="max-w-6xl mx-auto px-4 py-10 text-stone-600">Cargando…</p>;
+  if (estado.cargando) return <p className="marco-crm py-10 text-stone-600">Cargando…</p>;
   if (estado.error) return (
-    <div className="max-w-6xl mx-auto px-4 py-10 flex flex-col gap-4 items-start">
+    <div className="marco-crm py-10 flex flex-col gap-4 items-start">
       <p className="text-stone-800">{estado.error}</p>
       <a href="/" onClick={(e) => { e.preventDefault(); ir("/"); }} className={BTN}>Ver todos los vehículos</a>
     </div>
@@ -329,7 +329,7 @@ function Detalle({ id, ir, locales }) {
   const wa = empresa && empresa.whatsapp ? `https://wa.me/${empresa.whatsapp}?text=${encodeURIComponent(`Hola, me interesa el ${nombreVeh(v)} ${v.anio} (${clp(precioDestacado(v))}) que vi en la web.`)}` : "";
   const datosTecnicos = [["Año", v.anio], ["Kilometraje", km(v.km)], ["Transmisión", v.transmision], ["Combustible", v.combustible], ["Color", v.color]].filter(([, x]) => x);
   return (
-    <div className="max-w-6xl mx-auto px-4 md:px-6 py-6 flex flex-col gap-6">
+    <div className="marco-crm !max-w-7xl py-6 flex flex-col gap-6">
       <a href="/" onClick={(e) => { e.preventDefault(); ir("/"); }} className="text-sm text-stone-600 hover:underline">← Volver a los vehículos</a>
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
         <div className="lg:col-span-3 flex flex-col gap-3">
@@ -399,8 +399,8 @@ export default function SitioPublico() {
       {ruta.replace(/\/$/, "") === "/privacidad" ? <Privacidad />
         : ruta.replace(/\/$/, "") === "/vender" ? <Vender locales={locales} empresa={empresa} ir={ir} />
         : m ? <Detalle id={m[1]} ir={ir} locales={locales} />
-        : estado.cargando ? <p className="max-w-6xl mx-auto px-4 py-10 text-stone-600">Cargando vehículos…</p>
-        : estado.error ? <p className="max-w-6xl mx-auto px-4 py-10 text-stone-700">{estado.error}</p>
+        : estado.cargando ? <p className="marco-crm py-10 text-stone-600">Cargando vehículos…</p>
+        : estado.error ? <p className="marco-crm py-10 text-stone-700">{estado.error}</p>
         : <Catalogo datos={estado.datos} ir={ir} />}
     </Marco>
   );
