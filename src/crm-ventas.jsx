@@ -114,40 +114,96 @@ function TareaFila({ api, t, puedeEditar, accion, clienteConCorreo = true, subti
 /* =========================================================
    FICHA DE UN LEAD
 ========================================================= */
-function NuevaTarea({ api, leadId, onCreada }) {
-  const [titulo, setTitulo] = useState("");
+/** Título sugerido de la próxima acción, si el ejecutivo no escribe uno. */
+const TITULO_SUGERIDO = {
+  llamada: (c) => `Llamar a ${c}`, whatsapp: (c) => `Escribir por WhatsApp a ${c}`,
+  visita: (c) => `Visita de ${c} a la sucursal`, otro: (c) => `Seguimiento de ${c}`,
+};
+
+/**
+ * Seguimiento del lead en una sola tarjeta: 1) qué hiciste (un contacto que ya ocurrió, o una nota) y 2) qué sigue (la próxima
+ * acción con fecha, que va a la Agenda). Cualquiera de las dos puede quedar vacía; un solo botón guarda ambas.
+ */
+function Seguimiento({ api, lead, cliente, accion }) {
+  const nombre = (cliente && cliente.nombre) || "el cliente";
+  const [hecho, setHecho] = useState(""); // "" (nada) | llamada | whatsapp | visita | nota
+  const [detalle, setDetalle] = useState("");
+  const [conSigue, setConSigue] = useState(true);
   const [tipo, setTipo] = useState("llamada");
+  const [titulo, setTitulo] = useState("");
   const [cuando, setCuando] = useState(aInputFecha(enDias(1)));
   const [error, setError] = useState("");
   const [aviso, setAviso] = useState(null);
-  const [enviando, setEnviando] = useState(false);
-  const crear = async () => {
+  const [ocupado, setOcupado] = useState(false);
+  const tituloFinal = titulo.trim() || TITULO_SUGERIDO[tipo](nombre);
+
+  const guardar = async () => {
     setError(""); setAviso(null);
-    const v = validarTarea({ titulo, tipo, venceEn: cuando });
-    if (!v.ok) { setError(mensajeError({ message: v.error })); return; }
-    setEnviando(true);
-    try { const r = await api("tareas.create", { leadId, titulo, tipo, venceEn: new Date(cuando).toISOString() }); setTitulo(""); setAviso(mensajeInvitacion(r && r.invitacion)); onCreada(); }
-    catch (e) { setError(mensajeError(e)); }
-    setEnviando(false);
+    if (!hecho && !conSigue) { setError("Indica qué hiciste, qué sigue o ambas cosas."); return; }
+    if (hecho === "nota" && !detalle.trim()) { setError("Escribe la nota."); return; }
+    if (conSigue) {
+      const v = validarTarea({ titulo: tituloFinal, tipo, venceEn: cuando });
+      if (!v.ok) { setError(mensajeError({ message: v.error })); return; }
+    }
+    setOcupado(true);
+    await accion(async () => {
+      let r = null;
+      if (hecho) r = await api("leads.nota", { id: lead.id, tipo: hecho, detalle });
+      let inv = null;
+      if (conSigue) {
+        const t = await api("tareas.create", { leadId: lead.id, titulo: tituloFinal, tipo, venceEn: new Date(cuando).toISOString() });
+        inv = mensajeInvitacion(t && t.invitacion);
+      }
+      setAviso(inv || { ok: true, texto: hecho && conSigue ? "Guardado: quedó en el historial y la próxima acción en la Agenda." : hecho ? "Guardado en el historial." : "Próxima acción agendada." });
+      setHecho(""); setDetalle(""); setTitulo(""); setCuando(aInputFecha(enDias(1))); setConSigue(true);
+      // Con la próxima acción ya agendada no hace falta volver a preguntar «¿cuál es el siguiente paso?».
+      return conSigue ? { ...(r || {}), pedirProximaAccion: false } : r;
+    });
+    setOcupado(false);
   };
+
   return (
-    <div className="border border-stone-200 bg-white p-3 flex flex-col gap-2">
-      <p className="text-sm text-stone-700">Agendar una tarea</p>
-      <div className="flex flex-col md:flex-row gap-2">
-        <input value={titulo} onChange={(e) => setTitulo(e.target.value)} placeholder="Ej.: Llamar para confirmar visita" className={INPUT} />
-        <select value={tipo} onChange={(e) => setTipo(e.target.value)} className={`${INPUT} md:w-52`}>{TIPOS_TAREA.map((t) => <option key={t.id} value={t.id}>{t.nombre}</option>)}</select>
+    <div className="bg-white border border-stone-200 p-4 flex flex-col gap-3">
+      <p className="text-sm font-medium text-stone-800">Seguimiento</p>
+
+      <div className="flex flex-col gap-2">
+        <p className="text-xs uppercase tracking-wide text-stone-500">1. ¿Qué hiciste? <span className="normal-case tracking-normal text-stone-400">(un contacto que ya ocurrió o una nota; opcional)</span></p>
+        <div className="flex flex-wrap gap-2">
+          {[{ id: "", nombre: "Nada por ahora" }, ...TIPOS_CONTACTO].map((t) => (
+            <button key={t.id || "nada"} type="button" onClick={() => setHecho(t.id)} className={`px-3 py-1.5 text-sm border ${hecho === t.id ? "bg-stone-900 text-white border-stone-900" : "border-stone-300 bg-white text-stone-700"}`}>{t.nombre}</button>
+          ))}
+        </div>
+        {hecho && <textarea rows={2} value={detalle} onChange={(e) => setDetalle(e.target.value)} placeholder={hecho === "nota" ? "Escribe la nota…" : "¿Qué se habló? (opcional)"} className={INPUT} />}
+        {hecho && hecho !== "nota" && lead.etapa === "nuevo" && <p className="text-xs text-stone-500">El primer contacto pasa el lead a «Contactado».</p>}
       </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <input type="datetime-local" value={cuando} onChange={(e) => setCuando(e.target.value)} className={`${INPUT} md:w-60`} />
-        <button type="button" onClick={() => setCuando(aInputFecha(enDias(0, new Date().getHours() + 2)))} className={BTN}>En 2 h</button>
-        <button type="button" onClick={() => setCuando(aInputFecha(enDias(1)))} className={BTN}>Mañana</button>
-        <button type="button" onClick={() => setCuando(aInputFecha(enDias(3)))} className={BTN}>En 3 días</button>
-        <button type="button" onClick={() => setCuando(aInputFecha(enDias(7)))} className={BTN}>En 1 semana</button>
-        <button onClick={crear} disabled={enviando} className={`${BTN_PRIMARIO} ml-auto`}>Agendar</button>
+
+      <div className="flex flex-col gap-2 border-t border-stone-100 pt-3">
+        <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-stone-500">
+          <input type="checkbox" checked={conSigue} onChange={(e) => setConSigue(e.target.checked)} /> 2. ¿Qué sigue? <span className="normal-case tracking-normal text-stone-400">(la próxima acción, va a la Agenda)</span>
+        </label>
+        {conSigue && (
+          <>
+            <div className="flex flex-col md:flex-row gap-2">
+              <select value={tipo} onChange={(e) => setTipo(e.target.value)} className={`${INPUT} md:w-52`}>{TIPOS_TAREA.map((t) => <option key={t.id} value={t.id}>{t.nombre}</option>)}</select>
+              <input value={titulo} onChange={(e) => setTitulo(e.target.value)} placeholder={TITULO_SUGERIDO[tipo](nombre)} className={INPUT} />
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <input type="datetime-local" value={cuando} onChange={(e) => setCuando(e.target.value)} className={`${INPUT} md:w-60`} />
+              <button type="button" onClick={() => setCuando(aInputFecha(enDias(0, new Date().getHours() + 2)))} className={BTN}>En 2 h</button>
+              <button type="button" onClick={() => setCuando(aInputFecha(enDias(1)))} className={BTN}>Mañana</button>
+              <button type="button" onClick={() => setCuando(aInputFecha(enDias(3)))} className={BTN}>En 3 días</button>
+              <button type="button" onClick={() => setCuando(aInputFecha(enDias(7)))} className={BTN}>En 1 semana</button>
+            </div>
+            {tipo === "visita" && <p className="text-xs text-stone-500">Al agendar una visita, el cliente recibe la invitación en su calendario (Google Calendar, Outlook o Apple).</p>}
+          </>
+        )}
       </div>
-      {tipo === "visita" && !aviso && <p className="text-xs text-stone-500">Al agendar una visita, el cliente recibe por correo la invitación para agregarla a su calendario (Google Calendar, Outlook o Apple).</p>}
-      {aviso && <p className={`text-sm ${aviso.ok ? "text-emerald-700" : "text-amber-700"}`}>{aviso.texto}</p>}
-      {error && <p className="text-sm text-rose-600">{error}</p>}
+
+      <div className="flex flex-wrap items-center gap-3">
+        <button type="button" onClick={guardar} disabled={ocupado} className={BTN_AMBAR}>{ocupado ? "Guardando…" : "Guardar"}</button>
+        {aviso && <p className={`text-sm ${aviso.ok ? "text-emerald-700" : "text-amber-700"}`}>{aviso.texto}</p>}
+        {error && <p className="text-sm text-rose-600">{error}</p>}
+      </div>
     </div>
   );
 }
@@ -156,8 +212,6 @@ function LeadFicha({ api, leadId, catalogos, onCerrar, onCambio, onEditar }) {
   const { cargando, error, datos, recargar } = useCarga(() => api("leads.get", { id: leadId }), [api, leadId]);
   const [equipo, setEquipo] = useState([]);
   const [msg, setMsg] = useState("");
-  const [tipo, setTipo] = useState("llamada");
-  const [detalle, setDetalle] = useState("");
   const [motivo, setMotivo] = useState("");
   const [pidePerdida, setPidePerdida] = useState(false);
   const [siguiente, setSiguiente] = useState(false);
@@ -183,7 +237,6 @@ function LeadFicha({ api, leadId, catalogos, onCerrar, onCambio, onEditar }) {
     if (etapa === "perdido") { setPidePerdida(true); return; }
     accion(() => api("leads.mover", { id: lead.id, etapa }));
   };
-  const registrar = () => accion(async () => { const r = await api("leads.nota", { id: lead.id, tipo, detalle }); setDetalle(""); return r; });
   const pp = lead.parte_pago || {};
   const fin = lead.financiamiento || {};
 
@@ -276,21 +329,7 @@ function LeadFicha({ api, leadId, catalogos, onCerrar, onCambio, onEditar }) {
         </div>
       )}
 
-      {puedeEditar && (
-        <div className="bg-white border border-stone-200 p-4 flex flex-col gap-2">
-          <p className="text-sm text-stone-700">Registrar un contacto o una nota</p>
-          <div className="flex flex-wrap gap-2">
-            {TIPOS_CONTACTO.map((t) => (
-              <button key={t.id} onClick={() => setTipo(t.id)} className={`px-3 py-1.5 text-sm border ${tipo === t.id ? "bg-stone-900 text-white border-stone-900" : "border-stone-300 bg-white text-stone-700"}`}>{t.nombre}</button>
-            ))}
-          </div>
-          <textarea rows={2} value={detalle} onChange={(e) => setDetalle(e.target.value)} placeholder={tipo === "nota" ? "Escribe la nota…" : "¿Qué se habló? (opcional)"} className={INPUT} />
-          <div><button onClick={registrar} disabled={tipo === "nota" && !detalle.trim()} className={BTN_AMBAR}>Guardar</button>
-            {lead.etapa === "nuevo" && tipo !== "nota" && <span className="text-xs text-stone-500 ml-3">El primer contacto pasa el lead a «Contactado».</span>}</div>
-        </div>
-      )}
-
-      {puedeEditar && <NuevaTarea api={api} leadId={lead.id} onCreada={async () => { await recargar(); onCambio(); }} />}
+      {puedeEditar && <Seguimiento api={api} lead={lead} cliente={cliente} accion={accion} />}
 
       {tareas.length > 0 && (
         <div className="bg-white border border-stone-200 p-4">
