@@ -3326,9 +3326,9 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     const tareas = (data ?? []).filter((t: any) => todas || t.asignado_a === userId).slice(0, MAX_LISTA);
     const leads = await porIds("leads", tareas.map((t: any) => t.lead_id));
     const clientes = await porIds("clientes", leads.map((l: any) => l.cliente_id));
-    const nombreCliente = new Map(clientes.map((c: any) => [c.id, c.nombre]));
+    const porId = new Map(clientes.map((c: any) => [c.id, c]));
     const info: Record<string, unknown> = {};
-    for (const l of leads) info[l.id] = { cliente: nombreCliente.get(l.cliente_id) ?? "", etapa: l.etapa };
+    for (const l of leads) { const c: any = porId.get(l.cliente_id); info[l.id] = { cliente: c ? c.nombre : "", etapa: l.etapa, conCorreo: !!(c && c.email) }; }
     return json({ tareas, leads: info });
   }
 

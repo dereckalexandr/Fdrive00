@@ -53,7 +53,7 @@ const enDias = (dias, hora = 10) => { const d = new Date(); d.setDate(d.getDate(
  * Una tarea del lead: marcar como hecha, reprogramar (nueva fecha y hora) o cancelar. En una visita, el cliente recibe
  * por correo la invitación actualizada o la cancelación, y su calendario se ajusta solo.
  */
-function TareaFila({ api, t, puedeEditar, accion, clienteConCorreo = true }) {
+function TareaFila({ api, t, puedeEditar, accion, clienteConCorreo = true, subtitulo = "", onAbrir = null, onAviso = null }) {
   const [modo, setModo] = useState(""); // "" | reprogramar | cancelar
   const [cuando, setCuando] = useState(() => aInputFecha(new Date(t.vence_en)));
   const [motivo, setMotivo] = useState("");
@@ -65,14 +65,21 @@ function TareaFila({ api, t, puedeEditar, accion, clienteConCorreo = true }) {
     setAviso(null);
     const r = await api(op, { id: t.id, ...extra });
     setModo("");
-    setAviso(mensajeInvitacion(r && r.invitacion, modoInv));
+    const m = mensajeInvitacion(r && r.invitacion, modoInv);
+    // En la Agenda la fila puede cambiar de grupo o desaparecer al recargar: el aviso lo muestra la Agenda.
+    if (onAviso) onAviso(m); else setAviso(m);
     return r;
   });
   return (
     <li className="flex flex-col gap-1.5 py-1">
       <div className={`flex flex-wrap items-center gap-x-3 gap-y-1 text-sm ${color}`}>
         <input type="checkbox" checked={!!t.hecha && !t.cancelada} disabled={!!t.cancelada || !puedeEditar} onChange={(e) => accion(() => api("tareas.hecha", { id: t.id, hecha: e.target.checked }))} aria-label="Marcar como hecha" />
-        <span className={`flex-1 min-w-[8rem] ${t.hecha || t.cancelada ? "line-through" : ""}`}>{t.titulo}</span>
+        {onAbrir ? (
+          <button type="button" onClick={onAbrir} className="flex-1 min-w-[8rem] text-left">
+            <span className="block">{t.titulo}</span>
+            {subtitulo && <span className="block text-xs text-stone-500">{subtitulo}</span>}
+          </button>
+        ) : <span className={`flex-1 min-w-[8rem] ${t.hecha || t.cancelada ? "line-through" : ""}`}>{t.titulo}</span>}
         {t.cancelada && <span className="text-[11px] px-1.5 py-0.5 bg-stone-200 text-stone-600 no-underline" title={t.motivo_cancelacion || ""}>Cancelada</span>}
         {t.reprogramada_en && abierta && <span className="text-[11px] text-sky-700">Reprogramada</span>}
         <span className="text-xs whitespace-nowrap">{fechaHora(t.vence_en)}</span>
@@ -719,21 +726,21 @@ function Leads({ api, catalogos, abrirLead, version, onCambio }) {
 /* =========================================================
    AGENDA
 ========================================================= */
-function GrupoTareas({ titulo, color, tareas, infoLeads, onHecha, onAbrir }) {
+/** Un grupo de la Agenda (vencidas, hoy, próximas): cada tarea se marca hecha, se reprograma o se cancela aquí mismo. */
+function GrupoTareas({ api, titulo, tareas, infoLeads, accion, onAbrir, onAviso }) {
   if (tareas.length === 0) return null;
   return (
     <Tarjeta titulo={`${titulo} (${tareas.length})`}>
       <ul className="flex flex-col divide-y divide-stone-100">
-        {tareas.map((t) => (
-          <li key={t.id} className="flex items-center gap-3 py-2 text-sm">
-            <input type="checkbox" onChange={() => onHecha(t)} aria-label="Marcar como hecha" />
-            <button onClick={() => t.lead_id && onAbrir(t.lead_id)} className="flex-1 text-left">
-              <span className={`block ${color}`}>{t.titulo}</span>
-              {infoLeads[t.lead_id] && <span className="text-xs text-stone-500">{infoLeads[t.lead_id].cliente} · {etapaNombre(infoLeads[t.lead_id].etapa)}</span>}
-            </button>
-            <span className="text-xs text-stone-500 whitespace-nowrap">{fechaHora(t.vence_en)}</span>
-          </li>
-        ))}
+        {tareas.map((t) => {
+          const info = infoLeads[t.lead_id];
+          return (
+            <TareaFila key={t.id} api={api} t={t} puedeEditar accion={accion} onAviso={onAviso}
+              clienteConCorreo={!!(info && info.conCorreo)}
+              subtitulo={info ? `${info.cliente} · ${etapaNombre(info.etapa)}` : ""}
+              onAbrir={t.lead_id ? () => onAbrir(t.lead_id) : null} />
+          );
+        })}
       </ul>
     </Tarjeta>
   );
@@ -743,10 +750,11 @@ function Agenda({ api, catalogos, abrirLead, version, onCambio }) {
   const [todas, setTodas] = useState(false);
   const { cargando, error, datos, recargar } = useCarga(() => api("tareas.list", { todas }), [api, todas, version]);
   const [msg, setMsg] = useState("");
+  const [aviso, setAviso] = useState(null);
   if (cargando && !datos) return <Cargando />;
   if (error && !datos) return <Aviso>{error}</Aviso>;
   const g = agruparTareas(datos.tareas);
-  const hecha = async (t) => { setMsg(""); try { await api("tareas.hecha", { id: t.id, hecha: true }); await recargar(); onCambio(); } catch (e) { setMsg(mensajeError(e)); } };
+  const accion = async (fn) => { setMsg(""); setAviso(null); try { await fn(); await recargar(); onCambio(); } catch (e) { setMsg(mensajeError(e)); } };
   return (
     <>
       {catalogos.veTodo && (
@@ -756,10 +764,11 @@ function Agenda({ api, catalogos, abrirLead, version, onCambio }) {
         </div>
       )}
       {msg && <Aviso>{msg}</Aviso>}
+      {aviso && <Aviso tipo={aviso.ok ? "ok" : "info"}>{aviso.texto}</Aviso>}
       {datos.tareas.length === 0 && <Tarjeta><p className="text-sm text-stone-500">No hay tareas pendientes. Agenda llamadas y visitas desde la ficha de cada lead.</p></Tarjeta>}
-      <GrupoTareas titulo="Vencidas" color="text-rose-700" tareas={g.vencidas} infoLeads={datos.leads} onHecha={hecha} onAbrir={abrirLead} />
-      <GrupoTareas titulo="Hoy" color="text-stone-900" tareas={g.hoy} infoLeads={datos.leads} onHecha={hecha} onAbrir={abrirLead} />
-      <GrupoTareas titulo="Próximas" color="text-stone-700" tareas={g.proximas} infoLeads={datos.leads} onHecha={hecha} onAbrir={abrirLead} />
+      <GrupoTareas api={api} titulo="Vencidas" tareas={g.vencidas} infoLeads={datos.leads} accion={accion} onAbrir={abrirLead} onAviso={setAviso} />
+      <GrupoTareas api={api} titulo="Hoy" tareas={g.hoy} infoLeads={datos.leads} accion={accion} onAbrir={abrirLead} onAviso={setAviso} />
+      <GrupoTareas api={api} titulo="Próximas" tareas={g.proximas} infoLeads={datos.leads} accion={accion} onAbrir={abrirLead} onAviso={setAviso} />
     </>
   );
 }

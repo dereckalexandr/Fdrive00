@@ -242,3 +242,14 @@ test("Con Google Calendar conectado: Google invita al cliente, y al reprogramar 
     delete entorno.GOOGLE_CLIENT_ID; delete entorno.GOOGLE_CLIENT_SECRET; delete entorno.GOOGLE_REFRESH_TOKEN;
   }
 });
+
+test("Agenda: cada tarea indica si el cliente tiene correo (para avisar al reprogramar o cancelar desde ahí)", async () => {
+  const con = await ve(U.e1.token, "leads.create", { exigirCorreo: true, cliente: { nombre: "Con Correo", telefono: "977770000", email: "con@mail.cl" }, lead: { tipo: "venta", fuente: "Llamada" } });
+  const sin = await ve(U.e1.token, "leads.create", { cliente: { nombre: "Sin Correo Agenda", telefono: "977770001" }, lead: { tipo: "venta", fuente: "Llamada" } });
+  await ve(U.e1.token, "tareas.create", { leadId: con.lead.id, titulo: "Llamar", tipo: "llamada", venceEn: manana11() });
+  await ve(U.e1.token, "tareas.create", { leadId: sin.lead.id, titulo: "Llamar", tipo: "llamada", venceEn: manana11() });
+  const ag = await ve(U.e1.token, "tareas.list");
+  assert.equal(ag.leads[con.lead.id].conCorreo, true);
+  assert.equal(ag.leads[sin.lead.id].conCorreo, false);
+  assert.equal(ag.leads[con.lead.id].cliente, "Con Correo");
+});
