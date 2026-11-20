@@ -208,3 +208,64 @@ export function validarArchivoWa(a) {
   const nombre = String(a.nombre || (mime === "application/pdf" ? "documento.pdf" : "foto.jpg")).replace(/[\\/:*?"<>|]+/g, "_").slice(0, 120);
   return { ok: true, value: { mime, base64: m[2], bytes, nombre, tipo: mime === "application/pdf" ? "document" : "image" } };
 }
+
+/* ---------- Plantillas creadas desde el CRM (se envían a Meta para su aprobación) ---------- */
+export const CATEGORIAS_PLANTILLA = [
+  { id: "UTILITY", nombre: "Servicio (avisos de una gestión en curso: visitas, cotizaciones, documentos)" },
+  { id: "MARKETING", nombre: "Marketing (ofertas, nuevos vehículos, promociones)" },
+];
+export const ESTADOS_PLANTILLA = { APPROVED: "Aprobada", PENDING: "En revisión", IN_APPEAL: "En apelación", REJECTED: "Rechazada", PAUSED: "Pausada", DISABLED: "Deshabilitada", PENDING_DELETION: "Borrándose" };
+
+/** Nombre técnico de la plantilla: minúsculas, números y guion bajo (Meta no acepta otra cosa). */
+export function nombrePlantilla(s) {
+  return String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 60);
+}
+
+/**
+ * Valida una plantilla nueva y la arma como la pide la API de Meta.
+ * input: { nombre, categoria, encabezado?, cuerpo, pie?, botones?: string[], ejemplos?: string[] }
+ * Las variables van numeradas {{1}}, {{2}}… en el cuerpo, en orden, y cada una necesita un ejemplo (Meta lo exige para revisarla).
+ */
+export function validarPlantillaNueva(input) {
+  const i = input || {};
+  const name = nombrePlantilla(i.nombre);
+  if (name.length < 3) return { ok: false, error: "plantilla_nombre" };
+  const category = String(i.categoria || "");
+  if (!CATEGORIAS_PLANTILLA.some((c) => c.id === category)) return { ok: false, error: "plantilla_categoria" };
+  const cuerpo = String(i.cuerpo || "").replace(/\r\n/g, "\n").trim();
+  if (cuerpo.length < 10 || cuerpo.length > 1024) return { ok: false, error: "plantilla_cuerpo" };
+  const vars = variablesDe(cuerpo);
+  if (vars.some((v) => !/^\d+$/.test(v))) return { ok: false, error: "plantilla_variables_numeradas" };
+  // Numeradas desde 1 y sin saltos, en el orden en que aparecen.
+  if (vars.some((v, k) => Number(v) !== k + 1)) return { ok: false, error: "plantilla_variables_numeradas" };
+  // Meta rechaza plantillas que empiezan o terminan con una variable.
+  if (/^\{\{\s*\d+\s*\}\}/.test(cuerpo) || /\{\{\s*\d+\s*\}\}[.!?\s]*$/.test(cuerpo)) return { ok: false, error: "plantilla_variable_borde" };
+  const ejemplos = (i.ejemplos || []).map((e) => String(e || "").replace(/[\r\n\t]+/g, " ").trim());
+  if (vars.length && (ejemplos.length < vars.length || vars.some((_, k) => !ejemplos[k]))) return { ok: false, error: "plantilla_ejemplos" };
+  const encabezado = String(i.encabezado || "").replace(/\s+/g, " ").trim();
+  if (encabezado.length > 60 || variablesDe(encabezado).length) return { ok: false, error: "plantilla_encabezado" };
+  const pie = String(i.pie || "").replace(/\s+/g, " ").trim();
+  if (pie.length > 60 || variablesDe(pie).length) return { ok: false, error: "plantilla_pie" };
+  const botones = (i.botones || []).map((b) => String(b || "").trim()).filter(Boolean);
+  if (botones.length > 3 || botones.some((b) => b.length > 25)) return { ok: false, error: "plantilla_botones" };
+
+  const components = [];
+  if (encabezado) components.push({ type: "HEADER", format: "TEXT", text: encabezado });
+  components.push({ type: "BODY", text: cuerpo, ...(vars.length ? { example: { body_text: [ejemplos.slice(0, vars.length)] } } : {}) });
+  if (pie) components.push({ type: "FOOTER", text: pie });
+  if (botones.length) components.push({ type: "BUTTONS", buttons: botones.map((text) => ({ type: "QUICK_REPLY", text })) });
+  return { ok: true, value: { name, language: "es", category, parameter_format: "POSITIONAL", components } };
+}
+
+/** Lista para la pantalla de administración: todas las plantillas con su estado y, si fue rechazada, el motivo. */
+export function plantillasParaAdmin(lista) {
+  return (lista || []).map((t) => {
+    const comps = t.components || [];
+    const parte = (tipo) => (comps.find((c) => c.type === tipo) || {}).text || "";
+    return {
+      id: String(t.id || ""), nombre: String(t.name || ""), idioma: String(t.language || ""), categoria: String(t.category || ""),
+      estado: String(t.status || ""), estadoNombre: ESTADOS_PLANTILLA[t.status] || String(t.status || ""), motivo: t.rejected_reason && t.rejected_reason !== "NONE" ? String(t.rejected_reason) : "",
+      encabezado: parte("HEADER"), cuerpo: parte("BODY"), pie: parte("FOOTER"), botones: ((comps.find((c) => c.type === "BUTTONS") || {}).buttons || []).map((b) => String(b.text || "")),
+    };
+  }).sort((a, b) => a.nombre.localeCompare(b.nombre));
+}

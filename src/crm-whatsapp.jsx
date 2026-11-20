@@ -10,7 +10,7 @@
  */
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { compressImage } from "./photos.js";
-import { MAX_BYTES_MEDIA } from "../supabase/functions/api/whatsapp-core.js";
+import { MAX_BYTES_MEDIA, CATEGORIAS_PLANTILLA, validarPlantillaNueva, variablesDe, nombrePlantilla } from "../supabase/functions/api/whatsapp-core.js";
 import { INPUT, BTN, BTN_PRIMARIO, Aviso, Cargando, Tarjeta, Campo, useCarga, mensajeError } from "./crm-ui.jsx";
 
 const errorWa = (e) => (e && e.message === "whatsapp_error" && e.detalle ? `WhatsApp no aceptó el mensaje: ${e.detalle}` : mensajeError(e));
@@ -293,6 +293,129 @@ function ConfigWhatsapp({ api, locales }) {
   );
 }
 
+/** Modelos para partir: el usuario los ajusta antes de enviarlos a Meta. */
+const MODELOS_PLANTILLA = [
+  { titulo: "Seguimiento de cotización", nombre: "seguimiento_cotizacion", categoria: "MARKETING", encabezado: "", cuerpo: "Hola {{1}}, te escribo de Drive Futuro. ¿Pudiste revisar la cotización del {{2}}? Quedo atento a tus dudas.", pie: "Responde a este mensaje para hablar con tu ejecutivo", botones: ["Sí, me interesa", "Más adelante"], ejemplos: ["Pedro", "Toyota Yaris 2020"] },
+  { titulo: "Recordatorio de visita", nombre: "recordatorio_visita", categoria: "UTILITY", encabezado: "Recordatorio de visita", cuerpo: "Hola {{1}}, te recordamos tu visita a Drive Futuro el {{2}}. Si necesitas cambiar la hora, responde este mensaje.", pie: "", botones: ["Confirmo", "Cambiar hora"], ejemplos: ["Pedro", "viernes 20 de noviembre a las 11:00"] },
+  { titulo: "Nuevo vehículo disponible", nombre: "nuevo_vehiculo_disponible", categoria: "MARKETING", encabezado: "", cuerpo: "Hola {{1}}, llegó un {{2}} que puede interesarte. ¿Quieres que te envíe fotos y el precio?", pie: "", botones: ["Sí, envíame", "No, gracias"], ejemplos: ["Pedro", "Hyundai Tucson 2022"] },
+  { titulo: "Documentos pendientes", nombre: "documentos_pendientes", categoria: "UTILITY", encabezado: "", cuerpo: "Hola {{1}}, para avanzar con tu {{2}} nos falta recibir algunos documentos. ¿Me los puedes enviar por este medio?", pie: "", botones: [], ejemplos: ["Pedro", "compra del vehículo"] },
+];
+const VACIA = { nombre: "", categoria: "MARKETING", encabezado: "", cuerpo: "", pie: "", botones: ["", "", ""], ejemplos: [] };
+const COLOR_ESTADO = { APPROVED: "bg-emerald-100 text-emerald-800", PENDING: "bg-amber-100 text-amber-800", IN_APPEAL: "bg-amber-100 text-amber-800", REJECTED: "bg-rose-100 text-rose-800", PAUSED: "bg-stone-200 text-stone-700", DISABLED: "bg-stone-200 text-stone-700" };
+
+/**
+ * Plantillas de WhatsApp (Administrador y Jefe Local): se crean aquí y se envían a Meta para su aprobación, sin entrar a Meta.
+ * Solo las aprobadas aparecen al ejecutivo para escribir primero o pasadas las 24 horas.
+ */
+function AdminPlantillas({ api }) {
+  const { cargando, error, datos, recargar } = useCarga(() => api("wa.plantillas_admin", {}), [api]);
+  const [f, setF] = useState(null); // formulario abierto
+  const [msg, setMsg] = useState(null);
+  const [ocupado, setOcupado] = useState(false);
+  const errorWaLocal = (e) => (e && e.message === "whatsapp_error" && e.detalle ? `Meta rechazó la solicitud: ${e.detalle}` : mensajeError(e));
+
+  const vars = f ? variablesDe(f.cuerpo) : [];
+  const ejemplosVista = (txt) => { let t = txt; vars.forEach((v, i) => { t = t.split(new RegExp(`\\{\\{\\s*${v}\\s*\\}\\}`)).join(f.ejemplos[i] || `[${v}]`); }); return t; };
+  const agregarVariable = () => setF({ ...f, cuerpo: `${f.cuerpo}{{${vars.length + 1}}}` });
+  const enviar = async () => {
+    setMsg(null);
+    const datosP = { ...f, botones: f.botones.filter((b) => b.trim()) };
+    const v = validarPlantillaNueva(datosP);
+    if (!v.ok) { setMsg({ ok: false, texto: mensajeError({ message: v.error }) }); return; }
+    setOcupado(true);
+    try {
+      const r = await api("wa.plantilla_crear", { plantilla: datosP });
+      setF(null);
+      setMsg({ ok: true, texto: `Plantilla «${r.plantilla.nombre}» enviada a Meta. Suele quedar aprobada en minutos (a veces hasta 24 horas); cuando diga «Aprobada», los ejecutivos ya la pueden usar.` });
+      await recargar();
+    } catch (e) { setMsg({ ok: false, texto: errorWaLocal(e) }); }
+    setOcupado(false);
+  };
+  const borrar = async (p) => {
+    if (!window.confirm(`¿Borrar la plantilla «${p.nombre}»? Meta no deja volver a usar ese nombre por 30 días.`)) return;
+    setMsg(null); setOcupado(true);
+    try { await api("wa.plantilla_borrar", { nombre: p.nombre }); setMsg({ ok: true, texto: `Plantilla «${p.nombre}» borrada.` }); await recargar(); } catch (e) { setMsg({ ok: false, texto: errorWaLocal(e) }); }
+    setOcupado(false);
+  };
+
+  return (
+    <div className="flex flex-col gap-4">
+      <Tarjeta titulo="Plantillas de WhatsApp" ayuda="Mensajes aprobados por Meta para escribirle primero al cliente o cuando pasaron más de 24 horas desde su último mensaje. Se crean aquí y Meta las revisa (las de «Marketing» tienen costo por envío)."
+        derecha={!f && <button type="button" onClick={() => { setMsg(null); setF({ ...VACIA, botones: ["", "", ""] }); }} className={BTN_PRIMARIO}>+ Nueva plantilla</button>}>
+        {msg && <p className={`text-sm mb-3 ${msg.ok ? "text-emerald-700" : "text-rose-600"}`}>{msg.texto}</p>}
+        {f && (
+          <div className="border border-stone-200 bg-stone-50 p-4 flex flex-col gap-3 mb-4">
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <span className="text-stone-600">Partir de un modelo:</span>
+              {MODELOS_PLANTILLA.map((m) => <button key={m.nombre} type="button" onClick={() => setF({ ...m, botones: [...m.botones, "", "", ""].slice(0, 3) })} className={BTN}>{m.titulo}</button>)}
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div className="flex flex-col gap-3">
+                <Campo etiqueta="Nombre (solo para identificarla)">
+                  <input value={f.nombre} maxLength={60} onChange={(e) => setF({ ...f, nombre: e.target.value })} placeholder="seguimiento_cotizacion" className={INPUT} />
+                  {f.nombre && <span className="text-xs text-stone-500">Se guardará como <span className="font-mono">{nombrePlantilla(f.nombre)}</span></span>}
+                </Campo>
+                <Campo etiqueta="Tipo">
+                  <select value={f.categoria} onChange={(e) => setF({ ...f, categoria: e.target.value })} className={INPUT}>{CATEGORIAS_PLANTILLA.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}</select>
+                </Campo>
+                <Campo etiqueta="Encabezado (opcional, en negrita)"><input value={f.encabezado} maxLength={60} onChange={(e) => setF({ ...f, encabezado: e.target.value })} className={INPUT} /></Campo>
+                <Campo etiqueta="Mensaje">
+                  <textarea rows={4} value={f.cuerpo} maxLength={1024} onChange={(e) => setF({ ...f, cuerpo: e.target.value })} placeholder="Hola {{1}}, ..." className={INPUT} />
+                  <span className="text-xs text-stone-500">Usa <span className="font-mono">{"{{1}}"}</span>, <span className="font-mono">{"{{2}}"}</span>… donde va un dato que cambia (nombre del cliente, vehículo, fecha). <button type="button" onClick={agregarVariable} className="text-sky-700 hover:underline">Agregar variable</button></span>
+                </Campo>
+                {vars.map((v, i) => (
+                  <Campo key={v} etiqueta={`Ejemplo para {{${v}}}`}>
+                    <input value={f.ejemplos[i] || ""} maxLength={100} onChange={(e) => { const ej = [...f.ejemplos]; ej[i] = e.target.value; setF({ ...f, ejemplos: ej }); }} placeholder={i === 0 ? "Pedro" : "Toyota Yaris 2020"} className={INPUT} />
+                  </Campo>
+                ))}
+                <Campo etiqueta="Pie (opcional, texto pequeño)"><input value={f.pie} maxLength={60} onChange={(e) => setF({ ...f, pie: e.target.value })} className={INPUT} /></Campo>
+                <Campo etiqueta="Botones de respuesta rápida (opcional, hasta 3)">
+                  <div className="flex flex-col gap-2">{f.botones.map((b, i) => <input key={i} value={b} maxLength={25} onChange={(e) => { const bs = [...f.botones]; bs[i] = e.target.value; setF({ ...f, botones: bs }); }} placeholder={i === 0 ? "Sí, me interesa" : ""} className={INPUT} />)}</div>
+                </Campo>
+              </div>
+              <div className="flex flex-col gap-2">
+                <p className="text-xs uppercase tracking-wide text-stone-500">Así lo verá el cliente</p>
+                <div className="bg-[#efeae2] p-4 rounded-lg">
+                  <div className="bg-white rounded-lg shadow-sm px-3 py-2 text-sm max-w-sm">
+                    {f.encabezado && <p className="font-semibold mb-1">{f.encabezado}</p>}
+                    <p className="whitespace-pre-wrap text-stone-900">{ejemplosVista(f.cuerpo) || <span className="text-stone-400">Escribe el mensaje…</span>}</p>
+                    {f.pie && <p className="text-xs text-stone-500 mt-1">{f.pie}</p>}
+                  </div>
+                  {f.botones.filter((b) => b.trim()).map((b, i) => <div key={i} className="bg-white rounded-lg shadow-sm px-3 py-1.5 text-sm text-sky-700 text-center mt-1 max-w-sm">{b}</div>)}
+                </div>
+                <p className="text-xs text-stone-500">Consejos para que Meta la apruebe: escribe un mensaje claro y propio del negocio, sin mayúsculas exageradas ni promesas engañosas, y no empieces ni termines con una variable.</p>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button type="button" onClick={enviar} disabled={ocupado} className={BTN_PRIMARIO}>{ocupado ? "Enviando…" : "Enviar a Meta para aprobación"}</button>
+              <button type="button" onClick={() => setF(null)} className={BTN}>Cancelar</button>
+            </div>
+          </div>
+        )}
+        {cargando && !datos && <Cargando />}
+        {error && !datos && <Aviso>{error}</Aviso>}
+        {datos && datos.plantillas.length === 0 && <p className="text-sm text-stone-500">Aún no hay plantillas. Crea la primera con «Nueva plantilla».</p>}
+        {datos && datos.plantillas.length > 0 && (
+          <ul className="flex flex-col divide-y divide-stone-100">
+            {datos.plantillas.map((p) => (
+              <li key={`${p.nombre}-${p.idioma}`} className="py-3 flex flex-col gap-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-mono text-sm text-stone-900">{p.nombre}</span>
+                  <span className={`text-[11px] px-2 py-0.5 ${COLOR_ESTADO[p.estado] || "bg-stone-100 text-stone-600"}`}>{p.estadoNombre}</span>
+                  <span className="text-xs text-stone-500">{p.categoria === "MARKETING" ? "Marketing" : p.categoria === "UTILITY" ? "Servicio" : p.categoria} · {p.idioma}</span>
+                  <button type="button" disabled={ocupado} onClick={() => borrar(p)} className="ml-auto text-xs text-rose-600 hover:underline">Borrar</button>
+                </div>
+                <p className="text-sm text-stone-700 whitespace-pre-wrap">{p.encabezado ? <b>{p.encabezado} · </b> : null}{p.cuerpo}</p>
+                {p.estado === "REJECTED" && <p className="text-xs text-rose-700">Meta la rechazó{p.motivo ? ` (motivo: ${p.motivo})` : ""}. Ajusta el texto y créala de nuevo con otro nombre.</p>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </Tarjeta>
+    </div>
+  );
+}
+
 /** Bandeja del ejecutivo: sus conversaciones (no leídas primero) y la conversación elegida al lado. */
 export function BandejaWhatsapp({ api, abrirLead, locales, onCambio = () => {} }) {
   const { cargando, error, datos, recargar } = useCarga(() => api("wa.list", {}), [api]);
@@ -300,6 +423,7 @@ export function BandejaWhatsapp({ api, abrirLead, locales, onCambio = () => {} }
   const [sel, setSel] = useState(null);
   const [q, setQ] = useState("");
   const [soloNoLeidos, setSoloNoLeidos] = useState(false);
+  const [vista, setVista] = useState("conversaciones"); // conversaciones | plantillas
   const alCambiar = useCallback(() => { recargar(); onCambio(); }, [recargar, onCambio]);
 
   const lista = useMemo(() => {
@@ -318,6 +442,13 @@ export function BandejaWhatsapp({ api, abrirLead, locales, onCambio = () => {} }
   return (
     <div className="flex flex-col gap-4">
       <ConfigWhatsapp api={api} locales={locales} />
+      {datos.puedePlantillas && (
+        <div className="flex border border-stone-300 self-start">
+          <button type="button" onClick={() => setVista("conversaciones")} className={`px-3 py-1.5 text-sm ${vista === "conversaciones" ? "bg-stone-900 text-white" : "bg-white text-stone-700"}`}>Conversaciones</button>
+          <button type="button" onClick={() => setVista("plantillas")} className={`px-3 py-1.5 text-sm ${vista === "plantillas" ? "bg-stone-900 text-white" : "bg-white text-stone-700"}`}>Plantillas</button>
+        </div>
+      )}
+      {vista === "plantillas" && datos.puedePlantillas ? <AdminPlantillas api={api} /> : <>
       {!datos.configurado && <Aviso tipo="info">WhatsApp aún no está conectado: cuando el Administrador cargue las credenciales de Meta, aquí aparecerán las conversaciones.</Aviso>}
       <div className="grid grid-cols-1 lg:grid-cols-[20rem_minmax(0,1fr)] gap-4 items-start">
         <div className={`bg-white border border-stone-200 flex flex-col ${actual ? "hidden lg:flex" : ""}`}>
@@ -354,6 +485,7 @@ export function BandejaWhatsapp({ api, abrirLead, locales, onCambio = () => {} }
           ) : <div className="bg-white border border-stone-200 p-8 text-center text-sm text-stone-500">Elige una conversación.</div>}
         </div>
       </div>
+      </>}
     </div>
   );
 }

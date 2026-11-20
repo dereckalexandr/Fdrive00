@@ -273,3 +273,40 @@ test("Configuración: solo el Administrador ve el estado de los secretos y elige
   assert.equal((await ve(admin, "wa.config_save", { localId: L1 })).status, 200);
   assert.equal((await ve(admin, "wa.estado")).localLeads, L1);
 });
+
+test("Plantillas desde el CRM: el Jefe Local las crea (van a Meta) y las borra; el ejecutivo no", async () => {
+  meta.plantillas = [];
+  const nueva = { nombre: "Nuevo vehículo disponible", categoria: "MARKETING", cuerpo: "Hola {{1}}, llegó un {{2}} que puede interesarte.", ejemplos: ["Pedro", "Hyundai Tucson 2022"], botones: ["Sí, envíame"] };
+  assert.equal((await ve(U.e1.token, "wa.plantilla_crear", { plantilla: nueva })).status, 403, "el ejecutivo no crea plantillas");
+  assert.equal((await ve(U.e1.token, "wa.plantillas_admin")).status, 403);
+  assert.equal((await ve(U.e1.token, "wa.list")).puedePlantillas, false);
+  assert.equal((await ve(U.jefe.token, "wa.list")).puedePlantillas, true);
+  assert.equal((await ve(U.jefe.token, "wa.plantilla_crear", { plantilla: { ...nueva, ejemplos: [] } })).error, "plantilla_ejemplos");
+
+  const r = await ve(U.jefe.token, "wa.plantilla_crear", { plantilla: nueva });
+  assert.equal(r.status, 200, JSON.stringify(r));
+  assert.equal(r.plantilla.nombre, "nuevo_vehiculo_disponible");
+  assert.equal(r.plantilla.estado, "PENDING");
+  const env = meta.llamadas.filter((l) => l.metodo === "POST" && l.ruta.endsWith("/WABA1/message_templates")).pop();
+  assert.equal(env.cuerpo.name, "nuevo_vehiculo_disponible");
+  assert.equal(env.cuerpo.category, "MARKETING");
+  assert.deepEqual(env.cuerpo.components[0].example.body_text, [["Pedro", "Hyundai Tucson 2022"]]);
+  assert.ok(db.tablas.bitacora.some((b) => b.accion === "whatsapp.plantilla_crear"));
+
+  // Mientras Meta no la aprueba, el ejecutivo no la ve para enviar.
+  let lista = await ve(U.jefe.token, "wa.plantillas_admin");
+  assert.equal(lista.plantillas[0].estadoNombre, "En revisión");
+  assert.equal((await ve(U.e1.token, "wa.plantillas", { recargar: true })).plantillas.some((p) => p.nombre === "nuevo_vehiculo_disponible"), false);
+  meta.plantillas[0].status = "APPROVED";
+  assert.equal((await ve(U.e1.token, "wa.plantillas", { recargar: true })).plantillas.some((p) => p.nombre === "nuevo_vehiculo_disponible"), true);
+
+  // Meta rechaza un nombre repetido: el CRM muestra el motivo.
+  const rep = await ve(U.jefe.token, "wa.plantilla_crear", { plantilla: nueva });
+  assert.equal(rep.error, "whatsapp_error");
+  assert.match(rep.detalle, /Ya existe/);
+
+  assert.equal((await ve(U.jefe.token, "wa.plantilla_borrar", { nombre: "nuevo_vehiculo_disponible" })).status, 200);
+  lista = await ve(U.jefe.token, "wa.plantillas_admin");
+  assert.equal(lista.plantillas.length, 0);
+  assert.equal((await ve(U.jefe.token, "wa.plantilla_borrar", { nombre: "MAL nombre" })).error, "plantilla_nombre");
+});

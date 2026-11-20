@@ -94,3 +94,30 @@ test("Archivos para enviar: fotos JPG/PNG y PDF de hasta 5 MB", () => {
   assert.equal(validarArchivoWa({ dataUrl: "hola" }).error, "archivo_invalido");
   assert.equal(validarArchivoWa({ dataUrl: "data:application/pdf;base64," + "A".repeat(7 * 1024 * 1024) }).error, "archivo_muy_grande");
 });
+
+test("Plantillas nuevas: nombre técnico, variables numeradas con ejemplo, sin variable al inicio o al final", async () => {
+  const { validarPlantillaNueva, nombrePlantilla, plantillasParaAdmin } = await import("../supabase/functions/api/whatsapp-core.js");
+  assert.equal(nombrePlantilla("Seguimiento Cotización 2"), "seguimiento_cotizacion_2");
+  const base = { nombre: "Recordatorio visita", categoria: "UTILITY", cuerpo: "Hola {{1}}, te esperamos el {{2}} en la sucursal.", ejemplos: ["Pedro", "viernes 20"] };
+  const ok = validarPlantillaNueva({ ...base, encabezado: "Recordatorio", pie: "Drive Futuro", botones: ["Confirmo", "", "Cambiar hora"] });
+  assert.equal(ok.ok, true);
+  assert.equal(ok.value.name, "recordatorio_visita");
+  assert.equal(ok.value.language, "es");
+  assert.deepEqual(ok.value.components.map((c) => c.type), ["HEADER", "BODY", "FOOTER", "BUTTONS"]);
+  assert.deepEqual(ok.value.components[1].example.body_text, [["Pedro", "viernes 20"]]);
+  assert.deepEqual(ok.value.components[3].buttons, [{ type: "QUICK_REPLY", text: "Confirmo" }, { type: "QUICK_REPLY", text: "Cambiar hora" }]);
+  assert.equal(validarPlantillaNueva({ ...base, nombre: "x" }).error, "plantilla_nombre");
+  assert.equal(validarPlantillaNueva({ ...base, categoria: "OTRA" }).error, "plantilla_categoria");
+  assert.equal(validarPlantillaNueva({ ...base, cuerpo: "Hola {{1}} y {{3}} gracias." }).error, "plantilla_variables_numeradas");
+  assert.equal(validarPlantillaNueva({ ...base, cuerpo: "Hola {{nombre}}, gracias." }).error, "plantilla_variables_numeradas");
+  assert.equal(validarPlantillaNueva({ ...base, cuerpo: "{{1}}, te esperamos mañana." }).error, "plantilla_variable_borde");
+  assert.equal(validarPlantillaNueva({ ...base, cuerpo: "Te esperamos mañana, {{1}}." }).error, "plantilla_variable_borde");
+  assert.equal(validarPlantillaNueva({ ...base, ejemplos: ["Pedro"] }).error, "plantilla_ejemplos");
+  assert.equal(validarPlantillaNueva({ ...base, encabezado: "Hola {{1}}" }).error, "plantilla_encabezado");
+  assert.equal(validarPlantillaNueva({ ...base, botones: ["a", "b", "c", "d"] }).error, "plantilla_botones");
+  const sinVars = validarPlantillaNueva({ nombre: "aviso general", categoria: "MARKETING", cuerpo: "Tenemos nuevos vehículos esta semana." });
+  assert.equal(sinVars.ok, true);
+  assert.equal(sinVars.value.components[0].example, undefined);
+  const adm = plantillasParaAdmin([{ id: "1", name: "b", language: "es", category: "UTILITY", status: "REJECTED", rejected_reason: "INVALID_FORMAT", components: [{ type: "BODY", text: "x" }] }, { id: "2", name: "a", language: "es", category: "MARKETING", status: "APPROVED", rejected_reason: "NONE", components: [] }]);
+  assert.deepEqual(adm.map((p) => [p.nombre, p.estadoNombre, p.motivo]), [["a", "Aprobada", ""], ["b", "Rechazada", "INVALID_FORMAT"]]);
+});

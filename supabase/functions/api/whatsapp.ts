@@ -10,6 +10,7 @@
 import {
   telefonoWa, mismoTelefono, nombreDesdePerfil, estadoSiguiente, parsearWebhook, ventanaAbierta, venceVentana, validarTextoWa,
   resumenMensaje, plantillasUsables, armarPlantilla, validarArchivoWa, telefonoVisible, FUENTE_WHATSAPP, MAX_BYTES_MEDIA,
+  validarPlantillaNueva, plantillasParaAdmin,
 } from "./whatsapp-core.js";
 import { permisosEfectivos } from "./crm-core.js";
 import { elegirAsignado, ETAPAS_CERRADAS } from "./ventas-core.js";
@@ -353,6 +354,8 @@ export async function whatsappOp(h: HerramientasWa, op: string, body: any): Prom
     const usu = new Map(usuarios.map((u: any) => [u.id, u]));
     return json({
       configurado: waConfigurado(),
+      // El Administrador y el Jefe Local crean y borran las plantillas de WhatsApp desde la bandeja.
+      puedePlantillas: (h.esAdmin || h.esSupervisor) && !!env("WA_WABA_ID"),
       conversaciones: convs.map((c: any) => {
         const l: any = lea.get(c.lead_id);
         const cl: any = cli.get(c.cliente_id);
@@ -406,6 +409,35 @@ export async function whatsappOp(h: HerramientasWa, op: string, body: any): Prom
     const r = await plantillas(!!body.recargar);
     if (!r.ok) return json({ plantillas: [], error: r.error });
     return json({ plantillas: r.lista });
+  }
+
+  /* ---- Plantillas: el Administrador y el Jefe Local las crean y borran desde el CRM; Meta las revisa y aprueba. ---- */
+  if (op === "wa.plantillas_admin" || op === "wa.plantilla_crear" || op === "wa.plantilla_borrar") {
+    if (!h.esAdmin && !h.esSupervisor) return err("forbidden", 403);
+    if (!waConfigurado() || !env("WA_WABA_ID")) return err("whatsapp_no_configurado", 503);
+    const waba = encodeURIComponent(env("WA_WABA_ID"));
+    if (op === "wa.plantillas_admin") {
+      const r = await graph(`/${waba}/message_templates?fields=id,name,language,status,category,components,rejected_reason&limit=200`);
+      if (!r.ok) return json({ error: "whatsapp_error", detalle: r.error }, 502);
+      return json({ plantillas: plantillasParaAdmin((r.data && r.data.data) || []) });
+    }
+    if (op === "wa.plantilla_crear") {
+      const v = validarPlantillaNueva(body.plantilla);
+      if (!v.ok) return err(v.error!);
+      const r = await graph(`/${waba}/message_templates`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(v.value) });
+      if (!r.ok) return json({ error: "whatsapp_error", detalle: r.error }, 502);
+      cachePlantillas = null;
+      await h.audit(h.actor, "whatsapp.plantilla_crear", "whatsapp", String((r.data && r.data.id) || v.value.name), { nombre: v.value.name, categoria: v.value.category });
+      return json({ plantilla: { id: String((r.data && r.data.id) || ""), nombre: v.value.name, estado: String((r.data && r.data.status) || "PENDING"), categoria: String((r.data && r.data.category) || v.value.category) } });
+    }
+    // Borrar: por nombre (borra todas sus versiones de idioma). Meta no deja reutilizar el nombre por 30 días.
+    const nombre = String(body.nombre ?? "").trim();
+    if (!/^[a-z0-9_]{3,512}$/.test(nombre)) return err("plantilla_nombre");
+    const r = await graph(`/${waba}/message_templates?name=${encodeURIComponent(nombre)}`, { method: "DELETE" });
+    if (!r.ok) return json({ error: "whatsapp_error", detalle: r.error }, 502);
+    cachePlantillas = null;
+    await h.audit(h.actor, "whatsapp.plantilla_borrar", "whatsapp", nombre, { nombre });
+    return json({ ok: true });
   }
 
   if (op === "wa.media") {

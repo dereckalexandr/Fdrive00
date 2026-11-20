@@ -264,7 +264,16 @@ export const iniciarFuncion = async () => {
       meta.llamadas.push({ metodo, ruta: u.pathname, cuerpo, auth: init && init.headers && init.headers.authorization });
       const ok = (d) => new Response(JSON.stringify(d), { status: 200 });
       if (u.hostname === "lookaside.prueba") { const a = meta.archivos[u.pathname.slice(1)]; return a ? new Response(a.bytes, { status: 200 }) : new Response("", { status: 404 }); }
-      if (u.pathname.endsWith("/message_templates")) return ok({ data: meta.plantillas });
+      if (u.pathname.endsWith("/message_templates")) {
+        if (metodo === "POST") {
+          if (meta.plantillas.some((p) => p.name === cuerpo.name)) return new Response(JSON.stringify({ error: { message: "Ya existe una plantilla con ese nombre", error_user_msg: "Ya existe una plantilla con ese nombre", code: 100 } }), { status: 400 });
+          const nueva = { ...cuerpo, id: "tpl" + ++meta.n, status: "PENDING" };
+          meta.plantillas.push(nueva);
+          return ok({ id: nueva.id, status: "PENDING", category: cuerpo.category });
+        }
+        if (metodo === "DELETE") { const nombre = u.searchParams.get("name"); meta.plantillas = meta.plantillas.filter((p) => p.name !== nombre); return ok({ success: true }); }
+        return ok({ data: meta.plantillas });
+      }
       if (u.pathname.endsWith("/media") && metodo === "POST") return ok({ id: "mediasal" + ++meta.n });
       if (u.pathname.endsWith("/messages") && metodo === "POST") {
         if (meta.fallarEnvio) { const m = meta.fallarEnvio; meta.fallarEnvio = ""; return new Response(JSON.stringify({ error: { message: m, code: 131047 } }), { status: 400 }); }
