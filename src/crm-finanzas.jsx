@@ -11,6 +11,7 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { InputDinero } from "./campo-dinero.jsx";
 import { Nomina } from "./crm-nomina.jsx";
+import { Conciliacion } from "./crm-conciliacion.jsx";
 import {
   CATEGORIAS_FIN, DOCUMENTOS_FIN, MEDIOS_FIN, categoriaFin, categoriaConVehiculo, validarMovimiento, movimientosCsv, claveDe,
   categoriasAgrupadas, GRUPOS_FIN, MAX_ARCHIVOS_FIN, faltaRespaldo,
@@ -489,9 +490,13 @@ function SaldoInicial({ api, cuenta, onCerrar, onListo }) {
 
 function BancosYCaja({ api }) {
   const { cargando, error, datos, recargar } = useCarga(() => api("fin.resumen", {}), [api]);
+  const conc = useCarga(() => api("fin.conciliaciones", {}).catch(() => ({ conciliaciones: {} })), [api]);
   const [editar, setEditar] = useState(null);
+  const [conciliar, setConciliar] = useState(null);
   if (cargando && !datos) return <Cargando />;
   if (error && !datos) return <Aviso>{error}</Aviso>;
+  const ultima = (clave) => conc.datos && conc.datos.conciliaciones && conc.datos.conciliaciones[clave];
+  if (conciliar) return <Conciliacion api={api} cuenta={conciliar} puedeEditar={datos.puedeEditar} onCerrar={() => { setConciliar(null); recargar(); conc.recargar(); }} />;
   return (
     <div className="flex flex-col gap-4">
       <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-3">
@@ -501,13 +506,24 @@ function BancosYCaja({ api }) {
             <span className="font-medium text-stone-900">{c.nombre}</span>
             <span className={`text-2xl font-semibold ${c.saldo < 0 ? "text-rose-700" : "text-stone-900"}`}>{clp(c.saldo)}</span>
             <span className="text-xs text-stone-500">{c.desde ? `Partió con ${clp(c.inicial)} el ${fechaCL(c.desde)}` : "Sin saldo inicial: se cuenta desde el primer movimiento"} · entró {clp(c.ingresos)} · salió {clp(c.egresos)}</span>
-            {datos.puedeEditar && <button type="button" onClick={() => setEditar(c)} className="text-xs text-stone-700 hover:underline self-start mt-1">{c.desde ? "Cambiar saldo inicial" : "Fijar saldo inicial"}</button>}
+            {c.tipo === "banco" && (() => {
+              const u = ultima(c.clave);
+              return u ? (
+                <span className={`text-xs ${u.diferencia === 0 && u.faltan === 0 ? "text-emerald-700" : "text-amber-700"}`}>
+                  {u.diferencia === 0 && u.faltan === 0 ? "✓ Cuadrada" : `⚠ ${u.faltan ? `${u.faltan} por registrar` : ""}${u.faltan && u.diferencia ? " · " : ""}${u.diferencia ? `diferencia ${clp(u.diferencia)}` : ""}`} con la cartola al {fechaCL(u.hasta)}
+                </span>
+              ) : <span className="text-xs text-stone-400">Sin conciliar con el banco</span>;
+            })()}
+            <div className="flex flex-wrap gap-3 mt-1">
+              {c.tipo === "banco" && <button type="button" onClick={() => setConciliar(c)} className="text-xs font-medium text-sky-700 hover:underline">Conciliar con cartola</button>}
+              {datos.puedeEditar && <button type="button" onClick={() => setEditar(c)} className="text-xs text-stone-700 hover:underline">{c.desde ? "Cambiar saldo inicial" : "Fijar saldo inicial"}</button>}
+            </div>
           </div>
         ))}
       </div>
       <div className="bg-stone-50 border border-stone-200 p-4 text-sm text-stone-700 flex flex-col gap-1">
         <p><strong>Total:</strong> {clp(datos.saldoTotal)}</p>
-        <p className="text-xs text-stone-500">Las cuentas bancarias se agregan en la pestaña Ventas → «Cuentas bancarias de la empresa». «Por depositar» junta los pagos de ventas con cheque, tarjeta o crédito de la financiera; cuando el dinero llegue al banco, regístralo como traspaso desde «Por depositar» hacia la cuenta. Compara cada saldo con la cartola: si no cuadra, falta registrar algo.</p>
+        <p className="text-xs text-stone-500">Las cuentas bancarias se agregan en la pestaña Ventas → «Cuentas bancarias de la empresa». «Por depositar» junta los pagos de ventas con cheque, tarjeta o crédito de la financiera; cuando el dinero llegue al banco, regístralo como traspaso desde «Por depositar» hacia la cuenta. Usa «Conciliar con cartola» en cada banco: sube la cartola y el CRM te dice qué falta registrar y si el saldo cuadra.</p>
       </div>
       {editar && <SaldoInicial api={api} cuenta={editar} onCerrar={() => setEditar(null)} onListo={() => { setEditar(null); recargar(); }} />}
     </div>

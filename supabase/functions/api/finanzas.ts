@@ -10,6 +10,7 @@ import {
   POR_DEPOSITAR, CATEGORIAS_FIN, MAX_ARCHIVOS_FIN, NS_FIN, faltaRespaldo, gastosPorMes, gastosFijosPendientes,
 } from "./finanzas-core.js";
 import { validarArchivo } from "./validaciones-core.js";
+import { conciliar, categoriaSugerida, leerFecha } from "./conciliacion-core.js";
 import { etiquetaCuenta, medioNombre } from "./pagos-core.js";
 import { validarTrabajador, armarNomina, parametrosNomina, CONCEPTOS_NOMINA, montoConcepto, VARIABLES_VACIAS } from "./nomina-core.js";
 
@@ -337,6 +338,62 @@ export async function finanzasOp(h: FinCtx, op: string, body: any): Promise<Resp
         sinRespaldo: { cantidad: sin.length, monto: sin.reduce((s, x) => s + x.monto, 0) },
         fijosPendientes: gastosFijosPendientes(movs, hasta).length,
       });
+    }
+
+    /**
+     * Conciliación bancaria: la pantalla lee la cartola (CSV o Excel) y manda sus líneas; aquí se emparejan con los movimientos de la cuenta
+     * y se compara el saldo final de la cartola con el saldo del CRM a esa fecha. Se guarda un resumen de la última conciliación de la cuenta.
+     */
+    if (op === "fin.conciliar") {
+      const ctas = await cuentas();
+      const cta = ctas.find((c) => c.clave === String(body.cuenta || ""));
+      if (!cta) return err("no_existe", 404);
+      const crudas: any[] = Array.isArray(body.lineas) ? body.lineas.slice(0, 5000) : [];
+      const lineas: any[] = [];
+      for (const l of crudas) {
+        const fecha = leerFecha(l && l.fecha);
+        const monto = Math.round(Number(l && l.monto));
+        if (!fecha || !Number.isFinite(monto) || monto === 0 || Math.abs(monto) > 1e11) return err("cartola_vacia");
+        lineas.push({
+          n: lineas.length + 1, fecha, monto, descripcion: String(l.descripcion ?? "").replace(/\s+/g, " ").trim().slice(0, 200),
+          documento: String(l.documento ?? "").trim().slice(0, 40), saldo: l.saldo === null || l.saldo === undefined || l.saldo === "" ? null : Math.round(Number(l.saldo)),
+        });
+      }
+      if (lineas.length === 0) return err("cartola_vacia");
+      const fechas = lineas.map((l) => l.fecha).sort();
+      const desde = fechas[0]; const hasta = fechas[fechas.length - 1];
+      const movs = await movimientos();
+      const r = conciliar(lineas, movs, cta.clave, { desde, hasta });
+      // Saldo final de la cartola: el de la última línea en el orden del banco (si viene de la más nueva a la más antigua, el de la primera).
+      const descendente = lineas[0].fecha > lineas[lineas.length - 1].fecha;
+      const conSaldo = lineas.filter((l) => Number.isFinite(l.saldo));
+      const ultima = conSaldo.length ? (descendente ? conSaldo[0] : conSaldo[conSaldo.length - 1]) : null;
+      const iniciales = await saldosIniciales(ctas);
+      const saldoCrm = (calcularSaldos(iniciales, movs.filter((m) => m.fecha <= hasta))[cta.clave] || { saldo: 0 }).saldo;
+      const resumen = {
+        desde, hasta, lineas: lineas.length, cuadran: r.lineas.filter((l) => l.estado === "cuadra").length, faltan: r.lineas.filter((l) => l.estado === "falta").length,
+        sinCartola: r.sinCartola.length, saldoCartola: ultima ? ultima.saldo : null, saldoCrm, diferencia: ultima ? ultima.saldo - saldoCrm : null,
+      };
+      const reg = { ...resumen, cuenta: cta.clave, en: new Date().toISOString(), por: h.userName };
+      await sb.from("kv_store").upsert({ key: `fin::conciliacion::${cta.clave}`, value: JSON.stringify(reg), shared: false, updated_at: reg.en }, { onConflict: "key" });
+      return json({
+        cuenta: cta, resumen, puedeEditar,
+        lineas: r.lineas.map((l) => (l.estado === "falta" ? { ...l, categoria: categoriaSugerida(l) } : l)),
+        sinCartola: r.sinCartola,
+      });
+    }
+
+    /** Última conciliación de cada cuenta (para «Bancos y caja»). */
+    if (op === "fin.conciliaciones") {
+      const ctas = await cuentas();
+      const { data } = await sb.from("kv_store").select("key, value").like("key", "fin::conciliacion::%");
+      const out: Record<string, any> = {};
+      for (const x of data ?? []) {
+        const clave = String(x.key).slice("fin::conciliacion::".length);
+        if (!ctas.some((c) => c.clave === clave)) continue;
+        try { out[clave] = JSON.parse(x.value); } catch { /* registro dañado */ }
+      }
+      return json({ conciliaciones: out });
     }
 
     /** Gastos fijos (marcados «se repite cada mes») que aún no se registran en el mes. */
