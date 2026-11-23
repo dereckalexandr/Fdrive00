@@ -12,6 +12,7 @@
 //   administrador, si la cuenta publicitaria está bajo una) y GOOGLE_ADS_VERSION (por defecto v24; Google retira versiones cada año).
 import {
   parsearMetaInsights, parsearGoogleFilas, campaniaDeGoogle, campaniaDeMeta, ventanaMetricas, monedaValida, errorLegible,
+  operacionesCrearGoogle, idCampaniaCreada,
 } from "./ads-core.js";
 
 const env = (k: string) => (globalThis as any).Deno.env.get(k) ?? "";
@@ -105,6 +106,44 @@ async function gaql(consulta: string): Promise<any[]> {
   return filas;
 }
 
+/** Envía cambios a Google Ads (googleAds:mutate). Todo o nada: si una operación falla, no se aplica ninguna. */
+async function mutarGoogle(operaciones: any[]): Promise<any> {
+  for (let intento = 0; intento < 2; intento++) {
+    const acceso = await accesoGoogleAds(intento > 0);
+    const r = await fetch(`https://googleads.googleapis.com/${versionGoogle()}/customers/${clienteGoogle()}/googleAds:mutate`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${acceso}`, "developer-token": env("GOOGLE_ADS_DEVELOPER_TOKEN"), "content-type": "application/json",
+        ...(env("GOOGLE_ADS_LOGIN_CUSTOMER_ID") ? { "login-customer-id": env("GOOGLE_ADS_LOGIN_CUSTOMER_ID").replace(/\D/g, "") } : {}),
+      },
+      body: JSON.stringify({ mutateOperations: operaciones }),
+      signal: AbortSignal.timeout(30000),
+    });
+    if (r.status === 401 && intento === 0) continue;
+    const d: any = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      const e = d && d.error;
+      const det = e && Array.isArray(e.details) && e.details[0] && Array.isArray(e.details[0].errors) ? e.details[0].errors[0] : null;
+      throw new Error(`${(det && det.message) || (e && e.message) || `Google Ads respondió ${r.status}`} (${r.status})`);
+    }
+    return d;
+  }
+  throw new Error("Google Ads rechazó el acceso");
+}
+
+/** Crea la campaña de búsqueda (en pausa) y devuelve su id. */
+export async function crearCampaniaGoogle(nombre: string, v: any): Promise<string> {
+  const d = await mutarGoogle(operacionesCrearGoogle(clienteGoogle(), nombre, v));
+  const id = idCampaniaCreada(d);
+  if (!id) throw new Error("Google Ads no devolvió la campaña creada");
+  return id;
+}
+
+/** Activa (ENABLED) o pausa (PAUSED) una campaña de Google Ads. */
+export async function estadoCampaniaGoogle(id: string, estado: "ENABLED" | "PAUSED") {
+  await mutarGoogle([{ campaignOperation: { update: { resourceName: `customers/${clienteGoogle()}/campaigns/${Number(id)}`, status: estado }, updateMask: "status" } }]);
+}
+
 export async function cuentaDeGoogle() {
   const f = await gaql("SELECT customer.descriptive_name, customer.currency_code FROM customer");
   const c = (f[0] && f[0].customer) || {};
@@ -190,6 +229,10 @@ export async function sincronizarCampanias(sb: any, filtro: { id?: string; local
         gasto: m.gasto, impresiones: m.impresiones, clics: m.clics, ...(m.alcance !== null && m.alcance !== undefined ? { alcance: m.alcance } : {}),
         externo: { ...(c.externo || {}), leads: m.leads, mensajes: m.mensajes, moneda: mo.moneda, desde: ventana.desde, hasta: ventana.hasta }, sync_en: ahora, sync_error: null, actualizado_en: ahora,
       };
+      if (c.plataforma === "google" && c.externo && c.externo.estado === "enabled" && String(c.hasta) < hoy) {
+        try { await estadoCampaniaGoogle(c.externo_id, "PAUSED"); (patch.externo as any).estado = "paused"; (patch.externo as any).pausada_por = "fin de la campaña"; }
+        catch (e) { patch.sync_error = `No se pudo pausar en Google Ads al terminar la campaña: ${errorLegible("google", e)}`.slice(0, 300); }
+      }
       const up = await sb.from("campanias").update(patch).eq("id", c.id);
       if (up.error) throw up.error;
       res.actualizadas++;

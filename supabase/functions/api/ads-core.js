@@ -107,3 +107,98 @@ export function errorLegible(plataforma, e) {
   if (/rate|limit|429|quota/i.test(t)) return `${plataformaNombre(plataforma)}: demasiadas consultas, se reintenta en la próxima actualización.`;
   return `${plataformaNombre(plataforma)}: ${t.slice(0, 160)}`;
 }
+
+/* ======================= Crear campañas en Google Ads (búsqueda) ======================= */
+// Campaña de búsqueda simple: presupuesto diario, «maximizar clics», Chile, español, un grupo de anuncios con un anuncio adaptable
+// (títulos y descripciones) y palabras clave de concordancia de frase. Se crea EN PAUSA: se activa solo si el Jefe Local la aprobó.
+export const GOOGLE_CHILE = "geoTargetConstants/2152";
+export const GOOGLE_ESPANOL = "languageConstants/1003";
+export const LIMITES_GOOGLE = { titulos: [3, 15, 30], descripciones: [2, 4, 90], palabras: [1, 30, 80], diarioMin: 1000, diarioMax: 10_000_000 };
+
+const lineas = (x) => (Array.isArray(x) ? x : String(x || "").split(/\r?\n/)).map((s) => String(s).replace(/\s+/g, " ").trim()).filter(Boolean);
+const diasEntre = (a, b) => Math.round((Date.parse(`${b}T12:00:00Z`) - Date.parse(`${a}T12:00:00Z`)) / 86_400_000) + 1;
+
+/** Días que quedan de la campaña (desde hoy o desde su inicio, hasta su término). */
+export function diasRestantes(c, hoy) {
+  const desde = String(c.desde) > hoy ? String(c.desde) : hoy;
+  return String(c.hasta) >= desde ? diasEntre(desde, String(c.hasta)) : 0;
+}
+
+/** Textos sugeridos para la campaña: con las marcas del inventario y los datos de la empresa. El usuario los ajusta. */
+export function sugerenciasGoogle({ comuna = "", marcas = [], urlSitio = "" } = {}) {
+  const lugar = comuna ? ` en ${comuna}` : "";
+  const corta = (s, n) => (s.length <= n ? s : s.slice(0, n).replace(/\s+\S*$/, ""));
+  const titulos = [
+    corta(`Autos Usados${lugar}`, 30), "Revisados e Inspeccionados", "Financiamiento a tu Medida", "Recibimos tu Auto en Parte", "Agenda tu Visita Hoy",
+    ...marcas.slice(0, 5).map((m) => corta(`${m} Usados${lugar}`, 30)),
+  ].filter((t, i, a) => t && a.indexOf(t) === i).slice(0, 15);
+  const descripciones = [
+    "Autos usados revisados, con historial y documentos al día. Cotiza tu cuota en minutos.",
+    `Recibimos tu auto en parte de pago y te ayudamos con el crédito. Visítanos${lugar}.`.slice(0, 90),
+  ];
+  const palabras = ["autos usados", "comprar auto usado", `autos usados${lugar.toLowerCase()}`, "automotora", ...marcas.slice(0, 8).map((m) => `${m.toLowerCase()} usado`)]
+    .filter((p, i, a) => p && a.indexOf(p) === i).slice(0, 15);
+  return { titulos, descripciones, palabras, url: urlSitio };
+}
+
+/** Datos de la campaña a crear en Google. c: campaña del CRM (fechas y presupuesto). */
+export function validarCampaniaGoogle(input, c, hoy) {
+  const i = input || {};
+  const diario = Math.round(Number(String(i.presupuestoDiario ?? "").replace(/\D/g, "")));
+  if (!Number.isFinite(diario) || diario < LIMITES_GOOGLE.diarioMin || diario > LIMITES_GOOGLE.diarioMax) return { ok: false, error: "google_diario" };
+  const dias = diasRestantes(c, hoy);
+  if (dias <= 0) return { ok: false, error: "campania_terminada" };
+  if (Number(c.presupuesto) > 0 && diario * dias > Number(c.presupuesto)) return { ok: false, error: "google_diario_excede" };
+  const url = String(i.url || "").trim();
+  if (!/^https:\/\/[^\s/$.?#][^\s]*$/i.test(url) || url.length > 500) return { ok: false, error: "google_url" };
+  const [tMin, tMax, tLen] = LIMITES_GOOGLE.titulos;
+  const titulos = [...new Set(lineas(i.titulos))];
+  if (titulos.length < tMin || titulos.length > tMax || titulos.some((t) => t.length > tLen)) return { ok: false, error: "google_titulos" };
+  const [dMin, dMax, dLen] = LIMITES_GOOGLE.descripciones;
+  const descripciones = [...new Set(lineas(i.descripciones))];
+  if (descripciones.length < dMin || descripciones.length > dMax || descripciones.some((t) => t.length > dLen)) return { ok: false, error: "google_descripciones" };
+  const [pMin, pMax, pLen] = LIMITES_GOOGLE.palabras;
+  // Google rechaza algunos símbolos en las palabras clave: se dejan letras, números y espacios.
+  const palabras = [...new Set(lineas(i.palabras).map((p) => p.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, " ").replace(/\s+/g, " ").trim()).filter((p) => p.length >= 2))];
+  if (palabras.length < pMin || palabras.length > pMax || palabras.some((p) => p.length > pLen)) return { ok: false, error: "google_palabras" };
+  return { ok: true, value: { presupuestoDiario: diario, url, titulos, descripciones, palabras, dias } };
+}
+
+/**
+ * Operaciones de la API de Google Ads para crear la campaña en un solo envío (googleAds:mutate). Los recursos nuevos se enlazan
+ * entre sí con identificadores temporales negativos. La campaña queda EN PAUSA.
+ */
+export function operacionesCrearGoogle(cliente, nombre, v) {
+  const r = (tipo, n) => `customers/${cliente}/${tipo}/${n}`;
+  const presupuesto = r("campaignBudgets", -1); const campania = r("campaigns", -2); const grupo = r("adGroups", -3);
+  return [
+    { campaignBudgetOperation: { create: { resourceName: presupuesto, name: `${nombre} · presupuesto ${Date.now()}`, amountMicros: String(v.presupuestoDiario * 1_000_000), deliveryMethod: "STANDARD", explicitlyShared: false } } },
+    { campaignOperation: { create: {
+      resourceName: campania, name: nombre, status: "PAUSED", advertisingChannelType: "SEARCH", campaignBudget: presupuesto, targetSpend: {},
+      networkSettings: { targetGoogleSearch: true, targetSearchNetwork: true, targetContentNetwork: false, targetPartnerSearchNetwork: false },
+      containsEuPoliticalAdvertising: "DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING",
+    } } },
+    { campaignCriterionOperation: { create: { campaign: campania, location: { geoTargetConstant: GOOGLE_CHILE } } } },
+    { campaignCriterionOperation: { create: { campaign: campania, language: { languageConstant: GOOGLE_ESPANOL } } } },
+    { adGroupOperation: { create: { resourceName: grupo, name: `${nombre} · grupo`, campaign: campania, status: "ENABLED", type: "SEARCH_STANDARD" } } },
+    { adGroupAdOperation: { create: { adGroup: grupo, status: "ENABLED", ad: { finalUrls: [v.url], responsiveSearchAd: { headlines: v.titulos.map((text) => ({ text })), descriptions: v.descripciones.map((text) => ({ text })) } } } } },
+    ...v.palabras.map((text) => ({ adGroupCriterionOperation: { create: { adGroup: grupo, status: "ENABLED", keyword: { text, matchType: "PHRASE" } } } })),
+  ];
+}
+
+/** Id de la campaña creada, desde la respuesta de googleAds:mutate. */
+export function idCampaniaCreada(respuesta) {
+  for (const r of (respuesta && respuesta.mutateOperationResponses) || []) {
+    const rn = r.campaignResult && r.campaignResult.resourceName;
+    if (rn) return String(rn).split("/").pop();
+  }
+  return null;
+}
+
+/** ¿Se puede activar en Google? Solo con la campaña del CRM aprobada y dentro de sus fechas. */
+export function puedeActivar(c, hoy) {
+  if (c.estado !== "aprobada") return { ok: false, error: "campania_sin_aprobar" };
+  if (String(c.desde) > hoy) return { ok: false, error: "campania_no_empieza" };
+  if (String(c.hasta) < hoy) return { ok: false, error: "campania_terminada" };
+  return { ok: true };
+}

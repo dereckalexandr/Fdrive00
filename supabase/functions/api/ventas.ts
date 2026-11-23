@@ -21,8 +21,8 @@ import {
 } from "./ventas-core.js";
 import { whatsappOp } from "./whatsapp.ts";
 import { finanzasOp } from "./finanzas.ts";
-import { PLATAFORMAS, validarVinculo, validarImportacion, excedePresupuesto, errorLegible } from "./ads-core.js";
-import { estadoConexion, listarExternas, configurado as adsConfigurado, sincronizarCampanias } from "./ads.ts";
+import { PLATAFORMAS, validarVinculo, validarImportacion, excedePresupuesto, errorLegible, validarCampaniaGoogle, sugerenciasGoogle, puedeActivar, diasRestantes } from "./ads-core.js";
+import { estadoConexion, listarExternas, configurado as adsConfigurado, sincronizarCampanias, crearCampaniaGoogle, estadoCampaniaGoogle } from "./ads.ts";
 import { estadoLeadsAds, reintentarLead } from "./leads-ads.ts";
 import { estadoCatalogo } from "./catalogo.ts";
 import { googleConfigurado, crearVisitaGoogle, moverVisitaGoogle, cancelarVisitaGoogle } from "./google-calendar.ts";
@@ -1111,6 +1111,12 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       return data;
     }
     const campaniaDetalle = async (c: any) => ({ campania: conMetricas([c], await leadsConCampania())[0], puedeGestionar: gestiona, puedeAprobar: esSupervisor });
+    /** Si la campaña está activa en Google Ads, la pausa (al finalizar, cancelar o volver a pedir aprobación). No bloquea: si falla, lo anota. */
+    async function pausarEnGoogle(c: any, motivo: string) {
+      if (!(c && c.plataforma === "google" && c.externo_id && c.externo && c.externo.estado === "enabled" && adsConfigurado("google"))) return;
+      try { await estadoCampaniaGoogle(c.externo_id, "PAUSED"); await sb.from("campanias").update({ externo: { ...c.externo, estado: "paused", pausada_por: motivo } }).eq("id", c.id); }
+      catch (e) { await sb.from("campanias").update({ sync_error: `No se pudo pausar en Google Ads (${motivo}): ${errorLegible("google", e)}`.slice(0, 300) }).eq("id", c.id); }
+    }
     const parteDeLocal = async (tabla: string, id: string | null, local: string) => {
       if (!id) return true;
       const { data } = await sb.from(tabla).select("id, local_id").eq("id", id).maybeSingle();
@@ -1153,6 +1159,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       const { data, error } = await sb.from("campanias").update({ ...v.value, estado, ...(estado === "pendiente" && c.estado === "aprobada" ? { aprobado_por: null, aprobado_en: null } : {}), actualizado_en: new Date().toISOString() }).eq("id", c.id).select().single();
       if (error) return fallar(error);
       await audit(ctx.actor, "campania.editar", "campania", c.id, { numero: c.numero, estado, presupuesto: v.value.presupuesto });
+      if (estado === "pendiente" && c.estado === "aprobada") { await pausarEnGoogle(c, "presupuesto por aprobar"); return json(await campaniaDetalle((await cargarCampania(c.id))!)); }
       return json(await campaniaDetalle(data));
     }
     // Sin presupuesto sale sola (campaña orgánica); con presupuesto espera la aprobación del Jefe Local.
@@ -1216,7 +1223,8 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       const { data, error } = await sb.from("campanias").update({ estado: fin ? "finalizada" : "cancelada", actualizado_en: new Date().toISOString() }).eq("id", c.id).select().single();
       if (error) return fallar(error);
       await audit(ctx.actor, fin ? "campania.finalizar" : "campania.cancelar", "campania", c.id, { numero: c.numero });
-      return json(await campaniaDetalle(data));
+      await pausarEnGoogle(c, fin ? "campaña finalizada" : "campaña cancelada");
+      return json(await campaniaDetalle((await cargarCampania(c.id))!));
     }
 
     /* ----- plataformas de anuncios (Meta y Google Ads): el CRM lee el gasto y los resultados de las campañas vinculadas ----- */
@@ -1259,7 +1267,62 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       }
 
       // Vincular, importar y desvincular cambian los datos de la campaña: solo Marketing (igual que editar una campaña).
-      if (["marketing.ads.vincular", "marketing.ads.importar", "marketing.ads.desvincular"].includes(op) && !gestiona) return err("forbidden", 403);
+      if (["marketing.ads.vincular", "marketing.ads.importar", "marketing.ads.desvincular", "marketing.ads.google_crear", "marketing.ads.activar"].includes(op) && !gestiona) return err("forbidden", 403);
+      const hoyAds = new Date().toLocaleDateString("en-CA", { timeZone: "America/Santiago" });
+
+      /** Textos sugeridos para crear la campaña en Google Ads (marcas del inventario, comuna de la empresa) y el máximo diario posible. */
+      if (op === "marketing.ads.google_sugerencias") {
+        const c = await cargarCampania(String(body.id ?? ""));
+        if (!c) return err("no_existe", 404);
+        const [vq, eq] = await Promise.all([scoped(sb.from("vehiculos").select("marca, estado, activo")), sb.from("kv_store").select("value").eq("key", "empresa::datos").maybeSingle()]);
+        const cuenta: Record<string, number> = {};
+        for (const v of vq.data ?? []) if (v.activo !== false && v.estado === "disponible" && v.marca) cuenta[v.marca] = (cuenta[v.marca] || 0) + 1;
+        const marcas = Object.entries(cuenta).sort((a, b) => b[1] - a[1]).map(([m]) => m);
+        let empresa: any = {};
+        try { empresa = eq.data && eq.data.value ? JSON.parse(eq.data.value) : {}; } catch { empresa = {}; }
+        const dias = diasRestantes(c, hoyAds);
+        const urlSitio = ((globalThis as any).Deno.env.get("SITIO_URL") || "https://fdrive02.vercel.app").replace(/\/$/, "");
+        return json({ sugerencias: sugerenciasGoogle({ comuna: empresa.comuna || "", marcas, urlSitio }), dias, maxDiario: Number(c.presupuesto) > 0 && dias > 0 ? Math.floor(Number(c.presupuesto) / dias) : null, conectado: adsConfigurado("google") });
+      }
+
+      /** Crea en Google Ads la campaña de búsqueda de una campaña del CRM (queda en pausa y vinculada). */
+      if (op === "marketing.ads.google_crear") {
+        const c = await cargarCampania(String(body.id ?? ""));
+        if (!c) return err("no_existe", 404);
+        if (c.externo_id) return err("externo_ya_vinculado", 409);
+        if (c.canal !== "google") return err("canal_no_google");
+        if (!["borrador", "pendiente", "aprobada"].includes(c.estado)) return err("campania_estado_invalido");
+        if (!adsConfigurado("google")) return err("ads_no_configurado", 503);
+        const v = validarCampaniaGoogle(body.datos, c, hoyAds);
+        if (!v.ok) return err(v.error!);
+        let externoId: string;
+        try { externoId = await crearCampaniaGoogle(`${folioCampania(c.numero)} · ${c.nombre}`.slice(0, 120), v.value); }
+        catch (e) { return json({ error: "ads_error", detalle: errorLegible("google", e) }, 502); }
+        const { error } = await sb.from("campanias").update({
+          plataforma: "google", externo_id: externoId, externo: { nombre: c.nombre, estado: "paused", creada_desde_crm: true, presupuestoDiario: v.value.presupuestoDiario }, sync_error: null, actualizado_en: new Date().toISOString(),
+        }).eq("id", c.id);
+        if (error) return fallar(error);
+        await audit(ctx.actor, "campania.google_crear", "campania", c.id, { numero: c.numero, externo_id: externoId, presupuesto_diario: v.value.presupuestoDiario, palabras: v.value.palabras.length });
+        await sincronizarCampanias(sb, { id: c.id });
+        return json(await campaniaDetalle((await cargarCampania(c.id))!));
+      }
+
+      /** Activa o pausa en Google Ads. Activar exige la campaña aprobada y dentro de sus fechas; pausar lo puede hacer también el Jefe Local. */
+      if (op === "marketing.ads.activar" || op === "marketing.ads.pausar") {
+        const activar = op === "marketing.ads.activar";
+        const c = await cargarCampania(String(body.id ?? ""));
+        if (!c) return err("no_existe", 404);
+        if (!c.externo_id) return err("sin_vinculo", 409);
+        if (c.plataforma !== "google") return err("meta_solo_lectura", 409);
+        if (activar) { const p = puedeActivar(c, hoyAds); if (!p.ok) return err(p.error!, 409); }
+        if (!adsConfigurado("google")) return err("ads_no_configurado", 503);
+        try { await estadoCampaniaGoogle(c.externo_id, activar ? "ENABLED" : "PAUSED"); }
+        catch (e) { return json({ error: "ads_error", detalle: errorLegible("google", e) }, 502); }
+        const { error } = await sb.from("campanias").update({ externo: { ...(c.externo || {}), estado: activar ? "enabled" : "paused", pausada_por: activar ? null : userName }, sync_error: null, actualizado_en: new Date().toISOString() }).eq("id", c.id);
+        if (error) return fallar(error);
+        await audit(ctx.actor, activar ? "campania.google_activar" : "campania.google_pausar", "campania", c.id, { numero: c.numero, externo_id: c.externo_id });
+        return json(await campaniaDetalle((await cargarCampania(c.id))!));
+      }
 
       if (op === "marketing.ads.vincular") {
         const c = await cargarCampania(String(body.id ?? ""));

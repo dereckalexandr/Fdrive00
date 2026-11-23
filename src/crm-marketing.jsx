@@ -9,14 +9,14 @@
  * El servidor valida todo; aquí solo se muestra lo que corresponde.
  * ----------------------------------------------------------------
  */
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { InputDinero } from "./campo-dinero.jsx";
 import { mesChile } from "../supabase/functions/api/ventas-core.js";
 import {
   CANALES, TIPOS_PUBLICACION, ESTADOS_PUBLICACION, TIPOS_MATERIAL, ESTADOS_MATERIAL, canalNombre, tipoPublicacionNombre, publicacionNombre,
   campaniaNombre, materialTipoNombre, materialEstadoNombre, validarCampania, validarPublicacion,
 } from "../supabase/functions/api/marketing-core.js";
-import { PLATAFORMAS, plataformaNombre } from "../supabase/functions/api/ads-core.js";
+import { PLATAFORMAS, plataformaNombre, LIMITES_GOOGLE } from "../supabase/functions/api/ads-core.js";
 import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, useCarga, mensajeError, apiPorDefecto } from "./crm-ui.jsx";
 
 /** El error de una plataforma trae el motivo ya redactado en `detalle`. */
@@ -193,6 +193,58 @@ function FormResultados({ api, camp, onCerrar, onGuardada }) {
   );
 }
 
+/** Crear en Google Ads la campaña de búsqueda de una campaña del CRM (queda en pausa; se activa cuando está aprobada). */
+function FormGoogleAds({ api, camp, onCerrar, onListo }) {
+  const sug = useCarga(() => api("marketing.ads.google_sugerencias", { id: camp.id }), [api, camp.id]);
+  const [f, setF] = useState(null);
+  const [msg, setMsg] = useState("");
+  const [ocupado, setOcupado] = useState(false);
+  useEffect(() => {
+    if (sug.datos && !f) {
+      const s = sug.datos.sugerencias;
+      setF({ presupuestoDiario: sug.datos.maxDiario ? String(Math.floor(sug.datos.maxDiario / 1000) * 1000) : "", url: s.url, titulos: s.titulos.join("\n"), descripciones: s.descripciones.join("\n"), palabras: s.palabras.join("\n") });
+    }
+  }, [sug.datos, f]);
+  const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
+  const filas = (t) => String(t || "").split("\n").map((x) => x.trim()).filter(Boolean);
+  const Contador = ({ texto, min, max, largo }) => {
+    const l = filas(texto); const largas = l.filter((x) => x.length > largo).length;
+    return <span className={`text-[11px] ${l.length < min || l.length > max || largas ? "text-rose-600" : "text-stone-500"}`}>{l.length} de {min}–{max}{largas ? ` · ${largas} con más de ${largo} caracteres` : ` · hasta ${largo} caracteres c/u`}</span>;
+  };
+  const crear = async () => {
+    setMsg(""); setOcupado(true);
+    try { await api("marketing.ads.google_crear", { id: camp.id, datos: f }); onListo(); }
+    catch (e) { setMsg(textoError(e)); setOcupado(false); }
+  };
+  const [tMin, tMax, tLen] = LIMITES_GOOGLE.titulos; const [dMin, dMax, dLen] = LIMITES_GOOGLE.descripciones; const [pMin, pMax, pLen] = LIMITES_GOOGLE.palabras;
+  return (
+    <Modal titulo={`Crear en Google Ads · ${camp.nombre}`} onCerrar={onCerrar}>
+      {sug.cargando && !sug.datos && <Cargando />}
+      {sug.error && !sug.datos && <Aviso>{sug.error}</Aviso>}
+      {sug.datos && !sug.datos.conectado && <Aviso>Google Ads aún no está conectado: el Administrador debe cargar las claves en el servidor.</Aviso>}
+      {f && (
+        <div className="flex flex-col gap-3">
+          <p className="text-sm text-stone-600">Campaña de búsqueda en Chile y en español. Se crea <strong>en pausa</strong>: la activas cuando el Jefe Local apruebe el presupuesto, y se pausa sola al finalizarla o al pasar su fecha de término. Los textos vienen sugeridos con tu inventario: ajústalos.</p>
+          <div className="grid md:grid-cols-2 gap-3">
+            <Campo etiqueta="Presupuesto diario ($)" ayuda={sug.datos.maxDiario ? `Máximo ${clp(sug.datos.maxDiario)} al día para no pasar el presupuesto en los ${sug.datos.dias} días que quedan.` : `Quedan ${sug.datos.dias} días de campaña.`}>
+              <InputDinero value={f.presupuestoDiario} onChange={(e) => set("presupuestoDiario", e.target.value)} className={`${INPUT} font-mono`} />
+            </Campo>
+            <Campo etiqueta="Página de destino"><input value={f.url} onChange={(e) => set("url", e.target.value)} className={INPUT} placeholder="https://…" /></Campo>
+          </div>
+          <Campo etiqueta={<span className="flex justify-between gap-2">Títulos (uno por línea) <Contador texto={f.titulos} min={tMin} max={tMax} largo={tLen} /></span>}><textarea rows={5} value={f.titulos} onChange={(e) => set("titulos", e.target.value)} className={`${INPUT} font-mono text-xs`} /></Campo>
+          <Campo etiqueta={<span className="flex justify-between gap-2">Descripciones (una por línea) <Contador texto={f.descripciones} min={dMin} max={dMax} largo={dLen} /></span>}><textarea rows={3} value={f.descripciones} onChange={(e) => set("descripciones", e.target.value)} className={`${INPUT} font-mono text-xs`} /></Campo>
+          <Campo etiqueta={<span className="flex justify-between gap-2">Palabras clave (una por línea, concordancia de frase) <Contador texto={f.palabras} min={pMin} max={pMax} largo={pLen} /></span>}><textarea rows={4} value={f.palabras} onChange={(e) => set("palabras", e.target.value)} className={`${INPUT} font-mono text-xs`} /></Campo>
+          <div className="flex flex-wrap items-center gap-3">
+            <button type="button" onClick={crear} disabled={ocupado || !sug.datos.conectado} className={BTN_PRIMARIO}>{ocupado ? "Creando…" : "Crear en Google Ads (en pausa)"}</button>
+            <button type="button" onClick={onCerrar} className={BTN}>Cancelar</button>
+            {msg && <p className="text-sm text-rose-600">{msg}</p>}
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 /** Campañas de una plataforma (Meta o Google): vincular con una del CRM, o importar como campaña nueva. */
 function CampaniasExternas({ api, plataforma, campanias, onCerrar, onCambio }) {
   const { cargando, error, datos, recargar } = useCarga(() => api("marketing.ads.externas", { plataforma }), [api, plataforma]);
@@ -336,6 +388,7 @@ function LeadsDeAnuncios({ api, version }) {
 
 function Campanias({ api, puedeGestionar, puedeAprobar, version, onCambio }) {
   const [forma, setForma] = useState(undefined);
+  const [google, setGoogle] = useState(null);
   const [resultados, setResultados] = useState(null);
   const [msg, setMsg] = useState("");
   const [ocupado, setOcupado] = useState(false);
@@ -344,7 +397,7 @@ function Campanias({ api, puedeGestionar, puedeAprobar, version, onCambio }) {
   if (error && !datos) return <Aviso>{error}</Aviso>;
   const correr = async (op, c, extra) => {
     setMsg(""); setOcupado(true);
-    try { await api(op, { id: c.id, ...extra }); await recargar(); onCambio(); } catch (e) { setMsg(mensajeError(e)); }
+    try { await api(op, { id: c.id, ...extra }); await recargar(); onCambio(); } catch (e) { setMsg(textoError(e)); }
     setOcupado(false);
   };
   const rechazar = (c) => { const motivo = window.prompt("¿Por qué se rechaza?"); if (motivo && motivo.trim().length >= 3) correr("marketing.campanias.rechazar", c, { motivo }); };
@@ -368,7 +421,7 @@ function Campanias({ api, puedeGestionar, puedeAprobar, version, onCambio }) {
             {datos.campanias.map((c) => (
               <tr key={c.id} className="border-b border-stone-100 align-top">
                 <td className="py-2.5 px-4 text-stone-900">{c.nombre}<div className="text-xs text-stone-500">{c.folio} · {canalNombre(c.canal)}</div>
-                  {c.externo_id && <div className="text-[11px] text-sky-700 mt-0.5">🔗 {plataformaNombre(c.plataforma)}{c.sync_en ? ` · leída ${hace(c.sync_en)}` : " · aún sin leer"}</div>}
+                  {c.externo_id && <div className="text-[11px] text-sky-700 mt-0.5">🔗 {plataformaNombre(c.plataforma)}{c.plataforma === "google" && c.externo && c.externo.estado ? (c.externo.estado === "enabled" ? " · ▶ activa" : " · ⏸ en pausa") : ""}{c.sync_en ? ` · leída ${hace(c.sync_en)}` : " · aún sin leer"}</div>}
                   {c.sync_error && <div className="text-[11px] text-rose-700 mt-0.5 max-w-xs">{c.sync_error}</div>}</td>
                 <td className="py-2.5 px-4 text-xs text-stone-600 whitespace-nowrap">{fechaSimple(c.desde)} → {fechaSimple(c.hasta)}</td>
                 <td className="py-2.5 px-4 text-right font-mono whitespace-nowrap">{clp(c.presupuesto)}<div className="text-xs text-stone-500">gastado {clp(c.gasto)}{c.metricas.consumo !== null ? ` (${c.metricas.consumo}%)` : ""}</div>{c.excedePresupuesto && <div className="text-[11px] text-rose-700 font-sans">{Number(c.presupuesto_aprobado) > 0 ? "Pasó el presupuesto aprobado" : "Gasta sin presupuesto aprobado"}</div>}</td>
@@ -379,6 +432,9 @@ function Campanias({ api, puedeGestionar, puedeAprobar, version, onCambio }) {
                   {puedeAprobar && c.estado === "pendiente" && <><button disabled={ocupado} onClick={() => correr("marketing.campanias.aprobar", c)} className={BTN_AMBAR}>Aprobar</button> <button disabled={ocupado} onClick={() => rechazar(c)} className={BTN}>Rechazar</button></>}
                   {puedeGestionar && (c.estado === "borrador" || c.estado === "rechazada") && <button disabled={ocupado} onClick={() => correr("marketing.campanias.enviar", c)} className={BTN_AMBAR}>{Number(c.presupuesto) > 0 ? "Enviar a aprobación" : "Activar"}</button>}{" "}
                   {puedeGestionar && (c.estado === "aprobada" || c.estado === "finalizada") && !c.externo_id && <button onClick={() => setResultados(c)} className={BTN}>Resultados</button>}{" "}
+                  {puedeGestionar && c.canal === "google" && !c.externo_id && ["borrador", "pendiente", "aprobada"].includes(c.estado) && <button onClick={() => setGoogle(c)} className={BTN}>Crear en Google Ads</button>}{" "}
+                  {puedeGestionar && c.plataforma === "google" && c.externo && c.externo.estado !== "enabled" && c.estado === "aprobada" && <button disabled={ocupado} onClick={() => window.confirm("¿Activar en Google Ads? Empezará a gastar el presupuesto diario.") && correr("marketing.ads.activar", c)} className={BTN_AMBAR}>Activar en Google</button>}{" "}
+                  {(puedeGestionar || puedeAprobar) && c.plataforma === "google" && c.externo && c.externo.estado === "enabled" && <button disabled={ocupado} onClick={() => correr("marketing.ads.pausar", c)} className={BTN}>Pausar en Google</button>}{" "}
                   {puedeGestionar && c.externo_id && <button disabled={ocupado} onClick={() => window.confirm("¿Desvincular de la plataforma? Quedan los últimos números leídos y vuelve a ser manual.") && correr("marketing.ads.desvincular", c)} className={BTN}>Desvincular</button>}{" "}
                   {puedeGestionar && c.estado === "aprobada" && <button disabled={ocupado} onClick={() => correr("marketing.campanias.finalizar", c)} className={BTN}>Finalizar</button>}{" "}
                   {puedeGestionar && ["borrador", "pendiente", "rechazada", "aprobada"].includes(c.estado) && <button onClick={() => setForma(c)} className={BTN}>Editar</button>}{" "}
@@ -391,6 +447,7 @@ function Campanias({ api, puedeGestionar, puedeAprobar, version, onCambio }) {
       </div>
       <p className="text-xs text-stone-500">Los leads se asocian a la campaña desde el formulario del lead (campo «Campaña»). El costo por lead y por venta usa el gasto (anotado a mano o leído de Meta y Google) y los leads y ventas aprobadas que cuenta el CRM.</p>
       {forma !== undefined && <FormCampania api={api} camp={forma} onCerrar={() => setForma(undefined)} onGuardada={async () => { setForma(undefined); await recargar(); onCambio(); }} />}
+      {google && <FormGoogleAds api={api} camp={google} onCerrar={() => setGoogle(null)} onListo={async () => { setGoogle(null); await recargar(); onCambio(); }} />}
       {resultados && <FormResultados api={api} camp={resultados} onCerrar={() => setResultados(null)} onGuardada={async () => { setResultados(null); await recargar(); onCambio(); }} />}
     </>
   );

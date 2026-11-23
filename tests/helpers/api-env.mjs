@@ -316,6 +316,23 @@ export const iniciarFuncion = async () => {
       if (metodo === "GET" && meta.archivos[mid]) return ok({ url: "https://lookaside.prueba/" + mid, mime_type: meta.archivos[mid].mime, file_size: meta.archivos[mid].bytes.length, id: mid });
       return new Response(JSON.stringify({ error: { message: "no encontrado", code: 100 } }), { status: 404 });
     }
+    if (String(url).startsWith("https://googleads.googleapis.com/") && String(url).endsWith(":mutate")) {
+      const cuerpo = JSON.parse(init.body);
+      ads.google.llamadas.push({ url: String(url), mutate: cuerpo.mutateOperations, headers: init.headers });
+      if (ads.google.fallar) { const st = ads.google.fallar; ads.google.fallar = 0; return new Response(JSON.stringify({ error: { code: st, message: "falla simulada", details: [{ errors: [{ message: "La campaña no cumple las políticas" }] }] } }), { status: st }); }
+      ads.google.mutaciones.push(cuerpo.mutateOperations);
+      const cliente = String(url).split("/customers/")[1].split("/")[0];
+      const respuestas = cuerpo.mutateOperations.map((op) => {
+        const [tipo, cambio] = Object.entries(op)[0];
+        const recurso = { campaignBudgetOperation: "campaignBudgets", campaignOperation: "campaigns", campaignCriterionOperation: "campaignCriteria", adGroupOperation: "adGroups", adGroupAdOperation: "adGroupAds", adGroupCriterionOperation: "adGroupCriteria" }[tipo];
+        const nombre = tipo.replace("Operation", "Result");
+        const rn = cambio.update ? cambio.update.resourceName : `customers/${cliente}/${recurso}/${tipo === "campaignOperation" ? 9000000 + ++ads.google.n : ++ads.google.n}`;
+        if (tipo === "campaignOperation" && cambio.update) { const id = rn.split("/").pop(); const c = ads.google.campanias.find((x) => x.id === id); if (c) c.status = cambio.update.status; }
+        if (tipo === "campaignOperation" && cambio.create) ads.google.campanias.push({ id: rn.split("/").pop(), name: cambio.create.name, status: cambio.create.status });
+        return { [nombre]: { resourceName: rn } };
+      });
+      return new Response(JSON.stringify({ mutateOperationResponses: respuestas }), { status: 200 });
+    }
     if (String(url).startsWith("https://googleads.googleapis.com/")) {
       const cuerpo = JSON.parse(init.body);
       ads.google.llamadas.push({ url: String(url), query: cuerpo.query, headers: init.headers });
