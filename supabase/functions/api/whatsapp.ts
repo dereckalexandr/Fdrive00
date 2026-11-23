@@ -10,7 +10,7 @@
 import {
   telefonoWa, mismoTelefono, nombreDesdePerfil, estadoSiguiente, parsearWebhook, ventanaAbierta, venceVentana, validarTextoWa,
   resumenMensaje, plantillasUsables, armarPlantilla, validarArchivoWa, telefonoVisible, FUENTE_WHATSAPP, MAX_BYTES_MEDIA,
-  validarPlantillaNueva, plantillasParaAdmin,
+  validarPlantillaNueva, plantillasParaAdmin, validarRespuestas, RESPUESTAS_SUGERIDAS,
 } from "./whatsapp-core.js";
 import { permisosEfectivos } from "./crm-core.js";
 import { elegirAsignado, ETAPAS_CERRADAS } from "./ventas-core.js";
@@ -314,7 +314,7 @@ export async function whatsappOp(h: HerramientasWa, op: string, body: any): Prom
       conversacion: { ...conv, telefono_visible: telefonoVisible(conv.telefono) }, mensajes, cliente,
       lead: lead ? { id: lead.id, etapa: lead.etapa, tipo: lead.tipo, asignado: asignado ? asignado.nombre : null } : null,
       ventanaAbierta: ventanaAbierta(conv.ultimo_entrante_en), venceVentana: venceVentana(conv.ultimo_entrante_en),
-      puedeEscribir: escribir && waConfigurado(), configurado: waConfigurado(),
+      puedeEscribir: escribir && waConfigurado(), configurado: waConfigurado(), yo: h.userName,
     };
   }
 
@@ -356,6 +356,7 @@ export async function whatsappOp(h: HerramientasWa, op: string, body: any): Prom
       configurado: waConfigurado(),
       // El Administrador y el Jefe Local crean y borran las plantillas de WhatsApp desde la bandeja.
       puedePlantillas: (h.esAdmin || h.esSupervisor) && !!env("WA_WABA_ID"),
+      puedeRespuestas: h.esAdmin || h.esSupervisor,
       conversaciones: convs.map((c: any) => {
         const l: any = lea.get(c.lead_id);
         const cl: any = cli.get(c.cliente_id);
@@ -376,7 +377,7 @@ export async function whatsappOp(h: HerramientasWa, op: string, body: any): Prom
       if (r.error) return err(r.error, 404);
       lead = r.lead;
       escribir = h.puedeTocar(lead);
-      if (!r.conv) return json({ conversacion: null, mensajes: [], telefono: r.telefono, telefono_visible: r.telefono ? telefonoVisible(r.telefono) : "", ventanaAbierta: false, puedeEscribir: escribir && !!r.telefono && waConfigurado(), configurado: waConfigurado(), sinTelefono: !r.telefono });
+      if (!r.conv) return json({ conversacion: null, mensajes: [], telefono: r.telefono, telefono_visible: r.telefono ? telefonoVisible(r.telefono) : "", ventanaAbierta: false, puedeEscribir: escribir && !!r.telefono && waConfigurado(), configurado: waConfigurado(), sinTelefono: !r.telefono, yo: h.userName });
       conv = r.conv;
       const a = await acceso(conv);
       if (a.lead && a.lead.id !== lead.id) { /* la conversación sigue a otro lead del cliente: se muestra igual (es el mismo número) */ }
@@ -409,6 +410,25 @@ export async function whatsappOp(h: HerramientasWa, op: string, body: any): Prom
     const r = await plantillas(!!body.recargar);
     if (!r.ok) return json({ plantillas: [], error: r.error });
     return json({ plantillas: r.lista });
+  }
+
+  /* ---- Respuestas rápidas: textos guardados del local; las usa todo el equipo y las mantiene el Administrador o el Jefe Local. ---- */
+  if (op === "wa.respuestas" || op === "wa.respuestas_guardar") {
+    const clave = `whatsapp::respuestas::${h.localId || "general"}`;
+    if (op === "wa.respuestas") {
+      const g = await sb.from("kv_store").select("value").eq("key", clave).maybeSingle();
+      let lista: any = null;
+      try { lista = g.data && g.data.value ? JSON.parse(g.data.value) : null; } catch { lista = null; }
+      const guardadas = Array.isArray(lista);
+      return json({ respuestas: guardadas ? lista : RESPUESTAS_SUGERIDAS, predeterminadas: !guardadas, puedeEditar: h.esAdmin || h.esSupervisor });
+    }
+    if (!h.esAdmin && !h.esSupervisor) return err("forbidden", 403);
+    const v = validarRespuestas(body.respuestas);
+    if (!v.ok) return err(v.error!);
+    const up = await sb.from("kv_store").upsert({ key: clave, value: JSON.stringify(v.value), shared: false, updated_at: new Date().toISOString() }, { onConflict: "key" });
+    if (up.error) return fallo(up.error);
+    await h.audit(h.actor, "whatsapp.respuestas", "whatsapp", clave, { cantidad: v.value.length });
+    return json({ respuestas: v.value, predeterminadas: false, puedeEditar: true });
   }
 
   /* ---- Plantillas: el Administrador y el Jefe Local las crean y borran desde el CRM; Meta las revisa y aprueba. ---- */

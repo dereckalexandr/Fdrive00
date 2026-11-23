@@ -269,3 +269,40 @@ export function plantillasParaAdmin(lista) {
     };
   }).sort((a, b) => a.nombre.localeCompare(b.nombre));
 }
+
+/* ---------- Respuestas rápidas (textos guardados que el ejecutivo inserta en la conversación) ---------- */
+export const MAX_RESPUESTAS = 40;
+/** Sugeridas mientras el local no guarde las suyas. */
+export const RESPUESTAS_SUGERIDAS = [
+  { titulo: "Saludo", texto: "Hola {cliente}, soy {ejecutivo} de Drive Futuro. ¿En qué te puedo ayudar?" },
+  { titulo: "Ubicación del local", texto: "Te esperamos en nuestro local. ¿Quieres que te envíe la ubicación en el mapa?" },
+  { titulo: "Horario de atención", texto: "Atendemos de lunes a viernes de 10:00 a 19:00 y los sábados de 10:00 a 14:00." },
+  { titulo: "Pedir datos para cotizar", texto: "Para enviarte una cotización necesito tu nombre completo, RUT y si tienes un auto para dejar en parte de pago." },
+  { titulo: "Agendar visita", texto: "¿Qué día y hora te acomoda para venir a ver el vehículo? Te lo dejo reservado para ese momento." },
+  { titulo: "Gracias", texto: "¡Gracias {cliente}! Cualquier duda, escríbeme por aquí." },
+];
+
+/** Valida la lista completa que guarda el Administrador o el Jefe Local. */
+export function validarRespuestas(lista) {
+  if (!Array.isArray(lista)) return { ok: false, error: "respuestas_invalidas" };
+  if (lista.length > MAX_RESPUESTAS) return { ok: false, error: "respuestas_demasiadas" };
+  const out = [];
+  for (const r of lista) {
+    const titulo = String((r && r.titulo) || "").replace(/\s+/g, " ").trim();
+    const texto = String((r && r.texto) || "").replace(/\r\n/g, "\n").trim();
+    if (titulo.length < 2 || titulo.length > 40) return { ok: false, error: "respuesta_titulo" };
+    if (texto.length < 2 || texto.length > 1000) return { ok: false, error: "respuesta_texto" };
+    out.push({ titulo, texto });
+  }
+  return { ok: true, value: out };
+}
+
+/** Reemplaza {cliente} (su primer nombre) y {ejecutivo} en el texto de una respuesta rápida. */
+export function aplicarRespuesta(texto, { cliente = "", ejecutivo = "" } = {}) {
+  const primero = (s) => String(s || "").trim().split(/\s+/)[0] || "";
+  return String(texto || "")
+    .replace(/\{cliente\}/gi, primero(cliente) || "")
+    .replace(/\{ejecutivo\}/gi, primero(ejecutivo) || "")
+    .replace(/ +([,.!?])/g, "$1")
+    .replace(/ {2,}/g, " ");
+}

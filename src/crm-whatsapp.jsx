@@ -10,7 +10,7 @@
  */
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { compressImage } from "./photos.js";
-import { MAX_BYTES_MEDIA, CATEGORIAS_PLANTILLA, validarPlantillaNueva, variablesDe, nombrePlantilla } from "../supabase/functions/api/whatsapp-core.js";
+import { MAX_BYTES_MEDIA, CATEGORIAS_PLANTILLA, validarPlantillaNueva, variablesDe, nombrePlantilla, aplicarRespuesta, validarRespuestas, MAX_RESPUESTAS } from "../supabase/functions/api/whatsapp-core.js";
 import { INPUT, BTN, BTN_PRIMARIO, Aviso, Cargando, Tarjeta, Campo, useCarga, mensajeError } from "./crm-ui.jsx";
 
 const errorWa = (e) => (e && e.message === "whatsapp_error" && e.detalle ? `WhatsApp no aceptó el mensaje: ${e.detalle}` : mensajeError(e));
@@ -129,6 +129,35 @@ const leerArchivo = (file) => new Promise((resolve, reject) => {
   fr.readAsDataURL(file);
 });
 
+/** Lista de respuestas rápidas del local para insertar en el mensaje (se puede buscar por título o texto). */
+function SelectorRespuestas({ api, cliente, ejecutivo, onElegir, onCerrar }) {
+  const { cargando, datos } = useCarga(() => api("wa.respuestas", {}), [api]);
+  const [q, setQ] = useState("");
+  const lista = ((datos && datos.respuestas) || []).filter((r) => { const t = q.trim().toLowerCase(); return !t || r.titulo.toLowerCase().includes(t) || r.texto.toLowerCase().includes(t); });
+  return (
+    <div className="border border-stone-200 bg-white shadow-sm p-2 flex flex-col gap-2 max-h-72">
+      <div className="flex gap-2">
+        <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar respuesta…" className={`${INPUT} flex-1`} />
+        <button type="button" onClick={onCerrar} className={BTN}>Cerrar</button>
+      </div>
+      {cargando && !datos && <Cargando />}
+      <div className="overflow-y-auto flex flex-col">
+        {lista.length === 0 && datos && <p className="text-xs text-stone-500 p-2">No hay respuestas que coincidan.</p>}
+        {lista.map((r, i) => {
+          const texto = aplicarRespuesta(r.texto, { cliente, ejecutivo });
+          return (
+            <button key={i} type="button" onClick={() => onElegir(texto)} className="text-left px-2 py-1.5 hover:bg-amber-50 border-b border-stone-100">
+              <span className="block text-sm font-medium text-stone-900">{r.titulo}</span>
+              <span className="block text-xs text-stone-500 truncate">{texto}</span>
+            </button>
+          );
+        })}
+      </div>
+      {datos && datos.predeterminadas && <p className="text-[11px] text-stone-400 px-1">Respuestas sugeridas. {datos.puedeEditar ? "Personalízalas en WhatsApp → Respuestas rápidas." : "El Jefe Local puede personalizarlas."}</p>}
+    </div>
+  );
+}
+
 /**
  * Una conversación: por su id (bandeja) o por el lead (ficha del lead).
  * Se actualiza sola cada pocos segundos y queda leída al mirarla.
@@ -138,8 +167,10 @@ export function ChatWhatsapp({ api, conversacionId, leadId, alto = "h-[28rem]", 
   const [texto, setTexto] = useState("");
   const [archivo, setArchivo] = useState(null); // { nombre, tipo, dataUrl }
   const [plantilla, setPlantilla] = useState(false);
+  const [respuestas, setRespuestas] = useState(false);
   const [ocupado, setOcupado] = useState(false);
   const fondo = useRef(null);
+  const areaTexto = useRef(null);
   const params = conversacionId ? { id: conversacionId } : { leadId };
   const { cargando, error, datos, recargar } = useCarga(() => api("wa.conversacion", params), [api, conversacionId, leadId]);
   useCadaTanto(recargar, 8000);
@@ -230,16 +261,21 @@ export function ChatWhatsapp({ api, conversacionId, leadId, alto = "h-[28rem]", 
                 <button type="button" onClick={() => setArchivo(null)} className="ml-auto text-rose-600 hover:underline text-xs">Quitar</button>
               </div>
             )}
+            {respuestas && (
+              <SelectorRespuestas api={api} cliente={(datos.cliente && datos.cliente.nombre) || ""} ejecutivo={datos.yo || ""} onCerrar={() => setRespuestas(false)}
+                onElegir={(t) => { setTexto((x) => (x.trim() ? `${x.trimEnd()}\n${t}` : t)); setRespuestas(false); setTimeout(() => areaTexto.current && areaTexto.current.focus(), 0); }} />
+            )}
             <div className="flex gap-2 items-end">
               <label className={`${BTN} cursor-pointer shrink-0`} title="Adjuntar foto o PDF">📎<input type="file" accept="image/*,application/pdf" onChange={elegirArchivo} className="hidden" /></label>
-              <textarea value={texto} rows={2} maxLength={4096} placeholder={archivo ? "Texto que acompaña el archivo (opcional)" : "Escribe un mensaje…"}
+              <button type="button" onClick={() => setRespuestas((x) => !x)} className={`${BTN} shrink-0`} title="Respuestas rápidas">⚡</button>
+              <textarea ref={areaTexto} value={texto} rows={2} maxLength={4096} placeholder={archivo ? "Texto que acompaña el archivo (opcional)" : "Escribe un mensaje…"}
                 onChange={(e) => setTexto(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && (texto.trim() || archivo) && !ocupado) { e.preventDefault(); enviar(archivo ? { archivo, texto } : { texto }); } }}
                 className={`${INPUT} flex-1 resize-none`} />
               <button type="button" disabled={ocupado || (!texto.trim() && !archivo)} onClick={() => enviar(archivo ? { archivo, texto } : { texto })} className={`${BTN_PRIMARIO} shrink-0`}>{ocupado ? "…" : "Enviar"}</button>
             </div>
             <div className="flex justify-between text-[11px] text-stone-500">
-              <span>Enter envía · Shift + Enter, nueva línea</span>
+              <span>Enter envía · Shift + Enter, nueva línea · ⚡ respuestas rápidas</span>
               <button type="button" onClick={() => setPlantilla(true)} className="text-sky-700 hover:underline">Usar una plantilla</button>
             </div>
           </div>
@@ -288,6 +324,53 @@ function ConfigWhatsapp({ api, locales }) {
           </select>
         </Campo>
         {msg && <p className="text-xs text-stone-600">{msg}</p>}
+      </div>
+    </Tarjeta>
+  );
+}
+
+/** Respuestas rápidas del local (Administrador y Jefe Local): títulos y textos que el equipo inserta con ⚡. */
+function AdminRespuestas({ api }) {
+  const { cargando, error, datos, recargar } = useCarga(() => api("wa.respuestas", {}), [api]);
+  const [lista, setLista] = useState(null);
+  const [msg, setMsg] = useState(null);
+  const [ocupado, setOcupado] = useState(false);
+  useEffect(() => { if (datos) setLista(datos.respuestas.map((r) => ({ ...r }))); }, [datos]);
+  if (cargando && !datos) return <Cargando />;
+  if (error && !datos) return <Aviso>{error}</Aviso>;
+  if (!lista) return null;
+  const cambiar = (i, k, v) => setLista(lista.map((r, j) => (j === i ? { ...r, [k]: v } : r)));
+  const mover = (i, d) => { const n = [...lista]; const j = i + d; if (j < 0 || j >= n.length) return; [n[i], n[j]] = [n[j], n[i]]; setLista(n); };
+  const guardar = async () => {
+    setMsg(null);
+    const v = validarRespuestas(lista);
+    if (!v.ok) { setMsg({ ok: false, texto: mensajeError({ message: v.error }) }); return; }
+    setOcupado(true);
+    try { await api("wa.respuestas_guardar", { respuestas: v.value }); setMsg({ ok: true, texto: "Respuestas guardadas: el equipo ya las ve en el botón ⚡ de cada conversación." }); await recargar(); }
+    catch (e) { setMsg({ ok: false, texto: mensajeError(e) }); }
+    setOcupado(false);
+  };
+  return (
+    <Tarjeta titulo="Respuestas rápidas" ayuda="Textos que el equipo inserta con un clic (botón ⚡) al escribir dentro de las 24 horas. Usa {cliente} y {ejecutivo}: se reemplazan por el nombre del cliente y de quien escribe. No pasan por Meta y no tienen costo."
+      derecha={<button type="button" disabled={lista.length >= MAX_RESPUESTAS} onClick={() => setLista([...lista, { titulo: "", texto: "" }])} className={BTN}>+ Agregar</button>}>
+      {datos.predeterminadas && <p className="text-xs text-amber-700 mb-3">Son las respuestas sugeridas: ajústalas y pulsa «Guardar» para dejarlas como las de tu local.</p>}
+      <div className="flex flex-col gap-3">
+        {lista.map((r, i) => (
+          <div key={i} className="border border-stone-200 p-3 flex flex-col gap-2">
+            <div className="flex gap-2 items-center">
+              <input value={r.titulo} maxLength={40} onChange={(e) => cambiar(i, "titulo", e.target.value)} placeholder="Título (ej.: Horario de atención)" className={`${INPUT} flex-1`} />
+              <button type="button" onClick={() => mover(i, -1)} disabled={i === 0} className={BTN} title="Subir">↑</button>
+              <button type="button" onClick={() => mover(i, 1)} disabled={i === lista.length - 1} className={BTN} title="Bajar">↓</button>
+              <button type="button" onClick={() => setLista(lista.filter((_, j) => j !== i))} className="text-xs text-rose-600 hover:underline px-1">Quitar</button>
+            </div>
+            <textarea rows={2} value={r.texto} maxLength={1000} onChange={(e) => cambiar(i, "texto", e.target.value)} placeholder="Texto de la respuesta…" className={INPUT} />
+          </div>
+        ))}
+        {lista.length === 0 && <p className="text-sm text-stone-500">No hay respuestas. Agrega la primera con «+ Agregar».</p>}
+      </div>
+      <div className="flex flex-wrap items-center gap-3 mt-3">
+        <button type="button" onClick={guardar} disabled={ocupado} className={BTN_PRIMARIO}>{ocupado ? "Guardando…" : "Guardar"}</button>
+        {msg && <p className={`text-sm ${msg.ok ? "text-emerald-700" : "text-rose-600"}`}>{msg.texto}</p>}
       </div>
     </Tarjeta>
   );
@@ -442,13 +525,14 @@ export function BandejaWhatsapp({ api, abrirLead, locales, onCambio = () => {} }
   return (
     <div className="flex flex-col gap-4">
       <ConfigWhatsapp api={api} locales={locales} />
-      {datos.puedePlantillas && (
+      {(datos.puedePlantillas || datos.puedeRespuestas) && (
         <div className="flex border border-stone-300 self-start">
           <button type="button" onClick={() => setVista("conversaciones")} className={`px-3 py-1.5 text-sm ${vista === "conversaciones" ? "bg-stone-900 text-white" : "bg-white text-stone-700"}`}>Conversaciones</button>
-          <button type="button" onClick={() => setVista("plantillas")} className={`px-3 py-1.5 text-sm ${vista === "plantillas" ? "bg-stone-900 text-white" : "bg-white text-stone-700"}`}>Plantillas</button>
+          {datos.puedeRespuestas && <button type="button" onClick={() => setVista("respuestas")} className={`px-3 py-1.5 text-sm ${vista === "respuestas" ? "bg-stone-900 text-white" : "bg-white text-stone-700"}`}>Respuestas rápidas</button>}
+          {datos.puedePlantillas && <button type="button" onClick={() => setVista("plantillas")} className={`px-3 py-1.5 text-sm ${vista === "plantillas" ? "bg-stone-900 text-white" : "bg-white text-stone-700"}`}>Plantillas</button>}
         </div>
       )}
-      {vista === "plantillas" && datos.puedePlantillas ? <AdminPlantillas api={api} /> : <>
+      {vista === "respuestas" && datos.puedeRespuestas ? <AdminRespuestas api={api} /> : vista === "plantillas" && datos.puedePlantillas ? <AdminPlantillas api={api} /> : <>
       {!datos.configurado && <Aviso tipo="info">WhatsApp aún no está conectado: cuando el Administrador cargue las credenciales de Meta, aquí aparecerán las conversaciones.</Aviso>}
       <div className="grid grid-cols-1 lg:grid-cols-[20rem_minmax(0,1fr)] gap-4 items-start">
         <div className={`bg-white border border-stone-200 flex flex-col ${actual ? "hidden lg:flex" : ""}`}>

@@ -121,3 +121,15 @@ test("Plantillas nuevas: nombre técnico, variables numeradas con ejemplo, sin v
   const adm = plantillasParaAdmin([{ id: "1", name: "b", language: "es", category: "UTILITY", status: "REJECTED", rejected_reason: "INVALID_FORMAT", components: [{ type: "BODY", text: "x" }] }, { id: "2", name: "a", language: "es", category: "MARKETING", status: "APPROVED", rejected_reason: "NONE", components: [] }]);
   assert.deepEqual(adm.map((p) => [p.nombre, p.estadoNombre, p.motivo]), [["a", "Aprobada", ""], ["b", "Rechazada", "INVALID_FORMAT"]]);
 });
+
+test("Respuestas rápidas: validación y reemplazo de {cliente} y {ejecutivo}", async () => {
+  const { validarRespuestas, aplicarRespuesta, RESPUESTAS_SUGERIDAS, MAX_RESPUESTAS } = await import("../supabase/functions/api/whatsapp-core.js");
+  assert.ok(RESPUESTAS_SUGERIDAS.length >= 3);
+  assert.equal(validarRespuestas([{ titulo: "  Horario ", texto: " De 10 a 19 " }]).value[0].titulo, "Horario");
+  assert.equal(validarRespuestas("x").error, "respuestas_invalidas");
+  assert.equal(validarRespuestas([{ titulo: "a", texto: "hola" }]).error, "respuesta_titulo");
+  assert.equal(validarRespuestas([{ titulo: "Saludo", texto: "" }]).error, "respuesta_texto");
+  assert.equal(validarRespuestas(Array.from({ length: MAX_RESPUESTAS + 1 }, () => ({ titulo: "ab", texto: "cd" }))).error, "respuestas_demasiadas");
+  assert.equal(aplicarRespuesta("Hola {cliente}, soy {EJECUTIVO}.", { cliente: "Pedro Soto", ejecutivo: "Eva Contreras" }), "Hola Pedro, soy Eva.");
+  assert.equal(aplicarRespuesta("¡Gracias {cliente}! Saludos", {}), "¡Gracias! Saludos");
+});

@@ -310,3 +310,24 @@ test("Plantillas desde el CRM: el Jefe Local las crea (van a Meta) y las borra; 
   assert.equal(lista.plantillas.length, 0);
   assert.equal((await ve(U.jefe.token, "wa.plantilla_borrar", { nombre: "MAL nombre" })).error, "plantilla_nombre");
 });
+
+test("Respuestas rápidas: sugeridas al inicio; el Jefe Local las guarda para su local y el ejecutivo las usa", async () => {
+  const ini = await ve(U.e1.token, "wa.respuestas");
+  assert.equal(ini.status, 200, JSON.stringify(ini));
+  assert.equal(ini.predeterminadas, true);
+  assert.equal(ini.puedeEditar, false);
+  assert.ok(ini.respuestas.length >= 3);
+  assert.equal((await ve(U.e1.token, "wa.respuestas_guardar", { respuestas: [{ titulo: "Hola", texto: "Hola!" }] })).status, 403, "el ejecutivo no las cambia");
+  assert.equal((await ve(U.e1.token, "wa.list")).puedeRespuestas, false);
+  assert.equal((await ve(U.jefe.token, "wa.list")).puedeRespuestas, true);
+  assert.equal((await ve(U.jefe.token, "wa.respuestas_guardar", { respuestas: [{ titulo: "x", texto: "y" }] })).error, "respuesta_titulo");
+  const g = await ve(U.jefe.token, "wa.respuestas_guardar", { respuestas: [{ titulo: "Horario", texto: "Atendemos de 10 a 19, {cliente}." }, { titulo: "Ubicación", texto: "Av. Siempre Viva 742" }] });
+  assert.equal(g.status, 200, JSON.stringify(g));
+  const ahora = await ve(U.e1.token, "wa.respuestas");
+  assert.equal(ahora.predeterminadas, false);
+  assert.deepEqual(ahora.respuestas.map((r) => r.titulo), ["Horario", "Ubicación"]);
+  assert.ok(db.tablas.bitacora.some((b) => b.accion === "whatsapp.respuestas"));
+  // La conversación trae el nombre de quien escribe (para {ejecutivo}).
+  const c = await ve(U.dueno.token, "wa.conversacion", { id: U.conv1 });
+  assert.equal(c.yo, U.dueno.nombre);
+});
