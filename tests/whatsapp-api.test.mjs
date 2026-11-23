@@ -331,3 +331,23 @@ test("Respuestas rápidas: sugeridas al inicio; el Jefe Local las guarda para su
   const c = await ve(U.dueno.token, "wa.conversacion", { id: U.conv1 });
   assert.equal(c.yo, U.dueno.nombre);
 });
+
+test("Etiquetas: quien ve la conversación la etiqueta; se validan y aparecen en la bandeja", async () => {
+  const { validarEtiquetas } = await import("../supabase/functions/api/whatsapp-core.js");
+  assert.deepEqual(validarEtiquetas(["Caliente", " caliente ", "Parte de pago"]).value, ["Caliente", "Parte de pago"]);
+  assert.equal(validarEtiquetas(["x"]).error, "etiquetas_invalidas");
+  assert.equal(validarEtiquetas(["Uno", "Dos", "Tres", "Cuatro", "Cinco", "Seis"]).error, "etiquetas_invalidas");
+  const c = db.tablas.wa_conversaciones.find((x) => x.lead_id);
+  const lead = db.tablas.leads.find((l) => l.id === c.lead_id);
+  const dueno = Object.values(U).find((u) => u.id === lead.asignado_a);
+  const otro = Object.values(U).find((u) => u.id !== lead.asignado_a && u.id !== U.jefe.id);
+  const r = await ve(dueno.token, "wa.etiquetas", { id: c.id, etiquetas: ["Caliente", "Financiamiento"] });
+  assert.equal(r.status, 200, JSON.stringify(r));
+  assert.deepEqual(db.tablas.wa_conversaciones.find((x) => x.id === c.id).etiquetas, ["Caliente", "Financiamiento"]);
+  assert.equal((await ve(otro.token, "wa.etiquetas", { id: c.id, etiquetas: ["Otra"] })).status, 404, "otro ejecutivo no la ve");
+  assert.equal((await ve(U.jefe.token, "wa.etiquetas", { id: c.id, etiquetas: ["Caliente", "Visita agendada"] })).status, 200, "el Jefe Local también");
+  const l = await ve(dueno.token, "wa.list", {});
+  assert.deepEqual(l.conversaciones.find((x) => x.id === c.id).etiquetas, ["Caliente", "Visita agendada"]);
+  assert.ok(l.etiquetasSugeridas.includes("Parte de pago"));
+  assert.equal((await ve(U.jefe.token, "wa.etiquetas", { id: c.id, etiquetas: "Caliente" })).error, "etiquetas_invalidas");
+});

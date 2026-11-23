@@ -306,3 +306,19 @@ export function aplicarRespuesta(texto, { cliente = "", ejecutivo = "" } = {}) {
     .replace(/ +([,.!?])/g, "$1")
     .replace(/ {2,}/g, " ");
 }
+
+/* ---------- Etiquetas de las conversaciones ---------- */
+export const MAX_ETIQUETAS = 5;
+export const ETIQUETAS_SUGERIDAS = ["Caliente", "Financiamiento", "Parte de pago", "Pidió fotos", "Visita agendada", "Sin respuesta", "Postventa"];
+/** Etiquetas de una conversación: hasta 5, de 2 a 20 caracteres, sin repetir (sin importar mayúsculas). */
+export function validarEtiquetas(lista) {
+  if (!Array.isArray(lista)) return { ok: false, error: "etiquetas_invalidas" };
+  const out = [];
+  for (const x of lista) {
+    const t = String(x ?? "").replace(/\s+/g, " ").trim();
+    if (t.length < 2 || t.length > 20) return { ok: false, error: "etiquetas_invalidas" };
+    if (!out.some((y) => y.toLowerCase() === t.toLowerCase())) out.push(t);
+  }
+  if (out.length > MAX_ETIQUETAS) return { ok: false, error: "etiquetas_invalidas" };
+  return { ok: true, value: out };
+}

@@ -145,7 +145,7 @@ function Consulta() {
     if (siteKey && window.turnstile && widget.current !== null) { window.turnstile.reset(widget.current); setCaptcha(""); }
   };
   return (
-    <div className="max-w-3xl mx-auto px-4 md:px-6 py-8 md:py-12 flex flex-col gap-6">
+    <div className="max-w-3xl xl:max-w-5xl mx-auto px-4 md:px-6 py-8 md:py-12 flex flex-col gap-6">
       <div>
         <h1 className="font-serif text-3xl md:text-4xl text-stone-900 leading-tight">Revisa la inspección de un vehículo</h1>
         <p className="text-stone-600 mt-2">Escribe la patente para ver el resultado de la inspección, descargar el informe completo y revisar las imágenes.</p>
@@ -186,7 +186,7 @@ export default function SitioInspecciones() {
   return (
     <div className="min-h-screen bg-stone-50 text-stone-900 flex flex-col">
       <header className="bg-stone-900 text-stone-100">
-        <div className="max-w-5xl mx-auto px-4 md:px-6 py-4 flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
+        <div className="marco-crm !max-w-7xl py-4 flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
           <div className="flex items-center gap-2.5 font-serif text-xl md:text-2xl">
             <span className="w-9 h-9 rounded-xl bg-amber-500 text-stone-900 text-sm font-bold flex items-center justify-center">DF</span>
             Drive Futuro
@@ -198,9 +198,9 @@ export default function SitioInspecciones() {
           </nav>
         </div>
       </header>
-      <main className="flex-1">{seccion === "estimador" ? <div className="max-w-5xl mx-auto px-4 md:px-6 py-8"><Suspense fallback={<p className="text-sm text-stone-500">Cargando…</p>}><EstimadorCompra apiPatente={apiPatentePublica} /></Suspense></div> : seccion === "calculadora" ? <Calculadora /> : seccion === "bhe" ? <CalculadoraBhe /> : <Consulta />}</main>
+      <main className="flex-1">{seccion === "estimador" ? <div className="marco-crm !max-w-7xl py-8"><Suspense fallback={<p className="text-sm text-stone-500">Cargando…</p>}><EstimadorCompra apiPatente={apiPatentePublica} /></Suspense></div> : seccion === "calculadora" ? <Calculadora /> : seccion === "bhe" ? <CalculadoraBhe /> : <Consulta />}</main>
       <footer className="bg-stone-900 text-stone-400 text-xs">
-        <div className="max-w-5xl mx-auto px-4 md:px-6 py-6">{PIE[seccion]}</div>
+        <div className="marco-crm !max-w-7xl py-6">{PIE[seccion]}</div>
       </footer>
     </div>
   );

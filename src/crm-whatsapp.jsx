@@ -500,12 +500,42 @@ function AdminPlantillas({ api }) {
 }
 
 /** Bandeja del ejecutivo: sus conversaciones (no leídas primero) y la conversación elegida al lado. */
+/** Etiquetas de la conversación abierta: se agregan (sugeridas o propias) y se quitan con un clic. */
+function EtiquetasConversacion({ api, conv, sugeridas, onCambio }) {
+  const [nueva, setNueva] = useState("");
+  const [msg, setMsg] = useState("");
+  const actuales = conv.etiquetas || [];
+  const guardar = async (lista) => {
+    setMsg("");
+    try { await api("wa.etiquetas", { id: conv.id, etiquetas: lista }); setNueva(""); onCambio(); } catch (e) { setMsg(mensajeError(e)); }
+  };
+  const agregar = (t) => { const x = String(t || "").trim(); if (x && !actuales.some((y) => y.toLowerCase() === x.toLowerCase())) guardar([...actuales, x]); };
+  const libres = (sugeridas || []).filter((s) => !actuales.some((y) => y.toLowerCase() === s.toLowerCase()));
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 mb-3">
+      {actuales.map((t) => (
+        <span key={t} className="inline-flex items-center gap-1 text-xs bg-amber-100 text-amber-900 px-2 py-0.5 rounded-full">{t}<button type="button" onClick={() => guardar(actuales.filter((x) => x !== t))} className="text-amber-700 hover:text-rose-700" aria-label={`Quitar ${t}`}>✕</button></span>
+      ))}
+      {actuales.length < 5 && (
+        <>
+          <select value="" onChange={(e) => agregar(e.target.value)} className="text-xs border border-stone-300 bg-white px-1.5 py-0.5">
+            <option value="">+ Etiqueta</option>{libres.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+          <input value={nueva} maxLength={20} onChange={(e) => setNueva(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); agregar(nueva); } }} placeholder="Otra…" className="text-xs border border-stone-300 px-1.5 py-0.5 w-24" />
+        </>
+      )}
+      {msg && <span className="text-xs text-rose-600">{msg}</span>}
+    </div>
+  );
+}
+
 export function BandejaWhatsapp({ api, abrirLead, locales, onCambio = () => {} }) {
   const { cargando, error, datos, recargar } = useCarga(() => api("wa.list", {}), [api]);
   useCadaTanto(recargar, 15000);
   const [sel, setSel] = useState(null);
   const [q, setQ] = useState("");
   const [soloNoLeidos, setSoloNoLeidos] = useState(false);
+  const [etiqueta, setEtiqueta] = useState("");
   const [vista, setVista] = useState("conversaciones"); // conversaciones | plantillas
   const alCambiar = useCallback(() => { recargar(); onCambio(); }, [recargar, onCambio]);
 
@@ -513,9 +543,10 @@ export function BandejaWhatsapp({ api, abrirLead, locales, onCambio = () => {} }
     if (!datos) return [];
     const t = q.trim().toLowerCase();
     return datos.conversaciones
+      .filter((c) => (!etiqueta || (c.etiquetas || []).includes(etiqueta)))
       .filter((c) => (!soloNoLeidos || c.no_leidos > 0) && (!t || [c.nombre, c.telefono, c.telefono_visible, c.ultimo_texto, c.asignado].some((x) => String(x || "").toLowerCase().includes(t))))
       .sort((a, b) => (b.no_leidos > 0) - (a.no_leidos > 0) || String(b.ultimo_mensaje_en || "").localeCompare(String(a.ultimo_mensaje_en || "")));
-  }, [datos, q, soloNoLeidos]);
+  }, [datos, q, soloNoLeidos, etiqueta]);
 
   if (cargando && !datos) return <Cargando />;
   if (error && !datos) return <Aviso>{error}</Aviso>;
@@ -538,7 +569,12 @@ export function BandejaWhatsapp({ api, abrirLead, locales, onCambio = () => {} }
         <div className={`bg-white border border-stone-200 flex flex-col ${actual ? "hidden lg:flex" : ""}`}>
           <div className="p-3 border-b border-stone-200 flex flex-col gap-2">
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar nombre, teléfono o mensaje" className={INPUT} />
-            <label className="flex items-center gap-2 text-xs text-stone-600"><input type="checkbox" checked={soloNoLeidos} onChange={(e) => setSoloNoLeidos(e.target.checked)} /> Solo no leídos {noLeidos > 0 && `(${noLeidos})`}</label>
+            <div className="flex items-center justify-between gap-2">
+              <label className="flex items-center gap-2 text-xs text-stone-600"><input type="checkbox" checked={soloNoLeidos} onChange={(e) => setSoloNoLeidos(e.target.checked)} /> Solo no leídos {noLeidos > 0 && `(${noLeidos})`}</label>
+              {(() => { const usadas = [...new Set(datos.conversaciones.flatMap((c) => c.etiquetas || []))].sort(); return usadas.length > 0 && (
+                <select value={etiqueta} onChange={(e) => setEtiqueta(e.target.value)} className="text-xs border border-stone-300 bg-white px-1.5 py-0.5"><option value="">Todas las etiquetas</option>{usadas.map((u) => <option key={u} value={u}>{u}</option>)}</select>
+              ); })()}
+            </div>
           </div>
           <div className="max-h-[34rem] overflow-y-auto">
             {lista.length === 0 && <p className="p-4 text-sm text-stone-500">{datos.conversaciones.length === 0 ? "Aún no tienes conversaciones. Cuando un cliente de tus leads escriba al WhatsApp de la empresa, aparecerá aquí." : "Ninguna coincide."}</p>}
@@ -551,6 +587,7 @@ export function BandejaWhatsapp({ api, abrirLead, locales, onCambio = () => {} }
                   </div>
                   <p className="text-xs text-stone-500 truncate">{c.ultima_direccion === "saliente" ? "Tú: " : ""}{c.ultimo_texto || "—"}</p>
                   {c.asignado && <p className="text-[11px] text-stone-400 truncate">Atiende {c.asignado}</p>}
+                  {(c.etiquetas || []).length > 0 && <div className="flex flex-wrap gap-1 mt-0.5">{c.etiquetas.map((t) => <span key={t} className="text-[10px] bg-amber-100 text-amber-900 px-1.5 rounded-full">{t}</span>)}</div>}
                 </div>
                 {c.no_leidos > 0 && <span className="self-center text-xs bg-emerald-500 text-white rounded-full min-w-[1.4rem] text-center px-1.5 py-0.5">{c.no_leidos}</span>}
               </button>
@@ -564,6 +601,7 @@ export function BandejaWhatsapp({ api, abrirLead, locales, onCambio = () => {} }
                 <button type="button" onClick={() => setSel(null)} className={`${BTN} lg:hidden`}>← Volver</button>
                 {actual.lead_id && abrirLead && <button type="button" onClick={() => abrirLead(actual.lead_id)} className={BTN}>Abrir lead</button>}
               </div>}>
+              <EtiquetasConversacion api={api} conv={actual} sugeridas={datos.etiquetasSugeridas} onCambio={recargar} />
               <ChatWhatsapp key={actual.id} api={api} conversacionId={actual.id} onCambio={alCambiar} />
             </Tarjeta>
           ) : <div className="bg-white border border-stone-200 p-8 text-center text-sm text-stone-500">Elige una conversación.</div>}

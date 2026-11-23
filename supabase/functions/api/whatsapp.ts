@@ -10,7 +10,7 @@
 import {
   telefonoWa, mismoTelefono, nombreDesdePerfil, estadoSiguiente, parsearWebhook, ventanaAbierta, venceVentana, validarTextoWa,
   resumenMensaje, plantillasUsables, armarPlantilla, validarArchivoWa, telefonoVisible, FUENTE_WHATSAPP, MAX_BYTES_MEDIA,
-  validarPlantillaNueva, plantillasParaAdmin, validarRespuestas, RESPUESTAS_SUGERIDAS,
+  validarPlantillaNueva, plantillasParaAdmin, validarRespuestas, RESPUESTAS_SUGERIDAS, validarEtiquetas, ETIQUETAS_SUGERIDAS,
 } from "./whatsapp-core.js";
 import { permisosEfectivos } from "./crm-core.js";
 import { elegirAsignado, ETAPAS_CERRADAS } from "./ventas-core.js";
@@ -369,6 +369,7 @@ export async function whatsappOp(h: HerramientasWa, op: string, body: any): Prom
       // El Administrador y el Jefe Local crean y borran las plantillas de WhatsApp desde la bandeja.
       puedePlantillas: (h.esAdmin || h.esSupervisor) && !!env("WA_WABA_ID"),
       puedeRespuestas: h.esAdmin || h.esSupervisor,
+      etiquetasSugeridas: ETIQUETAS_SUGERIDAS,
       conversaciones: convs.map((c: any) => {
         const l: any = lea.get(c.lead_id);
         const cl: any = cli.get(c.cliente_id);
@@ -377,6 +378,7 @@ export async function whatsappOp(h: HerramientasWa, op: string, body: any): Prom
           id: c.id, telefono: c.telefono, telefono_visible: telefonoVisible(c.telefono), nombre: (cl && cl.nombre) || c.nombre_perfil || telefonoVisible(c.telefono),
           no_leidos: Number(c.no_leidos) || 0, ultimo_mensaje_en: c.ultimo_mensaje_en, ultimo_texto: c.ultimo_texto, ultima_direccion: c.ultima_direccion,
           ventanaAbierta: ventanaAbierta(c.ultimo_entrante_en), lead_id: c.lead_id, etapa: l ? l.etapa : null, tipo: l ? l.tipo : null, asignado: u ? u.nombre : null,
+          etiquetas: Array.isArray(c.etiquetas) ? c.etiquetas : [],
         };
       }),
     });
@@ -400,6 +402,18 @@ export async function whatsappOp(h: HerramientasWa, op: string, body: any): Prom
       lead = a.lead; escribir = a.escribir;
     }
     return json(await detalle(conv, lead, escribir));
+  }
+
+  /** Etiquetas de una conversación (las pone quien la puede ver: el ejecutivo del lead o el Jefe Local). */
+  if (op === "wa.etiquetas") {
+    const conv = (await sb.from("wa_conversaciones").select("*").eq("id", String(body.id ?? "")).maybeSingle()).data;
+    const a = await acceso(conv);
+    if (!a.ver) return err("no_existe", 404);
+    const v = validarEtiquetas(body.etiquetas);
+    if (!v.ok) return err(v.error!);
+    const up = await sb.from("wa_conversaciones").update({ etiquetas: v.value }).eq("id", conv.id);
+    if (up.error) return fallo(up.error);
+    return json({ etiquetas: v.value });
   }
 
   if (op === "wa.leer") {
