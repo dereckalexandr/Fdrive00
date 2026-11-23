@@ -206,7 +206,7 @@ export const meta = { llamadas: [], plantillas: [], fallarEnvio: "", archivos: {
  */
 /** Meta Ads y Google Ads simulados: cuentas, campañas y métricas que devuelven las APIs de lectura. */
 export const ads = {
-  meta: { cuenta: { name: "Cuenta BuyCar", currency: "CLP", account_status: 1 }, campanias: [], insights: {}, fallar: "", llamadas: [] },
+  meta: { cuenta: { name: "Cuenta BuyCar", currency: "CLP", account_status: 1 }, campanias: [], insights: {}, leads: {}, fallar: "", llamadas: [] },
   google: { cuenta: { descriptiveName: "BuyCar Google", currencyCode: "CLP" }, campanias: [], metricas: {}, fallar: 0, llamadas: [] },
 };
 export const google = { llamadas: [], eventos: {}, fallar: 0, n: 0, tokens: 0 };
@@ -221,7 +221,7 @@ export const iniciarFuncion = async () => {
   writeFileSync(fake, "export const createClient = () => globalThis.__baseFalsa.cliente;\n");
   const core = pathToFileURL(resolve("supabase/functions/api/crm-core.js")).href;
   let src = readFileSync("supabase/functions/api/index.ts", "utf8");
-  src = src.replace("npm:@supabase/supabase-js@2", pathToFileURL(fake).href).replace("./crm-core.js", core).replace("./ventas.ts", pathToFileURL(resolve("supabase/functions/api/ventas.ts")).href).replace("./publico.ts", pathToFileURL(resolve("supabase/functions/api/publico.ts")).href).replace("./alertas.ts", pathToFileURL(resolve("supabase/functions/api/alertas.ts")).href).replace("./patentes-core.js", pathToFileURL(resolve("supabase/functions/api/patentes-core.js")).href).replace("./whatsapp.ts", pathToFileURL(resolve("supabase/functions/api/whatsapp.ts")).href).replace("./ads.ts", pathToFileURL(resolve("supabase/functions/api/ads.ts")).href);
+  src = src.replace("npm:@supabase/supabase-js@2", pathToFileURL(fake).href).replace("./crm-core.js", core).replace("./ventas.ts", pathToFileURL(resolve("supabase/functions/api/ventas.ts")).href).replace("./publico.ts", pathToFileURL(resolve("supabase/functions/api/publico.ts")).href).replace("./alertas.ts", pathToFileURL(resolve("supabase/functions/api/alertas.ts")).href).replace("./patentes-core.js", pathToFileURL(resolve("supabase/functions/api/patentes-core.js")).href).replace("./whatsapp.ts", pathToFileURL(resolve("supabase/functions/api/whatsapp.ts")).href).replace("./ads.ts", pathToFileURL(resolve("supabase/functions/api/ads.ts")).href).replace("./leads-ads.ts", pathToFileURL(resolve("supabase/functions/api/leads-ads.ts")).href);
   const archivo = join(dir, "index.mts");
   writeFileSync(archivo, src);
   globalThis.__baseFalsa = db;
@@ -274,6 +274,13 @@ export const iniciarFuncion = async () => {
       const ok = (d) => new Response(JSON.stringify(d), { status: 200 });
       if (u.hostname === "lookaside.prueba") { const a = meta.archivos[u.pathname.slice(1)]; return a ? new Response(a.bytes, { status: 200 }) : new Response("", { status: 404 }); }
       // Meta Ads (solo lectura): cuenta publicitaria, campañas y métricas (insights) de una campaña.
+      // Formulario respondido (Lead Ads): /{leadgen_id}?fields=field_data,...
+      const idLead = u.pathname.split("/").pop();
+      if (metodo === "GET" && ads.meta.leads[idLead]) {
+        ads.meta.llamadas.push({ ruta: u.pathname, query: Object.fromEntries(u.searchParams), auth: init && init.headers && init.headers.authorization });
+        if (ads.meta.fallar) { const m = ads.meta.fallar; ads.meta.fallar = ""; return new Response(JSON.stringify({ error: { message: m, code: 200 } }), { status: 403 }); }
+        return ok({ id: idLead, created_time: "2026-11-23T15:00:00+0000", ...ads.meta.leads[idLead] });
+      }
       const mAct = /\/act_(\d+)(\/campaigns)?$/.exec(u.pathname);
       const mIns = /\/(\d+)\/insights$/.exec(u.pathname);
       if (mAct || mIns) {

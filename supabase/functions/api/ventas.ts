@@ -23,6 +23,7 @@ import { whatsappOp } from "./whatsapp.ts";
 import { finanzasOp } from "./finanzas.ts";
 import { PLATAFORMAS, validarVinculo, validarImportacion, excedePresupuesto, errorLegible } from "./ads-core.js";
 import { estadoConexion, listarExternas, configurado as adsConfigurado, sincronizarCampanias } from "./ads.ts";
+import { estadoLeadsAds, reintentarLead } from "./leads-ads.ts";
 import { googleConfigurado, crearVisitaGoogle, moverVisitaGoogle, cancelarVisitaGoogle } from "./google-calendar.ts";
 import { tramosEfectivos, calcularProduccion } from "./comisiones-core.js";
 import { enviarAviso, enSegundoPlano, correoActivo, enviarInvitacionVisita } from "./correo.ts";
@@ -1218,7 +1219,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     }
 
     /* ----- plataformas de anuncios (Meta y Google Ads): el CRM lee el gasto y los resultados de las campañas vinculadas ----- */
-    if (op.startsWith("marketing.ads.")) {
+    if (op.startsWith("marketing.ads.") || op.startsWith("marketing.leads.")) {
       if (!gestiona && !esSupervisor) return err("forbidden", 403);
       const plataforma = String(body.plataforma ?? "");
       const yaVinculada = async (plat: string, externoId: string) => {
@@ -1231,6 +1232,18 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
         try { const lista = await listarExternas(plat); const e = lista.find((x: any) => x.id === externoId); return e ? { externa: e } : { error: err("externo_no_existe", 404) }; }
         catch (e) { return { error: json({ error: "ads_error", detalle: errorLegible(plat, e) }, 502) }; }
       };
+
+      // Leads de los formularios de anuncios: estado de cada plataforma, leads de los últimos 30 días y los que fallaron (para reintentar).
+      if (op === "marketing.leads.estado") return json(await estadoLeadsAds(sb, localId));
+      if (op === "marketing.leads.reintentar") {
+        const plat = String(body.plataforma ?? "");
+        const lid = String(body.id ?? "");
+        if (!["meta", "google"].includes(plat) || !/^[\w-]{3,60}$/.test(lid)) return err("externo_invalido");
+        const r = await reintentarLead({ sb, audit, rolePermOverrides: ctx.rolePermOverrides }, plat, lid);
+        if (!r.ok) return json({ error: "ads_error", detalle: r.error }, 502);
+        await audit(ctx.actor, "ads.lead_reintentar", "lead_externo", lid, { plataforma: plat });
+        return json({ ok: true });
+      }
 
       if (op === "marketing.ads.estado") return json({ plataformas: await Promise.all(PLATAFORMAS.map((p) => estadoConexion(p.id))), puedeGestionar: gestiona || esSupervisor });
 

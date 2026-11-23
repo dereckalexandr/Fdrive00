@@ -8,6 +8,7 @@
 //   Jefe Local 12.345.678-5 · Ejecutivo 6.000.000-K · Tasador 5.555.555-9 · Inspector 12.000.000-4
 //   Validador 13.000.000-2 · Anunciante 14.000.000-0 · Marketing 10.000.013-K
 import { createServer as crearHttp } from "node:http";
+import { createHmac } from "node:crypto";
 import { iniciarFuncion, api, nuevaIp, loginAdmin, crm, manejar, db, boostr, ads, entorno, ADMIN_EMAIL, ADMIN_PW } from "../tests/helpers/api-env.mjs";
 
 const CLAVE = "Prueba12345";
@@ -36,7 +37,7 @@ await crear("anu", "Ana Anunciante", "14.000.000-0", ["anunciante"]);
 await crear("mkt", "Marta Marketing", "10.000.013-K", ["marketing"]);
 
 // Meta Ads y Google Ads simulados (la demo no sale a internet): una cuenta conectada con algunas campañas, para ver Marketing → Campañas.
-Object.assign(entorno, { META_AD_ACCOUNT_ID: "act_100200300", GOOGLE_ADS_DEVELOPER_TOKEN: "demo", GOOGLE_ADS_CUSTOMER_ID: "123-456-7890", GOOGLE_ADS_REFRESH_TOKEN: "demo", GOOGLE_CLIENT_ID: "demo", GOOGLE_CLIENT_SECRET: "demo" });
+Object.assign(entorno, { GOOGLE_ADS_LEAD_KEY: "clave-demo-formulario-google", META_AD_ACCOUNT_ID: "act_100200300", GOOGLE_ADS_DEVELOPER_TOKEN: "demo", GOOGLE_ADS_CUSTOMER_ID: "123-456-7890", GOOGLE_ADS_REFRESH_TOKEN: "demo", GOOGLE_CLIENT_ID: "demo", GOOGLE_CLIENT_SECRET: "demo" });
 ads.meta.campanias = [
   { id: "120200000001", name: "SUV usados · Santiago", status: "ACTIVE", effective_status: "ACTIVE" },
   { id: "120200000002", name: "Retargeting visitantes del sitio", status: "ACTIVE", effective_status: "ACTIVE" },
@@ -45,6 +46,10 @@ ads.meta.campanias = [
 ads.meta.insights["120200000001"] = { spend: "238500", reach: "41200", impressions: "96000", clicks: "1480", actions: [{ action_type: "lead", value: "17" }, { action_type: "onsite_conversion.messaging_conversation_started_7d", value: "9" }] };
 ads.meta.insights["120200000002"] = { spend: "86400", reach: "12800", impressions: "31000", clicks: "420", actions: [{ action_type: "lead", value: "4" }] };
 ads.google.campanias = [{ id: "7700110022", name: "Búsqueda: autos usados Las Condes", status: "ENABLED" }, { id: "7700110033", name: "Performance Max inventario", status: "ENABLED" }];
+// Un formulario de Meta que no se pudo leer (sin permiso), para ver el aviso de reintento.
+ads.meta.leads["900000000777"] = { field_data: [{ name: "full_name", values: ["Lucía Fernández"] }, { name: "phone_number", values: ["+56 9 7777 1234"] }] };
+ads.meta.fallar = "(#200) Requires leads_retrieval permission";
+await manejar(new Request("http://x/api?whatsapp=1", { method: "POST", headers: { "content-type": "application/json", "x-hub-signature-256": "sha256=" + createHmac("sha256", "secreto-app-prueba").update(JSON.stringify({ object: "page", entry: [{ id: "P", changes: [{ field: "leadgen", value: { leadgen_id: "900000000777" } }] }] })).digest("hex") }, body: JSON.stringify({ object: "page", entry: [{ id: "P", changes: [{ field: "leadgen", value: { leadgen_id: "900000000777" } }] }] }) }));
 ads.google.metricas["7700110022"] = { costMicros: 154_300_000_000, impressions: 18400, clicks: 612, conversions: 11 };
 
 // Patentes de ejemplo para la consulta de datos por patente (la API real está simulada).

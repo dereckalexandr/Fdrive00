@@ -286,6 +286,54 @@ function PlataformasAnuncios({ api, puedeGestionar, campanias, version, onCambio
   );
 }
 
+/** Leads que llegan de los formularios de Meta y Google Ads: estado, direcciones a configurar y los que fallaron (para reintentar). */
+function LeadsDeAnuncios({ api, version }) {
+  const { cargando, datos, recargar } = useCarga(() => api("marketing.leads.estado").catch(() => null), [api, version]);
+  const [ocupado, setOcupado] = useState("");
+  const [msg, setMsg] = useState(null);
+  if (cargando && !datos) return null;
+  if (!datos) return null;
+  const reintentar = async (f) => {
+    setMsg(null); setOcupado(`${f.plataforma}-${f.id}`);
+    try { await api("marketing.leads.reintentar", { plataforma: f.plataforma, id: f.id }); setMsg({ ok: true, texto: "Lead recuperado: ya está en el CRM." }); await recargar(); }
+    catch (e) { setMsg({ ok: false, texto: textoError(e) }); }
+    setOcupado("");
+  };
+  const copiar = (t) => { try { navigator.clipboard.writeText(t); setMsg({ ok: true, texto: "Dirección copiada." }); } catch (e) { /* sin portapapeles */ } };
+  const Columna = ({ titulo, d, pasos }) => (
+    <div className="border border-stone-200 p-3 flex flex-col gap-1.5">
+      <span className="font-medium text-stone-900">{titulo}</span>
+      <span className={`text-xs ${d.listo ? "text-emerald-700" : "text-stone-500"}`}>{d.listo ? "✓ Listo para recibir formularios" : "Falta cargar las claves en el servidor"}</span>
+      <span className="text-xs text-stone-600"><strong className="font-mono">{d.leads30}</strong> {d.leads30 === 1 ? "lead" : "leads"} en los últimos 30 días</span>
+      <details className="text-xs text-stone-600">
+        <summary className="cursor-pointer text-sky-700">Cómo configurarlo</summary>
+        <p className="mt-1.5">{pasos}</p>
+        <div className="flex gap-1.5 mt-1.5"><input readOnly value={d.url} onFocus={(e) => e.target.select()} className={`${INPUT} !text-xs font-mono`} /><button type="button" onClick={() => copiar(d.url)} className={BTN}>Copiar</button></div>
+      </details>
+    </div>
+  );
+  return (
+    <Tarjeta titulo="Leads de anuncios" ayuda="Quien llena un formulario de Meta (Facebook e Instagram) o de Google Ads entra solo al CRM como lead de venta, con su campaña, repartido entre los ejecutivos y con aviso por correo. Si ya existe un lead abierto de esa persona, se anota ahí en vez de crear otro.">
+      <div className="grid md:grid-cols-2 gap-3">
+        <Columna titulo="Meta (Facebook e Instagram)" d={datos.meta} pasos="En la app de Meta (Webhooks → Página): pega esta dirección y el mismo token de verificación de WhatsApp, y suscribe el campo «leadgen». El usuario del sistema necesita acceso a la página y el permiso leads_retrieval." />
+        <Columna titulo="Google Ads" d={datos.google} pasos="En el formulario de clientes potenciales de Google Ads (entrega de clientes potenciales → webhook): pega esta dirección y la clave que cargaste como GOOGLE_ADS_LEAD_KEY. Usa «Enviar datos de prueba» para comprobarlo." />
+      </div>
+      {msg && <div className="mt-3"><Aviso tipo={msg.ok ? "ok" : "error"}>{msg.texto}</Aviso></div>}
+      {datos.fallos.length > 0 && (
+        <div className="mt-3 border border-amber-300 bg-amber-50 p-3 flex flex-col gap-2">
+          <p className="text-sm text-amber-900"><strong>{datos.fallos.length} {datos.fallos.length === 1 ? "lead no se pudo guardar" : "leads no se pudieron guardar"}.</strong> Revisa el permiso o el token y reinténtalo: no se pierden.</p>
+          {datos.fallos.map((f) => (
+            <div key={`${f.plataforma}-${f.id}`} className="flex flex-wrap items-center justify-between gap-2 text-xs text-stone-700">
+              <span>{plataformaNombre(f.plataforma)} · {hace(f.en)} · {f.intentos} {f.intentos === 1 ? "intento" : "intentos"}<span className="block text-rose-700">{f.error}</span></span>
+              <button type="button" disabled={!!ocupado} onClick={() => reintentar(f)} className={BTN}>{ocupado === `${f.plataforma}-${f.id}` ? "Reintentando…" : "Reintentar"}</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </Tarjeta>
+  );
+}
+
 function Campanias({ api, puedeGestionar, puedeAprobar, version, onCambio }) {
   const [forma, setForma] = useState(undefined);
   const [resultados, setResultados] = useState(null);
@@ -309,6 +357,7 @@ function Campanias({ api, puedeGestionar, puedeAprobar, version, onCambio }) {
       </div>
       {msg && <Aviso>{msg}</Aviso>}
       <PlataformasAnuncios api={api} puedeGestionar={puedeGestionar} campanias={datos.campanias} version={version} onCambio={onCambio} />
+      <LeadsDeAnuncios api={api} version={version} />
       <div className="bg-white border border-stone-200 overflow-x-auto">
         <table className="w-full border-collapse text-sm">
           <thead><tr className="text-left text-xs uppercase tracking-wide text-stone-400 border-b border-stone-200">

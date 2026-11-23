@@ -23,6 +23,7 @@ import { publicOp } from "./publico.ts";
 import { correrAlertas } from "./alertas.ts";
 import { webhookWhatsapp } from "./whatsapp.ts";
 import { sincronizarCampanias } from "./ads.ts";
+import { avisoPaginaMeta, webhookLeadsGoogle } from "./leads-ads.ts";
 
 const sb = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -570,8 +571,13 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
   // Avisos de WhatsApp (Meta): .../functions/v1/api?whatsapp=1. Se autentican con la firma de Meta (WA_APP_SECRET), no con sesión.
   if (new URL(req.url).searchParams.has("whatsapp")) {
-    try { return await webhookWhatsapp(req, { sb, audit, rolePermOverrides }); }
+    try { const deps = { sb, audit, rolePermOverrides }; return await webhookWhatsapp(req, { ...deps, pagina: (payload: any) => avisoPaginaMeta(deps, payload) }); }
     catch (e) { console.error("whatsapp:", e); return new Response("error", { status: 500 }); }
+  }
+  // Formularios de Google Ads: .../functions/v1/api?googleleads=1. Se autentican con la clave del formulario (GOOGLE_ADS_LEAD_KEY), no con sesión.
+  if (new URL(req.url).searchParams.has("googleleads")) {
+    try { return await webhookLeadsGoogle(req, { sb, audit, rolePermOverrides }); }
+    catch (e) { console.error("googleleads:", e); return new Response("error", { status: 500 }); }
   }
   // Chequeo de salud para monitores externos (UptimeRobot y similares): responde 200 solo si la base contesta. No devuelve datos.
   if (req.method === "GET" && new URL(req.url).searchParams.has("health")) {

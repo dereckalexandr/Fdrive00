@@ -86,7 +86,7 @@ async function guardarMediaEntrante(sb: any, msg: any) {
 }
 
 /** Local donde entran los leads nuevos de WhatsApp: el elegido por el Administrador, o el único/primer local activo. */
-async function localWhatsapp(sb: any): Promise<string | null> {
+export async function localWhatsapp(sb: any): Promise<string | null> {
   const cfg = await sb.from("kv_store").select("value").eq("key", "whatsapp::config").maybeSingle();
   let elegido = "";
   try { elegido = cfg.data && cfg.data.value ? String(JSON.parse(cfg.data.value).local_id || "") : ""; } catch { elegido = ""; }
@@ -97,7 +97,7 @@ async function localWhatsapp(sb: any): Promise<string | null> {
 }
 
 /** Busca el cliente de un número (los teléfonos del CRM están escritos de muchas formas: se comparan normalizados). */
-async function clientePorTelefono(sb: any, telefono: string) {
+export async function clientePorTelefono(sb: any, telefono: string) {
   const ultimos = telefono.slice(-4);
   const q = await sb.from("clientes").select("*").ilike("telefono", `%${ultimos}%`);
   if (q.error) return null;
@@ -106,7 +106,25 @@ async function clientePorTelefono(sb: any, telefono: string) {
   return hallados[0] ?? null;
 }
 
-type DepsWebhook = { sb: any; audit: (actor: any, accion: string, entidad?: string, entidadId?: string, detalle?: Record<string, unknown>) => Promise<void>; rolePermOverrides: () => Promise<Record<string, string[]>> };
+export type DepsWebhook = {
+  sb: any; audit: (actor: any, accion: string, entidad?: string, entidadId?: string, detalle?: Record<string, unknown>) => Promise<void>; rolePermOverrides: () => Promise<Record<string, string[]>>;
+  /** Avisos de la página de Facebook (formularios de anuncios): llegan por la misma dirección y la misma firma que los de WhatsApp. */
+  pagina?: (payload: any) => Promise<Response>;
+};
+
+/** Ejecutivo al que le toca un lead nuevo de venta en un local (reparto por turnos entre los habilitados), con el equipo del local para los avisos. */
+export async function elegirEjecutivo(d: DepsWebhook, local: string) {
+  const { sb } = d;
+  const overrides = await d.rolePermOverrides();
+  const uq = await sb.from("usuarios").select("id, nombre, roles, permisos_extra, activo, local_id, email").eq("local_id", local);
+  const usuarios = uq.data ?? [];
+  const elegibles = usuarios.filter((u: any) => u.activo && (() => { const p = permisosEfectivos(u.roles ?? [], overrides, u.permisos_extra); return p.includes("leads.propios") && p.includes(permisoDeTipo("venta")); })()).map((u: any) => ({ id: u.id, nombre: u.nombre }));
+  const ultimas: Record<string, string> = {};
+  const grupo = grupoDeReparto("venta");
+  const lastQ = await sb.from("leads").select("asignado_a, creado_en, tipo").eq("local_id", local);
+  for (const l of lastQ.data ?? []) if (l.asignado_a && grupoDeReparto(l.tipo || "venta") === grupo && (!ultimas[l.asignado_a] || l.creado_en > ultimas[l.asignado_a])) ultimas[l.asignado_a] = l.creado_en;
+  return { asignado: elegirAsignado(elegibles, ultimas), usuarios, overrides };
+}
 
 /** Crea el cliente y el lead de venta de un número nuevo y lo reparte entre los ejecutivos habilitados del local. */
 async function crearLeadWhatsapp(d: DepsWebhook, conv: any, nombre: string, primerTexto: string) {
@@ -116,15 +134,7 @@ async function crearLeadWhatsapp(d: DepsWebhook, conv: any, nombre: string, prim
   const ci = await sb.from("clientes").insert({ nombre: nombreDesdePerfil(nombre, conv.telefono), telefono: `+${conv.telefono}`, local_id: local, notas: "Llegó por WhatsApp" }).select().single();
   if (ci.error) { console.error("whatsapp cliente:", ci.error.message); return null; }
   const cliente = ci.data;
-  const overrides = await d.rolePermOverrides();
-  const uq = await sb.from("usuarios").select("id, nombre, roles, permisos_extra, activo, local_id, email").eq("local_id", local);
-  const usuarios = uq.data ?? [];
-  const elegibles = usuarios.filter((u: any) => u.activo && (() => { const p = permisosEfectivos(u.roles ?? [], overrides, u.permisos_extra); return p.includes("leads.propios") && p.includes(permisoDeTipo("venta")); })()).map((u: any) => ({ id: u.id, nombre: u.nombre }));
-  const ultimas: Record<string, string> = {};
-  const grupo = grupoDeReparto("venta");
-  const lastQ = await sb.from("leads").select("asignado_a, creado_en, tipo").eq("local_id", local);
-  for (const l of lastQ.data ?? []) if (l.asignado_a && grupoDeReparto(l.tipo || "venta") === grupo && (!ultimas[l.asignado_a] || l.creado_en > ultimas[l.asignado_a])) ultimas[l.asignado_a] = l.creado_en;
-  const asignado = elegirAsignado(elegibles, ultimas);
+  const { asignado, usuarios, overrides } = await elegirEjecutivo(d, local);
   const ins = await sb.from("leads").insert({
     local_id: local, tipo: "venta", etapa: "nuevo", cliente_id: cliente.id, fuente: FUENTE_WHATSAPP, asignado_a: asignado ? asignado.id : null,
     notas: [`Escribió por WhatsApp desde ${telefonoVisible(conv.telefono)}.`, primerTexto ? `Primer mensaje: «${primerTexto}»` : ""].filter(Boolean).join("\n").slice(0, 1000),
@@ -188,6 +198,8 @@ export async function webhookWhatsapp(req: Request, d: DepsWebhook): Promise<Res
   try { payload = JSON.parse(crudo); } catch { return new Response("bad json", { status: 400 }); }
   const { sb } = d;
   const miNumero = env("WA_PHONE_NUMBER_ID");
+  // Formularios de anuncios de Facebook e Instagram (objeto «page»): los atiende el módulo de leads de anuncios.
+  if (payload && payload.object === "page") return d.pagina ? await d.pagina(payload) : new Response("ok", { status: 200 });
   const { mensajes, estados } = parsearWebhook(payload);
   try {
     for (const m of mensajes) {
