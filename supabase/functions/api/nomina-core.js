@@ -46,6 +46,14 @@ export function validarTrabajador(input) {
   if (!(ficha.sueldoBase > 0)) return { ok: false, error: "nomina_sueldo" };
   for (const k of ["colacion", "movilizacion", "asignacionFamiliar"]) if (Number.isNaN(ficha[k])) return { ok: false, error: "nomina_monto" };
   if (!(ficha.planSaludUf >= 0 && ficha.planSaludUf <= 100)) return { ok: false, error: "nomina_monto" };
+  // Datos para la liquidación (opcionales): fecha de ingreso y correo del trabajador.
+  const fechaIngreso = texto(f.fechaIngreso, 20);
+  const fechaReal = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s) && Number.isFinite(Date.parse(`${s}T12:00:00Z`)) && new Date(`${s}T12:00:00Z`).toISOString().slice(0, 10) === s;
+  if (fechaIngreso && !fechaReal(fechaIngreso)) return { ok: false, error: "fecha_invalida" };
+  const correo = texto(f.correo, 120).toLowerCase();
+  if (correo && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)) return { ok: false, error: "email_invalido" };
+  ficha.fechaIngreso = fechaIngreso || null;
+  ficha.correo = correo || null;
   return {
     ok: true,
     value: { nombre, rut: rut ? normalizarRut(rut) : null, cargo: texto(i.cargo, 80) || null, usuario_id: texto(i.usuarioId, 40) || null, activo: i.activo !== false, ficha },

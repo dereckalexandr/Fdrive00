@@ -11,6 +11,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { InputDinero } from "./campo-dinero.jsx";
 import { AFPS } from "../supabase/functions/api/calculadora-sueldo-core.js";
 import { armarNomina, parametrosNomina, FICHA_VACIA, VARIABLES_VACIAS, CONCEPTOS_NOMINA, montoConcepto, validarTrabajador } from "../supabase/functions/api/nomina-core.js";
+import { buildLiquidacionesPdf } from "./pdf-report.js";
 import { INPUT, BTN, BTN_PRIMARIO, clp as clpBase, Aviso, Cargando, Tarjeta, Campo, Modal, useCarga, mensajeError } from "./crm-ui.jsx";
 
 const clp = (n) => (n !== null && n !== undefined && Number(n) < 0 ? `−${clpBase(-Number(n))}` : clpBase(n));
@@ -23,6 +24,19 @@ function ultimosMeses() {
   const out = [];
   for (let i = 0; i < 12; i++) { out.push(`${a}-${String(m).padStart(2, "0")}`); m--; if (m === 0) { m = 12; a--; } }
   return out;
+}
+
+/** Descarga el PDF con las liquidaciones del mes (todas, o la de un trabajador). */
+async function descargarLiquidaciones(api, mes, trabajadorId, nombre) {
+  const r = await api("fin.nomina_liquidaciones", { mes, ...(trabajadorId ? { trabajadorId } : {}) });
+  const bytes = buildLiquidacionesPdf(r.liquidaciones, { fmt: clpBase });
+  const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+  const a = document.createElement("a");
+  const limpio = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  a.href = url; a.download = `Liquidacion_${mes}_${trabajadorId ? limpio(nombre) : "todas"}.pdf`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 3000);
+  return r.faltaEmpresa;
 }
 
 /* ================= Ficha de un trabajador ================= */
@@ -56,6 +70,8 @@ function FormTrabajador({ api, inicial, equipo, onCerrar, onListo }) {
           <Campo etiqueta="Nombre"><input value={t.nombre} onChange={(e) => setT({ ...t, nombre: e.target.value })} className={INPUT} /></Campo>
           <Campo etiqueta="RUT"><input value={t.rut} onChange={(e) => setT({ ...t, rut: e.target.value })} className={INPUT} placeholder="12.345.678-9" /></Campo>
           <Campo etiqueta="Cargo"><input value={t.cargo} onChange={(e) => setT({ ...t, cargo: e.target.value })} className={INPUT} /></Campo>
+          <Campo etiqueta="Fecha de ingreso"><input type="date" value={t.ficha.fechaIngreso || ""} onChange={(e) => setF("fechaIngreso", e.target.value)} className={INPUT} /></Campo>
+          <Campo etiqueta="Correo (opcional)"><input type="email" value={t.ficha.correo || ""} onChange={(e) => setF("correo", e.target.value)} className={INPUT} placeholder="nombre@correo.cl" /></Campo>
           <Campo etiqueta="Sueldo base (bruto)"><InputDinero value={t.ficha.sueldoBase || ""} onChange={(e) => setF("sueldoBase", Number(e.target.value))} className={INPUT} /></Campo>
           <Campo etiqueta="Contrato">
             <select value={t.ficha.contrato} onChange={(e) => setF("contrato", e.target.value)} className={INPUT}><option value="indefinido">Indefinido</option><option value="plazo_fijo">Plazo fijo / obra</option></select>
@@ -196,6 +212,12 @@ export function Nomina({ api }) {
     setOcupado(false);
   };
   const recargarTodo = () => { tr.recargar(); recargar(); };
+  const bajar = async (trabajadorId, nombre) => {
+    try {
+      const falta = await descargarLiquidaciones(api, mes, trabajadorId, nombre);
+      if (falta) setMsg({ ok: false, texto: "Faltan la razón social o el RUT de la empresa: complétalos en Ventas → «Datos de la empresa» para que salgan en la liquidación." });
+    } catch (e) { setMsg({ ok: false, texto: mensajeError(e) }); }
+  };
 
   return (
     <div className="flex flex-col gap-5">
@@ -249,6 +271,7 @@ export function Nomina({ api }) {
                           <td className="py-2 px-2 text-right whitespace-nowrap">{clpBase(f.costoEmpresa)}</td>
                           <td className="py-2 pl-2 whitespace-nowrap text-right">
                             <button type="button" onClick={() => setAbierta(abierta === f.trabajadorId ? null : f.trabajadorId)} className="text-xs text-stone-700 hover:underline">{abierta === f.trabajadorId ? "Ocultar" : "Detalle"}</button>
+                            {datos.nomina && !cambios && <button type="button" onClick={() => bajar(f.trabajadorId, f.nombre)} className="block ml-auto text-xs text-sky-700 hover:underline" title="Liquidación en PDF para firmar">PDF</button>}
                             {!bloqueada && <button type="button" onClick={() => { setFilas(filas.filter((x) => x.trabajadorId !== f.trabajadorId)); setCambios(true); }} className="block ml-auto text-xs text-rose-600 hover:underline">Quitar</button>}
                           </td>
                         </tr>
@@ -276,7 +299,14 @@ export function Nomina({ api }) {
             <div className="flex flex-wrap items-center gap-3 mt-4">
               <button type="button" onClick={guardar} disabled={ocupado || bloqueada || !calculo || !calculo.ok} className={BTN_PRIMARIO}>{ocupado ? "Guardando…" : datos.nomina ? "Guardar cambios" : "Guardar nómina"}</button>
               {cambios && !bloqueada && <span className="text-xs text-amber-700">Hay cambios sin guardar.</span>}
+              {datos.nomina && <button type="button" onClick={() => bajar(null)} disabled={cambios} title={cambios ? "Guarda los cambios primero" : ""} className={BTN}>Descargar liquidaciones (PDF)</button>}
               {algunPago && <span className="text-xs text-stone-500">Ya tiene pagos: para corregirla, anula esos pagos en Movimientos.</span>}
+              {msg && <span className={`text-sm ${msg.ok ? "text-emerald-700" : "text-rose-600"}`}>{msg.texto}</span>}
+            </div>
+          )}
+          {!puedeEditar && datos.nomina && (
+            <div className="flex flex-wrap items-center gap-3 mt-4">
+              <button type="button" onClick={() => bajar(null)} className={BTN}>Descargar liquidaciones (PDF)</button>
               {msg && <span className={`text-sm ${msg.ok ? "text-emerald-700" : "text-rose-600"}`}>{msg.texto}</span>}
             </div>
           )}

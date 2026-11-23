@@ -121,8 +121,8 @@ class PdfDoc {
     this.ops.push(`q ${dw.toFixed(2)} 0 0 ${dh.toFixed(2)} ${(x + (w - dw) / 2).toFixed(2)} ${(y + (h - dh) / 2).toFixed(2)} cm /Im${idx + 1} Do Q`);
   }
 
-  title(main, sub) {
-    this.text(MARGIN, this.y - 8, "DRIVE FUTURO", { size: 8, bold: true, gray: 0.45 });
+  title(main, sub, marca = "DRIVE FUTURO") {
+    if (marca) this.text(MARGIN, this.y - 8, marca, { size: 8, bold: true, gray: 0.45 });
     this.y -= 26;
     this.text(MARGIN, this.y, main, { size: 18, bold: true });
     this.y -= 18;
@@ -205,6 +205,16 @@ class PdfDoc {
       this.line(MARGIN, this.y + 1, PAGE_W - MARGIN, this.y + 1, 0.9);
     }
     this.y -= 6;
+  }
+
+  /** Una línea de detalle compacta: concepto a la izquierda, detalle al centro y monto a la derecha. */
+  item(concepto, detalle, monto) {
+    this.ensure(14);
+    const base = this.y - 10;
+    this.text(MARGIN + 6, base, concepto, { size: 9.5 });
+    if (detalle) this.text(MARGIN + 300, base, detalle, { size: 8.5, gray: 0.45 });
+    this.text(PAGE_W - MARGIN - 6 - textWidth(monto, 9.5), base, monto, { size: 9.5 });
+    this.y -= 13;
   }
 
   /** Línea de subtotal/total con el monto alineado a la derecha. */
@@ -662,6 +672,53 @@ export function buildContratoCompraventaPdf(c, { fmt }) {
   caja(MARGIN + mitad + 16, mitad, "FIRMA DEL COMPRADOR", comprador === "________" ? "" : comprador, com.rut);
   pdf.y -= 112;
   pdf.paragraph("NOTA", "Borrador generado por el sistema a partir del modelo de contrato de la plataforma de transferencias. Debe ser firmado por ambas partes (firma electrónica o ante notario) y revisado por un abogado antes de usarse.");
+  return pdf.build();
+}
+
+/**
+ * Liquidaciones de sueldo (una por página): empresa y trabajador, haberes imponibles y no imponibles, descuentos legales,
+ * líquido a pagar (en número y en palabras), lo que paga el empleador y las firmas.
+ * @param docs  lista de liquidaciones (ver armarLiquidacion en liquidacion-core.js)
+ */
+export function buildLiquidacionesPdf(docs, { fmt }) {
+  const lista = Array.isArray(docs) ? docs : [docs];
+  const pdf = new PdfDoc(`Liquidación de sueldo · ${(lista[0] && lista[0].periodo) || ""}`);
+  const items = (xs) => { for (const x of xs) pdf.item(x.concepto, x.detalle || "", fmt(x.monto)); pdf.y -= 2; };
+  lista.forEach((d, i) => {
+    if (i > 0) pdf.newPage();
+    pdf.title(`${d.titulo} · ${d.periodo}`, [d.empresa.rut ? `RUT ${d.empresa.rut}` : "", d.empresa.domicilio].filter(Boolean).join(" · "), (d.empresa.razonSocial || "").toUpperCase());
+    pdf.sectionBar("Trabajador");
+    const t = d.trabajador;
+    pdf.fields([["NOMBRE", t.nombre], ["RUT", t.rut], ["CARGO", t.cargo], ["FECHA DE INGRESO", t.fechaIngreso ? fechaLarga(t.fechaIngreso) : ""],
+      ["CONTRATO", t.contrato], ["DÍAS TRABAJADOS", String(t.diasTrabajados)], ["AFP", t.afp], ["SALUD", t.salud]], 4);
+    pdf.sectionBar("Haberes");
+    items(d.imponibles);
+    pdf.totalLine("Total imponible", fmt(d.totalImponible));
+    if (d.noImponibles.length) {
+      items(d.noImponibles);
+      pdf.totalLine("Total no imponible", fmt(d.totalNoImponible));
+    }
+    pdf.totalLine("Total haberes", fmt(d.totalHaberes), { big: true });
+    pdf.sectionBar("Descuentos");
+    if (d.descuentos.length) items(d.descuentos);
+    pdf.totalLine("Total descuentos", fmt(d.totalDescuentos));
+    pdf.totalLine("LÍQUIDO A PAGAR", fmt(d.liquido), { big: true });
+    pdf.paragraph("SON", d.liquidoPalabras.charAt(0).toUpperCase() + d.liquidoPalabras.slice(1));
+    if (d.empleador.length) {
+      pdf.sectionBar("Cotizaciones de cargo del empleador (no se descuentan al trabajador)");
+      items(d.empleador);
+    }
+    pdf.paragraph("", `Base tributable ${fmt(d.baseTributable)}${d.uf ? ` · UF ${Number(d.uf).toLocaleString("es-CL")}` : ""}${d.utm ? ` · UTM ${fmt(d.utm)}` : ""}.`);
+    // Firmas
+    pdf.ensure(110);
+    pdf.paragraph("", "Certifico que he recibido de mi empleador, a mi entera satisfacción, el monto líquido indicado en esta liquidación, y que no tengo cargo ni cobro alguno que hacer por concepto de las remuneraciones de este período.");
+    pdf.y -= 40;
+    const mitad = (CONTENT_W - 40) / 2;
+    const firma = (x, a, b) => { pdf.line(x, pdf.y, x + mitad, pdf.y, 0.4); pdf.text(x, pdf.y - 12, a, { size: 8.5 }); if (b) pdf.text(x, pdf.y - 23, b, { size: 8, gray: 0.45 }); };
+    firma(MARGIN, "Firma del empleador", d.empresa.razonSocial);
+    firma(MARGIN + mitad + 40, "Firma del trabajador", `${t.nombre}${t.rut ? ` · RUT ${t.rut}` : ""}`);
+    pdf.y -= 30;
+  });
   return pdf.build();
 }
 

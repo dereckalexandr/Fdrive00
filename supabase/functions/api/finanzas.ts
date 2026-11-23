@@ -12,6 +12,7 @@ import {
 import { validarArchivo } from "./validaciones-core.js";
 import { conciliar, categoriaSugerida, leerFecha } from "./conciliacion-core.js";
 import { etiquetaCuenta, medioNombre } from "./pagos-core.js";
+import { armarLiquidacion } from "./liquidacion-core.js";
 import { validarTrabajador, armarNomina, parametrosNomina, CONCEPTOS_NOMINA, montoConcepto, VARIABLES_VACIAS } from "./nomina-core.js";
 
 export type FinCtx = {
@@ -542,6 +543,26 @@ export async function finanzasOp(h: FinCtx, op: string, body: any): Promise<Resp
       if (error) return fallo(error);
       await h.audit(h.actor, "finanzas.nomina_guardar", "fin_nomina", data.id, { mes, costoEmpresa: v.value.totales.costoEmpresa });
       return json({ nomina: data });
+    }
+
+    /** Liquidaciones de sueldo de la nómina guardada del mes (todas o la de un trabajador), con los datos de la empresa, para el PDF. */
+    if (op === "fin.nomina_liquidaciones") {
+      const mes = String(body.mes || "");
+      if (!esMesValido(mes)) return err("mes_invalido");
+      const loc = local ?? (await h.localParaCrear());
+      if (!loc) return err("sin_local");
+      const n = (await leer(sb.from("fin_nominas").select("*").eq("local_id", loc).eq("mes", mes)))[0];
+      if (!n) return err("nomina_sin_guardar", 409);
+      const [trabajadores, emp] = await Promise.all([
+        leer(sb.from("fin_trabajadores").select("*").eq("local_id", loc)),
+        sb.from("kv_store").select("value").eq("key", "empresa::datos").maybeSingle(),
+      ]);
+      let empresa: any = {};
+      try { empresa = emp.data && emp.data.value ? JSON.parse(emp.data.value) : {}; } catch { empresa = {}; }
+      const filas = (n.filas || []).filter((f: any) => !body.trabajadorId || f.trabajadorId === body.trabajadorId);
+      if (filas.length === 0) return err("no_existe", 404);
+      const liquidaciones = filas.map((f: any) => armarLiquidacion({ mes, fila: f, empresa, trabajador: trabajadores.find((t: any) => t.id === f.trabajadorId) || {}, parametros: n.parametros || {} }));
+      return json({ mes, liquidaciones, faltaEmpresa: !empresa.razon_social || !empresa.rut });
     }
 
     /** Registra un pago de la nómina: crea los egresos (uno por trabajador para los sueldos; uno para Previred; uno para el impuesto). */
