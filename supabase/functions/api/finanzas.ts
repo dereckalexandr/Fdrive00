@@ -8,7 +8,10 @@
 import {
   validarMovimiento, calcularSaldos, flujoMensual, estadoResultados, rentabilidadVehiculo, periodo, categoriaFin, claveCaja, claveDe,
   POR_DEPOSITAR, CATEGORIAS_FIN, MAX_ARCHIVOS_FIN, NS_FIN, faltaRespaldo, gastosPorMes, gastosFijosPendientes,
+  validarPresupuesto, compararPresupuesto, publicidadPorRegistrar,
 } from "./finanzas-core.js";
+import { configurado as adsConfigurado, gastoMensual } from "./ads.ts";
+import { errorLegible } from "./ads-core.js";
 import { validarArchivo } from "./validaciones-core.js";
 import { conciliar, categoriaSugerida, leerFecha } from "./conciliacion-core.js";
 import { etiquetaCuenta, medioNombre } from "./pagos-core.js";
@@ -119,6 +122,13 @@ export async function finanzasOp(h: FinCtx, op: string, body: any): Promise<Resp
     }
     out.sort((a, b) => (a.fecha === b.fecha ? String(b.creado_en || "").localeCompare(String(a.creado_en || "")) : b.fecha.localeCompare(a.fecha)));
     return out;
+  }
+
+  /** Presupuesto del local (o general, si el Administrador mira todos los locales). */
+  const clavePresupuesto = () => `fin::presupuesto::${local || "general"}`;
+  async function leerPresupuesto() {
+    const { data } = await sb.from("kv_store").select("value").eq("key", clavePresupuesto()).maybeSingle();
+    try { return data && data.value ? JSON.parse(data.value) : { categorias: {} }; } catch { return { categorias: {} }; }
   }
 
   /** Saldos iniciales de las cuentas visibles (las cuentas generales no son de un local: se leen todas y se filtran por clave). */
@@ -335,8 +345,10 @@ export async function finanzasOp(h: FinCtx, op: string, body: any): Promise<Resp
       for (let i = 0; i < n; i++) { meses.unshift(`${a}-${String(m).padStart(2, "0")}`); m--; if (m === 0) { m = 12; a--; } }
       const movs = (await movimientos()).filter((x) => x.origen === "manual");
       const sin = movs.filter(faltaRespaldo);
+      const g = gastosPorMes(movs, meses);
+      const presupuesto = await leerPresupuesto();
       return json({
-        ...gastosPorMes(movs, meses), puedeEditar, cuentas: await cuentas(),
+        ...g, puedeEditar, cuentas: await cuentas(), presupuesto, presupuestoMes: compararPresupuesto(g, presupuesto, hasta),
         sinRespaldo: { cantidad: sin.length, monto: sin.reduce((s, x) => s + x.monto, 0) },
         fijosPendientes: gastosFijosPendientes(movs, hasta).length,
       });
@@ -396,6 +408,40 @@ export async function finanzasOp(h: FinCtx, op: string, body: any): Promise<Resp
         try { out[clave] = JSON.parse(x.value); } catch { /* registro dañado */ }
       }
       return json({ conciliaciones: out });
+    }
+
+    /** Presupuesto mensual por categoría (el mismo todos los meses). Lo ven el Administrador y el Jefe Local; lo cambia el Administrador. */
+    if (op === "fin.presupuesto") return json({ presupuesto: await leerPresupuesto(), puedeEditar });
+    if (op === "fin.presupuesto_guardar") {
+      if (!puedeEditar) return err("forbidden", 403);
+      const v = validarPresupuesto(body.presupuesto);
+      if (!v.ok) return err(v.error!);
+      const up = await sb.from("kv_store").upsert({ key: clavePresupuesto(), value: JSON.stringify(v.value), shared: false, updated_at: new Date().toISOString() }, { onConflict: "key" });
+      if (up.error) return fallo(up.error);
+      await h.audit(h.actor, "finanzas.presupuesto", "finanzas", clavePresupuesto(), { total: Object.values(v.value.categorias).reduce((s: number, x: any) => s + x, 0) });
+      return json({ presupuesto: v.value });
+    }
+
+    /**
+     * Publicidad de Meta y Google: lo que gastó cada cuenta publicitaria por mes contra lo registrado en Finanzas como «Publicidad»
+     * de esa plataforma. Lo que falta se registra con un clic (con el mes al que corresponde).
+     */
+    if (op === "fin.publicidad") {
+      const hasta = /^\d{4}-(0[1-9]|1[0-2])$/.test(String(body.hasta || "")) ? String(body.hasta) : hoyCL().slice(0, 7);
+      const n = Math.min(6, Math.max(1, Number(body.meses) || 3));
+      const meses: string[] = [];
+      let [a, m] = hasta.split("-").map(Number);
+      for (let i = 0; i < n; i++) { meses.unshift(`${a}-${String(m).padStart(2, "0")}`); m--; if (m === 0) { m = 12; a--; } }
+      const fin = periodo(hasta)!.hasta;
+      const gastos: Record<string, Record<string, number>> = {};
+      const errores: { plataforma: string; error: string }[] = [];
+      for (const plat of ["meta", "google"]) {
+        if (!adsConfigurado(plat)) continue;
+        try { gastos[plat] = await gastoMensual(plat, `${meses[0]}-01`, fin < hoyCL() ? fin : hoyCL()); }
+        catch (e) { errores.push({ plataforma: plat, error: errorLegible(plat, e) }); }
+      }
+      const movs = (await movimientos()).filter((x) => x.origen === "manual");
+      return json({ filas: publicidadPorRegistrar(gastos, movs, meses), conectadas: Object.keys(gastos), errores, puedeEditar, cuentas: await cuentas() });
     }
 
     /** Gastos fijos (marcados «se repite cada mes») que aún no se registran en el mes. */
@@ -460,7 +506,8 @@ export async function finanzasOp(h: FinCtx, op: string, body: any): Promise<Resp
         sub("fin.rentabilidad", { periodo: periodoTxt }), sub("fin.gastos", { hasta: esMes ? periodoTxt : `${periodoTxt}-12`, meses: 1 }),
         sub("fin.conciliaciones", {}),
       ]);
-      let fijos = 0; let nomina: any = null;
+      let fijos = 0; let nomina: any = null; let publicidad: any[] = [];
+      if (esMes) { try { publicidad = (await sub("fin.publicidad", { hasta: periodoTxt, meses: 1 })).filas; } catch { publicidad = []; } }
       if (esMes) {
         try { fijos = (await sub("fin.fijos", { mes: periodoTxt })).pendientes.length; } catch { fijos = 0; }
         try {
@@ -477,6 +524,7 @@ export async function finanzasOp(h: FinCtx, op: string, body: any): Promise<Resp
       const informe = armarInforme({
         periodo: periodoTxt, hoy, empresa: { razonSocial: empresa.razon_social || "", rut: empresa.rut || "", local: localNombre },
         resumen, resumenAnterior, rentabilidad, sinRespaldo: gastos.sinRespaldo, conciliaciones: conc.conciliaciones, fijosPendientes: fijos, nomina,
+        presupuesto: esMes ? gastos.presupuestoMes : null, publicidad,
       });
       await h.audit(h.actor, "finanzas.informe", "finanzas", periodoTxt, { periodo: periodoTxt });
       return json({ informe });

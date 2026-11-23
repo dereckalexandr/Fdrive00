@@ -45,6 +45,13 @@ ads.meta.campanias = [
 ];
 ads.meta.insights["120200000001"] = { spend: "238500", reach: "41200", impressions: "96000", clicks: "1480", actions: [{ action_type: "lead", value: "17" }, { action_type: "onsite_conversion.messaging_conversation_started_7d", value: "9" }] };
 ads.meta.insights["120200000002"] = { spend: "86400", reach: "12800", impressions: "31000", clicks: "420", actions: [{ action_type: "lead", value: "4" }] };
+{ // gasto mensual de las cuentas (Finanzas → Gastos → Publicidad)
+  const mesDemo = new Date().toLocaleDateString("en-CA", { timeZone: "America/Santiago" }).slice(0, 7);
+  let [aa, mm] = mesDemo.split("-").map(Number); mm--; if (mm === 0) { mm = 12; aa--; }
+  const antDemo = `${aa}-${String(mm).padStart(2, "0")}`;
+  ads.meta.gastoMensual = { [antDemo]: 241900, [mesDemo]: 324900 };
+  ads.google.gastoMensual = { [antDemo]: 98000, [mesDemo]: 154300 };
+}
 ads.google.campanias = [{ id: "7700110022", name: "Búsqueda: autos usados Las Condes", status: "ENABLED" }, { id: "7700110033", name: "Performance Max inventario", status: "ENABLED" }];
 // Un formulario de Meta que no se pudo leer (sin permiso), para ver el aviso de reintento.
 ads.meta.leads["900000000777"] = { field_data: [{ name: "full_name", values: ["Lucía Fernández"] }, { name: "phone_number", values: ["+56 9 7777 1234"] }] };

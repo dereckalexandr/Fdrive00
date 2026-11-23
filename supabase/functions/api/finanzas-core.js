@@ -172,8 +172,67 @@ export function validarMovimiento(input, { hoy } = {}) {
       documento_tipo: documento, documento_numero: texto(i.documentoNumero, 40) || null, medio,
       cuenta_id: cuenta, cuenta_destino_id: tipo === "traspaso" ? destino : null,
       vehiculo_id: cat.vehiculo || cat.conVehiculo ? texto(i.vehiculoId, 40) || null : null, notas: texto(i.notas, 500) || null,
+      // Mes al que corresponde el gasto (por ejemplo, la publicidad de octubre pagada en noviembre). Solo se guarda si viene: así editar no lo borra.
+      ...(/^\d{4}-(0[1-9]|1[0-2])$/.test(String(i.mesResultado || "")) ? { mes_resultado: String(i.mesResultado) } : {}),
     },
   };
+}
+
+/* ---------- Presupuesto mensual por categoría ---------- */
+/** Categorías que admiten presupuesto: los gastos del negocio (no aportes, retiros ni pagos de préstamos). */
+export const categoriasPresupuesto = () => CATEGORIAS_FIN.filter((c) => c.tipo === "egreso" && c.resultado);
+
+/** Presupuesto guardado: { categoria: monto mensual }. Descarta categorías que no existen y montos inválidos o en cero. */
+export function validarPresupuesto(input) {
+  const out = {};
+  const validas = new Set(categoriasPresupuesto().map((c) => c.id));
+  for (const [id, v] of Object.entries((input && input.categorias) || {})) {
+    if (!validas.has(id)) return { ok: false, error: "fin_categoria" };
+    const n = Math.round(Number(String(v).replace(/\D/g, "")));
+    if (!Number.isFinite(n) || n < 0 || n > 10_000_000_000) return { ok: false, error: "fin_monto" };
+    if (n > 0) out[id] = n;
+  }
+  return { ok: true, value: { categorias: out } };
+}
+
+/**
+ * Lo gastado en el mes contra el presupuesto de cada categoría (resultado de gastosPorMes y el presupuesto guardado).
+ * Incluye las categorías con presupuesto (aunque no tengan gasto) y las que gastaron sin presupuesto.
+ */
+export function compararPresupuesto(gastos, presupuesto, mes) {
+  const pres = (presupuesto && presupuesto.categorias) || {};
+  const gastoDe = {};
+  for (const g of (gastos && gastos.grupos) || []) for (const c of g.categorias) gastoDe[c.id] = c.meses[mes] || 0;
+  const ids = new Set([...Object.keys(pres), ...Object.keys(gastoDe).filter((id) => gastoDe[id] > 0)]);
+  const filas = [...ids].map((id) => {
+    const c = categoriaFin(id) || { id, nombre: id, grupo: "otros" };
+    const p = pres[id] || 0; const g = gastoDe[id] || 0;
+    return { id, nombre: c.nombre, grupo: c.grupo, presupuesto: p, gasto: g, pct: p > 0 ? Math.round((g / p) * 100) : null, excede: p > 0 ? g > p : false, sinPresupuesto: p === 0 && g > 0 };
+  }).sort((a, b) => (GRUPOS_FIN.findIndex((x) => x.id === a.grupo) - GRUPOS_FIN.findIndex((x) => x.id === b.grupo)) || b.gasto - a.gasto);
+  const totalPresupuesto = filas.reduce((s, f) => s + f.presupuesto, 0);
+  const totalGasto = filas.filter((f) => f.presupuesto > 0).reduce((s, f) => s + f.gasto, 0);
+  return { mes, filas, totalPresupuesto, totalGasto, excedidas: filas.filter((f) => f.excede) };
+}
+
+/* ---------- Publicidad de Meta y Google en Finanzas ---------- */
+/** ¿El egreso de publicidad corresponde a esa plataforma? (por el proveedor o la descripción). */
+export const esDePlataforma = (m, plataforma) => (plataforma === "meta" ? /meta|facebook|instagram/i : /google/i).test(`${m.contraparte || ""} ${m.descripcion || ""}`);
+
+/**
+ * Lo que gastó cada plataforma por mes contra lo registrado en Finanzas como publicidad de esa plataforma.
+ * gastos: { meta: { "AAAA-MM": monto }, google: {...} }; movs: egresos manuales vigentes.
+ */
+export function publicidadPorRegistrar(gastos, movs, meses) {
+  const filas = [];
+  for (const plataforma of Object.keys(gastos || {})) {
+    for (const mes of meses) {
+      const gasto = Math.round(Number((gastos[plataforma] || {})[mes]) || 0);
+      const registrado = (movs || []).filter((m) => m.estado !== "anulado" && m.tipo === "egreso" && m.categoria === "publicidad" && esDePlataforma(m, plataforma) && (m.mes_resultado || String(m.fecha).slice(0, 7)) === mes)
+        .reduce((s, m) => s + Number(m.monto), 0);
+      if (gasto || registrado) filas.push({ plataforma, mes, gasto, registrado, diferencia: gasto - registrado });
+    }
+  }
+  return filas;
 }
 
 /** Clave de saldo de un movimiento normalizado: la cuenta bancaria, «por depositar» o la caja del local. */

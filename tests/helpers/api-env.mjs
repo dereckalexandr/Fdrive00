@@ -206,8 +206,8 @@ export const meta = { llamadas: [], plantillas: [], fallarEnvio: "", archivos: {
  */
 /** Meta Ads y Google Ads simulados: cuentas, campañas y métricas que devuelven las APIs de lectura. */
 export const ads = {
-  meta: { cuenta: { name: "Cuenta BuyCar", currency: "CLP", account_status: 1 }, campanias: [], insights: {}, leads: {}, fallar: "", llamadas: [] },
-  google: { cuenta: { descriptiveName: "BuyCar Google", currencyCode: "CLP" }, campanias: [], metricas: {}, fallar: 0, llamadas: [] },
+  meta: { cuenta: { name: "Cuenta BuyCar", currency: "CLP", account_status: 1 }, campanias: [], insights: {}, leads: {}, gastoMensual: {}, fallar: "", llamadas: [] },
+  google: { cuenta: { descriptiveName: "BuyCar Google", currencyCode: "CLP" }, campanias: [], metricas: {}, gastoMensual: {}, mutaciones: [], n: 0, fallar: 0, llamadas: [] },
 };
 export const google = { llamadas: [], eventos: {}, fallar: 0, n: 0, tokens: 0 };
 /** Variables de entorno de la función simulada (las pruebas pueden cambiarlas). */
@@ -281,6 +281,10 @@ export const iniciarFuncion = async () => {
         if (ads.meta.fallar) { const m = ads.meta.fallar; ads.meta.fallar = ""; return new Response(JSON.stringify({ error: { message: m, code: 200 } }), { status: 403 }); }
         return ok({ id: idLead, created_time: "2026-11-23T15:00:00+0000", ...ads.meta.leads[idLead] });
       }
+      if (/\/act_\d+\/insights$/.test(u.pathname)) {
+        ads.meta.llamadas.push({ ruta: u.pathname, query: Object.fromEntries(u.searchParams) });
+        return ok({ data: Object.entries(ads.meta.gastoMensual).map(([mes, spend]) => ({ spend: String(spend), date_start: `${mes}-01` })) });
+      }
       const mAct = /\/act_(\d+)(\/campaigns)?$/.exec(u.pathname);
       const mIns = /\/(\d+)\/insights$/.exec(u.pathname);
       if (mAct || mIns) {
@@ -317,6 +321,7 @@ export const iniciarFuncion = async () => {
       ads.google.llamadas.push({ url: String(url), query: cuerpo.query, headers: init.headers });
       if (ads.google.fallar) { const st = ads.google.fallar; ads.google.fallar = 0; return new Response(JSON.stringify({ error: { code: st, message: "falla simulada", details: [{ errors: [{ message: "El token de desarrollador no está aprobado" }] }] } }), { status: st }); }
       const q = cuerpo.query;
+      if (/segments\.month/.test(q)) return new Response(JSON.stringify({ results: Object.entries(ads.google.gastoMensual).map(([mes, pesos]) => ({ segments: { month: `${mes}-01` }, metrics: { costMicros: String(pesos * 1_000_000) } })) }), { status: 200 });
       if (/FROM customer/.test(q)) return new Response(JSON.stringify({ results: [{ customer: ads.google.cuenta }] }), { status: 200 });
       const id = (/campaign\.id = (\d+)/.exec(q) || [])[1];
       if (id) {

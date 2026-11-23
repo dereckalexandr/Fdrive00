@@ -121,6 +121,26 @@ export async function metricasGoogle(id: string, desde: string, hasta: string) {
   return parsearGoogleFilas(f).get(String(id)) || { gasto: 0, alcance: null, impresiones: 0, clics: 0, leads: 0, mensajes: 0 };
 }
 
+/** Gasto de toda la cuenta publicitaria por mes ({ "AAAA-MM": pesos }). Lanza si la cuenta no está en pesos chilenos. */
+export async function gastoMensual(plataforma: string, desde: string, hasta: string): Promise<Record<string, number>> {
+  const cuenta = plataforma === "meta" ? await cuentaDeMeta() : await cuentaDeGoogle();
+  if (!monedaValida(cuenta.moneda)) throw new Error(`La cuenta publicitaria está en ${cuenta.moneda || "otra moneda"}: el CRM solo lleva pesos chilenos.`);
+  const out: Record<string, number> = {};
+  if (plataforma === "meta") {
+    const d = await graph(`/act_${cuentaMeta()}/insights`, { fields: "spend", time_range: JSON.stringify({ since: desde, until: hasta }), time_increment: "monthly", limit: "50" });
+    for (const f of d.data ?? []) { const mes = String(f.date_start || "").slice(0, 7); if (mes) out[mes] = (out[mes] || 0) + Math.round(Number(f.spend) || 0); }
+  } else {
+    const f = await gaql(`SELECT segments.month, metrics.cost_micros FROM customer WHERE segments.date BETWEEN '${desde}' AND '${hasta}'`);
+    for (const r of f) {
+      const mes = String((r.segments && r.segments.month) || "").slice(0, 7);
+      const micros = Number((r.metrics && (r.metrics.costMicros ?? r.metrics.cost_micros)) || 0);
+      if (mes) out[mes] = (out[mes] || 0) + micros;
+    }
+    for (const k of Object.keys(out)) out[k] = Math.round(out[k] / 1_000_000);
+  }
+  return out;
+}
+
 /* ---------------- Estado y lista ---------------- */
 export const configurado = (plataforma: string) => (plataforma === "meta" ? metaAdsConfigurado() : plataforma === "google" ? googleAdsConfigurado() : false);
 

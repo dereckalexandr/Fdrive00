@@ -15,7 +15,7 @@ import { Conciliacion } from "./crm-conciliacion.jsx";
 import { buildInformeMensualPdf } from "./pdf-report.js";
 import {
   CATEGORIAS_FIN, DOCUMENTOS_FIN, MEDIOS_FIN, categoriaFin, categoriaConVehiculo, validarMovimiento, movimientosCsv, claveDe,
-  categoriasAgrupadas, GRUPOS_FIN, MAX_ARCHIVOS_FIN, faltaRespaldo,
+  categoriasAgrupadas, GRUPOS_FIN, MAX_ARCHIVOS_FIN, faltaRespaldo, categoriasPresupuesto,
 } from "../supabase/functions/api/finanzas-core.js";
 import { MAX_BYTES_ARCHIVO } from "../supabase/functions/api/validaciones-core.js";
 import { compressImage, makePhotoId } from "./photos.js";
@@ -207,7 +207,7 @@ function FormMovimiento({ api, cuentas, inicial, plantilla, onCerrar, onListo })
     tipo: base.tipo, categoria: base.categoria, monto: String(base.monto), fecha: inicial ? inicial.fecha : hoyCL(), descripcion: base.descripcion || "", contraparte: base.contraparte || "",
     documentoTipo: base.documento_tipo || "sin_documento", documentoNumero: inicial ? inicial.documento_numero || "" : "", medio: base.medio || "transferencia",
     cuentaId: base.cuenta_id || "", cuentaDestinoId: base.cuenta_destino_id || "", vehiculoId: base.vehiculo_id || "", notas: inicial ? inicial.notas || "" : "",
-    recurrente: !!base.recurrente, serieId: plantilla ? plantilla.serie_id : (inicial && inicial.serie_id) || "",
+    recurrente: !!base.recurrente, serieId: plantilla ? plantilla.serie_id : (inicial && inicial.serie_id) || "", mesResultado: base.mes_resultado || "",
   } : { ...VACIO, fecha: hoyCL() }));
   const [msg, setMsg] = useState("");
   const [ocupado, setOcupado] = useState(false);
@@ -258,7 +258,7 @@ function FormMovimiento({ api, cuentas, inicial, plantilla, onCerrar, onListo })
     </select>
   );
   return (
-    <Modal titulo={inicial ? `Editar ${inicial.folio}` : plantilla ? "Registrar gasto fijo del mes" : "Registrar movimiento"} onCerrar={onCerrar}>
+    <Modal titulo={inicial ? `Editar ${inicial.folio}` : plantilla ? (plantilla.tituloForm || "Registrar gasto fijo del mes") : "Registrar movimiento"} onCerrar={onCerrar}>
       <div className="flex flex-col gap-3">
         {!inicial && !plantilla && (
           <div className="flex border border-stone-300 self-start">
@@ -296,6 +296,7 @@ function FormMovimiento({ api, cuentas, inicial, plantilla, onCerrar, onListo })
             </>
           )}
         </div>
+        {f.mesResultado && <p className="text-xs text-sky-800 bg-sky-50 border border-sky-200 px-3 py-2">Cuenta como gasto de {nombreMes(f.mesResultado)}, aunque se pague en otra fecha.</p>}
         <Campo etiqueta="Descripción"><input value={f.descripcion} maxLength={200} onChange={(e) => set("descripcion", e.target.value)} className={INPUT} placeholder={f.tipo === "traspaso" ? "Ej.: depósito del efectivo de la semana" : "Ej.: arriendo de noviembre"} /></Campo>
         {conVeh && (
           <Campo etiqueta="Vehículo" ayuda={f.categoria === "pago_consignante" ? "El auto consignado cuyo dueño recibe el pago." : "El gasto se suma al costo de ese auto (se ve en Rentabilidad). Sin vehículo, cuenta como gasto del mes."}>
@@ -635,6 +636,100 @@ function GastosFijos({ api, mes, cuentas, onListo }) {
   );
 }
 
+/** Presupuesto mensual por categoría: lo edita el Administrador; se compara con lo gastado en el mes. */
+function EditarPresupuesto({ api, actual, onCerrar, onListo }) {
+  const [v, setV] = useState(() => ({ ...((actual && actual.categorias) || {}) }));
+  const [msg, setMsg] = useState("");
+  const [ocupado, setOcupado] = useState(false);
+  const grupos = GRUPOS_FIN.map((g) => ({ ...g, categorias: categoriasPresupuesto().filter((c) => c.grupo === g.id) })).filter((g) => g.categorias.length);
+  const total = Object.values(v).reduce((s, x) => s + (Number(x) || 0), 0);
+  const guardar = async () => {
+    setOcupado(true); setMsg("");
+    try { await api("fin.presupuesto_guardar", { presupuesto: { categorias: v } }); onListo(); }
+    catch (e) { setMsg(mensajeError(e)); setOcupado(false); }
+  };
+  return (
+    <Modal titulo="Presupuesto mensual" onCerrar={onCerrar}>
+      <div className="flex flex-col gap-4">
+        <p className="text-sm text-stone-600">Cuánto esperas gastar cada mes en cada categoría. Déjalo vacío si no quieres controlarla. Se compara con lo gastado y se avisa cuando una categoría se pasa (también en el informe mensual).</p>
+        {grupos.map((g) => (
+          <div key={g.id}>
+            <p className="text-xs uppercase tracking-wide text-stone-500 mb-1.5">{g.nombre}</p>
+            <div className="grid md:grid-cols-2 gap-x-4 gap-y-2">
+              {g.categorias.map((c) => (
+                <label key={c.id} className="flex items-center justify-between gap-2 text-sm text-stone-700">
+                  <span className="truncate">{c.nombre}</span>
+                  <InputDinero value={v[c.id] ?? ""} onChange={(e) => setV({ ...v, [c.id]: e.target.value })} className={`${INPUT} !w-36 font-mono`} placeholder="—" />
+                </label>
+              ))}
+            </div>
+          </div>
+        ))}
+        <div className="flex flex-wrap items-center gap-3 border-t border-stone-200 pt-3">
+          <span className="text-sm text-stone-700">Total mensual: <strong className="font-mono">{clp(total)}</strong></span>
+          <button type="button" onClick={guardar} disabled={ocupado} className={`${BTN_PRIMARIO} ml-auto`}>{ocupado ? "Guardando…" : "Guardar"}</button>
+          <button type="button" onClick={onCerrar} className={BTN}>Cancelar</button>
+        </div>
+        {msg && <p className="text-sm text-rose-600">{msg}</p>}
+      </div>
+    </Modal>
+  );
+}
+
+function PresupuestoMes({ api, datos, puedeEditar, onListo }) {
+  const [editar, setEditar] = useState(false);
+  const c = datos.presupuestoMes;
+  const conPres = c.filas.filter((f) => f.presupuesto > 0);
+  return (
+    <Tarjeta titulo={`Presupuesto · ${nombreMes(c.mes)}`} ayuda="Lo gastado en el mes contra lo presupuestado por categoría. En rojo, las que se pasaron."
+      derecha={puedeEditar && <button type="button" onClick={() => setEditar(true)} className={BTN}>{conPres.length ? "Editar presupuesto" : "Definir presupuesto"}</button>}>
+      {conPres.length === 0 ? <p className="text-sm text-stone-500">Aún no hay presupuesto. {puedeEditar ? "Defínelo para controlar los gastos de cada mes." : "Lo define el Administrador."}</p> : (
+        <div className="flex flex-col gap-2.5">
+          <p className="text-sm text-stone-700">Gastado <strong className="font-mono">{clp(c.totalGasto)}</strong> de <strong className="font-mono">{clp(c.totalPresupuesto)}</strong> presupuestados{c.excedidas.length ? <span className="text-rose-700"> · {c.excedidas.length} {c.excedidas.length === 1 ? "categoría pasada" : "categorías pasadas"}</span> : ""}.</p>
+          {c.filas.map((f) => (
+            <div key={f.id} className="text-sm">
+              <div className="flex justify-between gap-3"><span className={f.excede ? "text-rose-700 font-medium" : "text-stone-800"}>{f.nombre}</span><span className="font-mono text-xs whitespace-nowrap">{clpBase(f.gasto)}{f.presupuesto ? ` / ${clpBase(f.presupuesto)}` : " · sin presupuesto"}{f.pct !== null ? ` (${f.pct}%)` : ""}</span></div>
+              {f.presupuesto > 0 && <div className="h-1.5 bg-stone-100 mt-1"><div className={`h-1.5 ${f.excede ? "bg-rose-500" : f.pct >= 85 ? "bg-amber-500" : "bg-emerald-500"}`} style={{ width: `${Math.min(100, f.pct)}%` }} /></div>}
+            </div>
+          ))}
+        </div>
+      )}
+      {editar && <EditarPresupuesto api={api} actual={datos.presupuesto} onCerrar={() => setEditar(false)} onListo={() => { setEditar(false); onListo(); }} />}
+    </Tarjeta>
+  );
+}
+
+/** Lo que gastaron las cuentas de Meta y Google Ads contra lo registrado como publicidad en Finanzas. */
+function PublicidadPorRegistrar({ api, hasta, onListo }) {
+  const { cargando, datos, recargar } = useCarga(() => api("fin.publicidad", { hasta, meses: 3 }).catch(() => null), [api, hasta]);
+  const [form, setForm] = useState(null);
+  if (cargando && !datos) return null;
+  if (!datos || (!datos.conectadas.length && !datos.errores.length)) return null;
+  const pendientes = datos.filas.filter((f) => f.diferencia !== 0);
+  const nombre = (p) => (p === "meta" ? "Meta Ads" : "Google Ads");
+  return (
+    <Tarjeta titulo="Publicidad en Meta y Google" ayuda="Lo que gastó cada cuenta publicitaria por mes, comparado con lo registrado en Finanzas como «Publicidad» de esa plataforma. Regístralo con la factura que envía la plataforma: cuenta en el mes al que corresponde.">
+      {datos.errores.map((e) => <p key={e.plataforma} className="text-sm text-rose-700 mb-2">{e.error}</p>)}
+      {datos.filas.length === 0 ? <p className="text-sm text-stone-500">Sin gasto en los últimos 3 meses.</p> : (
+        <div className="text-sm divide-y divide-stone-100">
+          {datos.filas.map((f) => (
+            <div key={`${f.plataforma}-${f.mes}`} className="flex flex-wrap items-center justify-between gap-2 py-2">
+              <span>{nombre(f.plataforma)} · {nombreMes(f.mes)}<span className="block text-xs text-stone-500">gastó {clpBase(f.gasto)} · registrado {clpBase(f.registrado)}</span></span>
+              {f.diferencia === 0 ? <span className="text-xs text-emerald-700">✓ Registrado</span>
+                : f.diferencia < 0 ? <span className="text-xs text-amber-700">Registrado de más: {clpBase(-f.diferencia)}</span>
+                : datos.puedeEditar ? <button type="button" onClick={() => setForm(f)} className={BTN}>Registrar {clpBase(f.diferencia)}</button>
+                : <span className="text-xs text-amber-700">Falta registrar {clpBase(f.diferencia)}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+      {pendientes.length === 0 && datos.filas.length > 0 && <p className="text-xs text-emerald-700 mt-2">Todo lo gastado está registrado.</p>}
+      {form && <FormMovimiento api={api} cuentas={datos.cuentas} plantilla={{ tipo: "egreso", categoria: "publicidad", monto: form.diferencia, descripcion: `Publicidad ${nombre(form.plataforma)} · ${nombreMes(form.mes)}`, contraparte: form.plataforma === "meta" ? "Meta Platforms" : "Google", documento_tipo: "factura", medio: "tarjeta", mes_resultado: form.mes, recurrente: false, tituloForm: `Registrar publicidad de ${nombre(form.plataforma)}` }}
+        onCerrar={() => setForm(null)} onListo={() => { setForm(null); recargar(); onListo(); }} />}
+    </Tarjeta>
+  );
+}
+
 function Gastos({ api, irA }) {
   const meses = useMemo(() => opcionesPeriodo().filter((p) => p.length === 7), []);
   const [hasta, setHasta] = useState(meses[0]);
@@ -662,6 +757,8 @@ function Gastos({ api, irA }) {
         <Cifra titulo="Gastos fijos por registrar" texto={String(d.fijosPendientes)} tono={d.fijosPendientes ? "text-amber-700" : "text-stone-900"} detalle={`en ${nombreMes(hasta)}`} />
       </div>
       <GastosFijos api={api} mes={hasta} cuentas={d.cuentas} onListo={recargar} />
+      <PresupuestoMes api={api} datos={d} puedeEditar={d.puedeEditar} onListo={recargar} />
+      <PublicidadPorRegistrar api={api} hasta={hasta} onListo={recargar} />
       <Tarjeta titulo="Gastos por categoría" ayuda="Lo que se gastó en el negocio cada mes (cuenta en el mes al que corresponde; la nómina pagada al mes siguiente queda en su mes). No incluye los pagos por compras de autos, los gastos asociados a un auto (son parte de su costo) ni los retiros del dueño.">
         {d.grupos.length === 0 ? <p className="text-sm text-stone-500">No hay gastos registrados en estos meses.</p> : (
           <div className="overflow-x-auto">

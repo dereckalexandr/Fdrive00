@@ -61,6 +61,8 @@ export function armarInforme(d) {
   if (d.nomina && d.nomina.aplica && !d.nomina.guardada) alertas.push({ nivel: "media", texto: `La nómina de ${nombrePeriodo(d.periodo)} no está guardada (${d.nomina.trabajadores} trabajadores).` });
   const nominaPend = (d.resumen.porPagar || []).filter((x) => x.tipo === "nomina");
   if (nominaPend.length) alertas.push({ nivel: "media", texto: `Pagos de nómina pendientes: ${nominaPend.map((x) => `${x.vehiculo} ${x.folio.replace("Nómina ", "")} (${pesos(x.falta)})`).join("; ")}.` });
+  for (const f of (d.presupuesto && d.presupuesto.excedidas) || []) alertas.push({ nivel: "media", texto: `${f.nombre}: se gastó ${pesos(f.gasto)}, sobre el presupuesto de ${pesos(f.presupuesto)} (${f.pct}%).` });
+  for (const f of (d.publicidad || []).filter((x) => x.diferencia > 0)) alertas.push({ nivel: "media", texto: `Publicidad de ${f.plataforma === "meta" ? "Meta" : "Google Ads"} sin registrar en Finanzas: ${pesos(f.diferencia)} (la plataforma gastó ${pesos(f.gasto)}).` });
   const sinCosto = ((d.rentabilidad && d.rentabilidad.ventas) || []).filter((v) => v.sinCosto);
   if (sinCosto.length) alertas.push({ nivel: "media", texto: `${n(sinCosto.length, "venta", "ventas")} sin costo registrado: su margen aparece inflado.` });
   const viejos = ((d.rentabilidad && d.rentabilidad.stock) || []).filter((v) => !v.consignado && v.dias > 90);
