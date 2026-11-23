@@ -18,6 +18,7 @@ let contadorAnuncios = 0;
 let contadorCompras = 0;
 let contadorConsig = 0;
 let contadorCampanias = 0;
+let contadorFin = 0;
 let contadorPublicaciones = 0;
 let relojWa = Date.now();
 const marcaWa = () => new Date(++relojWa).toISOString();
@@ -51,6 +52,7 @@ const DEFAULTS = {
   reservas: () => ({ id: randomUUID(), estado: "activa", motivo: null, cerrado_en: null, creado_en: new Date().toISOString() }),
   tareas: () => ({ id: randomUUID(), hecha: false, hecha_en: null, creado_en: new Date().toISOString() }),
   bitacora: () => ({ id: Math.floor(Math.random() * 1e9), creado_en: new Date().toISOString() }),
+  fin_movimientos: () => ({ id: randomUUID(), numero: ++contadorFin, estado: "vigente", cuenta_id: null, cuenta_destino_id: null, vehiculo_id: null, contraparte: null, documento_numero: null, notas: null, anulado_por: null, anulado_en: null, motivo_anulacion: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
 };
 const UNICOS = { wa_conversaciones: ["telefono"], vehiculos: ["patente"], usuarios: ["rut"], locales: ["nombre"], roles_permisos: ["rol"], config_negocio: ["clave"], kv_store: ["key"], patentes_consultadas: ["patente"] };
 
@@ -70,7 +72,7 @@ function patronARegex(patron, insensible) {
 }
 
 export function crearBaseFalsa() {
-  const tablas = { usuarios: [], locales: [], roles_permisos: [], bitacora: [], config_negocio: [], kv_store: [], vehiculos: [], clientes: [], leads: [], lead_eventos: [], tareas: [], cotizaciones: [], reservas: [], cierres: [], avisos: [], tasaciones: [], inspecciones: [], validaciones: [], validacion_docs: [], anuncios: [], anuncio_portales: [], campanias: [], publicaciones_rrss: [], material_vehiculo: [], compras: [], consignaciones: [], cierre_pagos: [], compra_pagos: [], cuentas_empresa: [], wa_conversaciones: [], wa_mensajes: [], patentes_consultadas: [], alertas_leads: [] };
+  const tablas = { usuarios: [], locales: [], roles_permisos: [], bitacora: [], config_negocio: [], kv_store: [], vehiculos: [], clientes: [], leads: [], lead_eventos: [], tareas: [], cotizaciones: [], reservas: [], cierres: [], avisos: [], tasaciones: [], inspecciones: [], validaciones: [], validacion_docs: [], anuncios: [], anuncio_portales: [], campanias: [], publicaciones_rrss: [], material_vehiculo: [], compras: [], consignaciones: [], cierre_pagos: [], compra_pagos: [], cuentas_empresa: [], fin_movimientos: [], fin_saldos: [], wa_conversaciones: [], wa_mensajes: [], patentes_consultadas: [], alertas_leads: [] };
   const consultas = [];
 
   function builder(nombre) {

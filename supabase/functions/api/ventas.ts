@@ -20,6 +20,7 @@ import {
   solicitudDeCanal, siguienteLlave,
 } from "./ventas-core.js";
 import { whatsappOp } from "./whatsapp.ts";
+import { finanzasOp } from "./finanzas.ts";
 import { googleConfigurado, crearVisitaGoogle, moverVisitaGoogle, cancelarVisitaGoogle } from "./google-calendar.ts";
 import { tramosEfectivos, calcularProduccion } from "./comisiones-core.js";
 import { enviarAviso, enSegundoPlano, correoActivo, enviarInvitacionVisita } from "./correo.ts";
@@ -593,6 +594,11 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
   }
 
   /* ---------- inventario ---------- */
+  /* ---- Finanzas: el Administrador registra; el Jefe Local mira lo de su local. ---- */
+  if (op.startsWith("fin.")) {
+    return await finanzasOp({ sb, json, err, fallo, audit, actor: ctx.actor, userName, esAdmin: ctx.esAdmin, esSupervisor, localId, localParaCrear, porIds }, op, body);
+  }
+
   if (op.startsWith("inventario.")) {
     if (op === "inventario.list") {
       if (!can("inventario.ver") && !can("inventario.editar") && !usaLeads) return err("forbidden", 403);

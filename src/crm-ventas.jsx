@@ -30,6 +30,7 @@ import { Miniatura as MiniaturaVehiculo } from "./crm-inventario.jsx";
 import { ListaLeads } from "./crm-leads-lista.jsx";
 import { SeccionCompra, SeccionConsignacion, ModuloCompras } from "./crm-compras.jsx";
 import { BandejaWhatsapp, SeccionWhatsapp, useCadaTanto } from "./crm-whatsapp.jsx";
+import { ModuloFinanzas } from "./crm-finanzas.jsx";
 import { etapaDeOperacion, etapasDeTipo, ayudaDeEtapa, tipoLeadNombre, TIPOS_LEAD, validarVehiculoOfrecido } from "../supabase/functions/api/compras-core.js";
 import {
   INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, mensajeInvitacion, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, NavegacionLateral, useGuardado, DatosDelDueno, CamposCondiciones, useCarga, mensajeError, CamposVehiculo, aVehiculoForm,
@@ -914,7 +915,7 @@ export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador, 
   const can = (p) => esAdmin || permisos.includes(p);
   const usaLeads = can("leads.propios") || can("leads.local") || can("leads.asignar");
   const [localSel, setLocalSel] = useState("");
-  const [tab, setTab] = useGuardado(esAdmin ? "ventas-admin" : "ventas", usaLeads ? "hoy" : "inventario", ["hoy", "inicio", "leads", "whatsapp", "agenda", "ventas", "gestion", "tasaciones", "aprobaciones", "compras", "inspecciones", "fichas", "equipo", "validaciones", "anuncios", "marketing", "inventario", "clientes"]);
+  const [tab, setTab] = useGuardado(esAdmin ? "ventas-admin" : "ventas", usaLeads ? "hoy" : "inventario", ["hoy", "inicio", "leads", "whatsapp", "agenda", "ventas", "gestion", "tasaciones", "aprobaciones", "compras", "inspecciones", "fichas", "equipo", "validaciones", "anuncios", "marketing", "finanzas", "inventario", "clientes"]);
   const [version, setVersion] = useState(0);
   const [leadAbierto, setLeadAbierto] = useState(null);
   const [leadEditando, setLeadEditando] = useState(null);
@@ -956,6 +957,7 @@ export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador, 
   if (puedeAprobar && renderFichas) opciones.push(["fichas", "Fichas de inspectores"]);
   if (puedeAprobar) opciones.push(["equipo", "Equipo"]);
   if (puedeAprobar) opciones.push(["validaciones", "Validaciones"], ["anuncios", "Avisos"], ["marketing", "Marketing"]);
+  if (puedeAprobar) opciones.push(["finanzas", "Finanzas"]);
   opciones.push(["inventario", "Inventario"]);
   if (usaLeads) opciones.push(["clientes", "Clientes"]);
 
@@ -965,6 +967,7 @@ export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador, 
     { titulo: "Trabajo diario", ids: ["hoy", "inicio", "leads", "whatsapp", "agenda", "clientes", "inventario"] },
     { titulo: "Comercial", ids: ["ventas", "gestion", "aprobaciones", "compras", "tasaciones", "inspecciones", "fichas", "equipo"] },
     { titulo: "Operación", ids: ["validaciones", "anuncios", "marketing"] },
+    { titulo: "Administración", ids: ["finanzas"] },
   ];
 
   return (
@@ -1001,6 +1004,7 @@ export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador, 
       {tabVigente === "agenda" && <Agenda api={api} catalogos={catalogos} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
       {tabVigente === "inventario" && <Inventario api={api} onCambio={subir} />}
       {tabVigente === "clientes" && <Clientes api={api} />}
+      {tabVigente === "finanzas" && <ModuloFinanzas api={api} />}
       </ErrorBoundary>
 
       {leadAbierto && !leadEditando && (
