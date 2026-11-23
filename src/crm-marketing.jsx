@@ -16,7 +16,11 @@ import {
   CANALES, TIPOS_PUBLICACION, ESTADOS_PUBLICACION, TIPOS_MATERIAL, ESTADOS_MATERIAL, canalNombre, tipoPublicacionNombre, publicacionNombre,
   campaniaNombre, materialTipoNombre, materialEstadoNombre, validarCampania, validarPublicacion,
 } from "../supabase/functions/api/marketing-core.js";
+import { PLATAFORMAS, plataformaNombre } from "../supabase/functions/api/ads-core.js";
 import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, useCarga, mensajeError, apiPorDefecto } from "./crm-ui.jsx";
+
+/** El error de una plataforma trae el motivo ya redactado en `detalle`. */
+const textoError = (e) => (e && e.message === "ads_error" && e.detalle ? e.detalle : mensajeError(e));
 
 const COLOR_PUB = { idea: "bg-stone-100 text-stone-700", produccion: "bg-sky-100 text-sky-800", programada: "bg-amber-100 text-amber-800", publicada: "bg-emerald-100 text-emerald-800", cancelada: "bg-stone-200 text-stone-500" };
 const COLOR_CAMP = { borrador: "bg-stone-100 text-stone-700", pendiente: "bg-amber-100 text-amber-800", aprobada: "bg-emerald-100 text-emerald-800", rechazada: "bg-rose-100 text-rose-800", finalizada: "bg-sky-100 text-sky-800", cancelada: "bg-stone-200 text-stone-500" };
@@ -189,6 +193,99 @@ function FormResultados({ api, camp, onCerrar, onGuardada }) {
   );
 }
 
+/** Campañas de una plataforma (Meta o Google): vincular con una del CRM, o importar como campaña nueva. */
+function CampaniasExternas({ api, plataforma, campanias, onCerrar, onCambio }) {
+  const { cargando, error, datos, recargar } = useCarga(() => api("marketing.ads.externas", { plataforma }), [api, plataforma]);
+  const [elegida, setElegida] = useState({}); // id externo -> id de campaña del CRM
+  const [presupuesto, setPresupuesto] = useState({});
+  const [msg, setMsg] = useState(null);
+  const [ocupado, setOcupado] = useState("");
+  const libres = campanias.filter((c) => !c.externo_id && c.estado !== "cancelada" && c.estado !== "finalizada");
+  const hacer = async (clave, op, params, texto) => {
+    setMsg(null); setOcupado(clave);
+    try { await api(op, { plataforma, ...params }); setMsg({ ok: true, texto }); await recargar(); onCambio(); }
+    catch (e) { setMsg({ ok: false, texto: textoError(e) }); }
+    setOcupado("");
+  };
+  return (
+    <Modal titulo={`Campañas de ${plataformaNombre(plataforma)}`} onCerrar={onCerrar} ancho="max-w-3xl">
+      <div className="flex flex-col gap-3">
+        <p className="text-sm text-stone-600">Vincula cada campaña de la plataforma con una del CRM: el CRM lee su gasto, alcance, clics y resultados dentro de las fechas de la campaña, y ya no se anotan a mano. Solo lee: no cambia nada en la plataforma.</p>
+        {msg && <Aviso tipo={msg.ok ? "ok" : "error"}>{msg.texto}</Aviso>}
+        {cargando && !datos && <Cargando />}
+        {error && !datos && <Aviso>{error}</Aviso>}
+        {datos && datos.campanias.length === 0 && <p className="text-sm text-stone-500">La cuenta no tiene campañas.</p>}
+        {datos && datos.campanias.map((c) => (
+          <div key={c.id} className="border border-stone-200 p-3 flex flex-col gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span><span className="font-medium text-stone-900">{c.nombre}</span><span className="block text-xs text-stone-500">ID {c.id} · {c.estado || "—"}{c.desde ? ` · desde ${fechaSimple(c.desde)}` : ""}</span></span>
+              {c.vinculada && <span className="text-xs text-emerald-700">✓ Vinculada a {c.vinculada.folio} · {c.vinculada.nombre}</span>}
+            </div>
+            {!c.vinculada && (
+              <div className="flex flex-wrap items-end gap-x-2 gap-y-3">
+                <label className="text-xs text-stone-600 flex flex-col gap-1">Vincular con la campaña del CRM
+                  <select value={elegida[c.id] || ""} onChange={(e) => setElegida({ ...elegida, [c.id]: e.target.value })} className={`${INPUT} !w-52`}>
+                    <option value="">Elige…</option>{libres.map((x) => <option key={x.id} value={x.id}>{x.folio} · {x.nombre}</option>)}
+                  </select>
+                </label>
+                <button type="button" disabled={!elegida[c.id] || !!ocupado} onClick={() => hacer(c.id, "marketing.ads.vincular", { id: elegida[c.id], externoId: c.id }, "Campaña vinculada: ya se leyeron sus números.")} className={BTN}>{ocupado === c.id ? "Vinculando…" : "Vincular"}</button>
+                <span className="text-xs text-stone-400 px-1 pb-2">o</span>
+                <label className="text-xs text-stone-600 flex flex-col gap-1">Importar como nueva · presupuesto ($)
+                  <input inputMode="numeric" value={presupuesto[c.id] ?? ""} onChange={(e) => setPresupuesto({ ...presupuesto, [c.id]: e.target.value.replace(/\D/g, "") })} className={`${INPUT} !w-28 font-mono`} placeholder="0" />
+                </label>
+                <button type="button" disabled={!!ocupado} onClick={() => hacer(c.id, "marketing.ads.importar", { externoId: c.id, presupuesto: Number(presupuesto[c.id] || 0) }, "Campaña importada en borrador: envíala a aprobación para que cuente el presupuesto.")} className={BTN}>{ocupado === c.id ? "Importando…" : "Importar"}</button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </Modal>
+  );
+}
+
+/** Estado de la conexión con Meta y Google Ads, y lectura de métricas. */
+function PlataformasAnuncios({ api, puedeGestionar, campanias, version, onCambio }) {
+  const { cargando, datos, recargar } = useCarga(() => api("marketing.ads.estado"), [api, version]);
+  const [abierta, setAbierta] = useState(null);
+  const [msg, setMsg] = useState(null);
+  const [ocupado, setOcupado] = useState(false);
+  if (cargando && !datos) return null;
+  if (!datos) return null;
+  const hayVinculadas = campanias.some((c) => c.externo_id);
+  const actualizar = async () => {
+    setMsg(null); setOcupado(true);
+    try {
+      const { resumen } = await api("marketing.ads.sync", {});
+      setMsg(resumen.errores.length ? { ok: false, texto: `${resumen.actualizadas} actualizadas. ${resumen.errores.map((e) => `${e.campania}: ${e.error}`).join(" · ")}` } : { ok: true, texto: resumen.revisadas ? `Listo: ${resumen.actualizadas} campañas actualizadas.` : "No hay campañas vinculadas todavía." });
+      await recargar(); onCambio();
+    } catch (e) { setMsg({ ok: false, texto: textoError(e) }); }
+    setOcupado(false);
+  };
+  return (
+    <Tarjeta titulo="Meta y Google Ads" ayuda="El CRM lee de tus cuentas publicitarias el gasto, alcance, clics y resultados de cada campaña, sin anotarlos a mano. Se actualiza solo cada 3 horas y también con el botón. Solo lee: no crea ni cambia anuncios."
+      derecha={hayVinculadas && <button type="button" onClick={actualizar} disabled={ocupado} className={BTN}>{ocupado ? "Actualizando…" : "Actualizar ahora"}</button>}>
+      <div className="grid md:grid-cols-2 gap-3">
+        {PLATAFORMAS.map((p) => {
+          const e = datos.plataformas.find((x) => x.plataforma === p.id) || {};
+          return (
+            <div key={p.id} className="border border-stone-200 p-3 flex flex-col gap-1.5">
+              <span className="font-medium text-stone-900">{p.nombre}</span>
+              {!e.configurado && <span className="text-xs text-stone-500">Sin conectar. El Administrador debe cargar las claves de la cuenta publicitaria en el servidor.</span>}
+              {e.configurado && !e.conectado && <span className="text-xs text-rose-700">{e.error || "No se pudo conectar."}</span>}
+              {e.conectado && <span className="text-xs text-emerald-700">✓ Conectada a «{e.cuenta || "la cuenta"}»{e.moneda ? ` · ${e.moneda}` : ""}</span>}
+              {e.conectado && e.monedaValida === false && <span className="text-xs text-amber-700">La cuenta está en {e.moneda}: el CRM solo lleva pesos chilenos y no convierte, así que no leerá sus números.</span>}
+              {e.conectado && e.activa === false && <span className="text-xs text-amber-700">La cuenta publicitaria no está activa en Meta.</span>}
+              {e.conectado && <button type="button" onClick={() => setAbierta(p.id)} className="text-xs font-medium text-sky-700 hover:underline self-start">{puedeGestionar ? "Ver campañas y vincular" : "Ver campañas"}</button>}
+            </div>
+          );
+        })}
+      </div>
+      {msg && <div className="mt-3"><Aviso tipo={msg.ok ? "ok" : "error"}>{msg.texto}</Aviso></div>}
+      {abierta && <CampaniasExternas api={api} plataforma={abierta} campanias={campanias} onCerrar={() => setAbierta(null)} onCambio={onCambio} />}
+    </Tarjeta>
+  );
+}
+
 function Campanias({ api, puedeGestionar, puedeAprobar, version, onCambio }) {
   const [forma, setForma] = useState(undefined);
   const [resultados, setResultados] = useState(null);
@@ -211,6 +308,7 @@ function Campanias({ api, puedeGestionar, puedeAprobar, version, onCambio }) {
         {puedeGestionar && <button onClick={() => setForma(null)} className={`${BTN_PRIMARIO} ml-auto`}>+ Nueva campaña</button>}
       </div>
       {msg && <Aviso>{msg}</Aviso>}
+      <PlataformasAnuncios api={api} puedeGestionar={puedeGestionar} campanias={datos.campanias} version={version} onCambio={onCambio} />
       <div className="bg-white border border-stone-200 overflow-x-auto">
         <table className="w-full border-collapse text-sm">
           <thead><tr className="text-left text-xs uppercase tracking-wide text-stone-400 border-b border-stone-200">
@@ -220,16 +318,19 @@ function Campanias({ api, puedeGestionar, puedeAprobar, version, onCambio }) {
             {datos.campanias.length === 0 && <tr><td colSpan={7} className="py-8 text-center text-stone-500">Aún no hay campañas.</td></tr>}
             {datos.campanias.map((c) => (
               <tr key={c.id} className="border-b border-stone-100 align-top">
-                <td className="py-2.5 px-4 text-stone-900">{c.nombre}<div className="text-xs text-stone-500">{c.folio} · {canalNombre(c.canal)}</div></td>
+                <td className="py-2.5 px-4 text-stone-900">{c.nombre}<div className="text-xs text-stone-500">{c.folio} · {canalNombre(c.canal)}</div>
+                  {c.externo_id && <div className="text-[11px] text-sky-700 mt-0.5">🔗 {plataformaNombre(c.plataforma)}{c.sync_en ? ` · leída ${hace(c.sync_en)}` : " · aún sin leer"}</div>}
+                  {c.sync_error && <div className="text-[11px] text-rose-700 mt-0.5 max-w-xs">{c.sync_error}</div>}</td>
                 <td className="py-2.5 px-4 text-xs text-stone-600 whitespace-nowrap">{fechaSimple(c.desde)} → {fechaSimple(c.hasta)}</td>
-                <td className="py-2.5 px-4 text-right font-mono whitespace-nowrap">{clp(c.presupuesto)}<div className="text-xs text-stone-500">gastado {clp(c.gasto)}{c.metricas.consumo !== null ? ` (${c.metricas.consumo}%)` : ""}</div></td>
+                <td className="py-2.5 px-4 text-right font-mono whitespace-nowrap">{clp(c.presupuesto)}<div className="text-xs text-stone-500">gastado {clp(c.gasto)}{c.metricas.consumo !== null ? ` (${c.metricas.consumo}%)` : ""}</div>{c.excedePresupuesto && <div className="text-[11px] text-rose-700 font-sans">{Number(c.presupuesto_aprobado) > 0 ? "Pasó el presupuesto aprobado" : "Gasta sin presupuesto aprobado"}</div>}</td>
                 <td className="py-2.5 px-4 text-right font-mono whitespace-nowrap">{c.metricas.leads} · {c.metricas.ventas}<div className="text-xs text-stone-500">{pct(c.metricas.conversion)} convierte</div></td>
                 <td className="py-2.5 px-4 text-right font-mono text-xs whitespace-nowrap">{clp(c.metricas.costoPorLead)} / {clp(c.metricas.costoPorVenta)}</td>
                 <td className="py-2.5 px-4"><Etiqueta clases={COLOR_CAMP[c.estado]} texto={campaniaNombre(c.estado)} />{c.estado === "rechazada" && c.motivo_rechazo && <div className="text-xs text-rose-700 mt-1">{c.motivo_rechazo}</div>}{c.estado === "aprobada" && c.aprobado_por && <div className="text-[11px] text-stone-400 mt-1">{c.aprobado_por}</div>}</td>
                 <td className="py-2.5 px-4 text-right whitespace-nowrap">
                   {puedeAprobar && c.estado === "pendiente" && <><button disabled={ocupado} onClick={() => correr("marketing.campanias.aprobar", c)} className={BTN_AMBAR}>Aprobar</button> <button disabled={ocupado} onClick={() => rechazar(c)} className={BTN}>Rechazar</button></>}
                   {puedeGestionar && (c.estado === "borrador" || c.estado === "rechazada") && <button disabled={ocupado} onClick={() => correr("marketing.campanias.enviar", c)} className={BTN_AMBAR}>{Number(c.presupuesto) > 0 ? "Enviar a aprobación" : "Activar"}</button>}{" "}
-                  {puedeGestionar && (c.estado === "aprobada" || c.estado === "finalizada") && <button onClick={() => setResultados(c)} className={BTN}>Resultados</button>}{" "}
+                  {puedeGestionar && (c.estado === "aprobada" || c.estado === "finalizada") && !c.externo_id && <button onClick={() => setResultados(c)} className={BTN}>Resultados</button>}{" "}
+                  {puedeGestionar && c.externo_id && <button disabled={ocupado} onClick={() => window.confirm("¿Desvincular de la plataforma? Quedan los últimos números leídos y vuelve a ser manual.") && correr("marketing.ads.desvincular", c)} className={BTN}>Desvincular</button>}{" "}
                   {puedeGestionar && c.estado === "aprobada" && <button disabled={ocupado} onClick={() => correr("marketing.campanias.finalizar", c)} className={BTN}>Finalizar</button>}{" "}
                   {puedeGestionar && ["borrador", "pendiente", "rechazada", "aprobada"].includes(c.estado) && <button onClick={() => setForma(c)} className={BTN}>Editar</button>}{" "}
                   {(puedeGestionar || puedeAprobar) && ["borrador", "pendiente", "rechazada", "aprobada"].includes(c.estado) && <button disabled={ocupado} onClick={() => window.confirm("¿Cancelar esta campaña?") && correr("marketing.campanias.cancelar", c)} className={BTN}>Cancelar</button>}
@@ -239,7 +340,7 @@ function Campanias({ api, puedeGestionar, puedeAprobar, version, onCambio }) {
           </tbody>
         </table>
       </div>
-      <p className="text-xs text-stone-500">Los leads se asocian a la campaña desde el formulario del lead (campo «Campaña»). El costo por lead y por venta usa el gasto que anotas y los leads y ventas aprobadas que cuenta el CRM.</p>
+      <p className="text-xs text-stone-500">Los leads se asocian a la campaña desde el formulario del lead (campo «Campaña»). El costo por lead y por venta usa el gasto (anotado a mano o leído de Meta y Google) y los leads y ventas aprobadas que cuenta el CRM.</p>
       {forma !== undefined && <FormCampania api={api} camp={forma} onCerrar={() => setForma(undefined)} onGuardada={async () => { setForma(undefined); await recargar(); onCambio(); }} />}
       {resultados && <FormResultados api={api} camp={resultados} onCerrar={() => setResultados(null)} onGuardada={async () => { setResultados(null); await recargar(); onCambio(); }} />}
     </>

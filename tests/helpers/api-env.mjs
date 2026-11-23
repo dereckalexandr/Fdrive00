@@ -39,7 +39,7 @@ const DEFAULTS = {
   validacion_docs: () => ({ id: randomUUID(), estado: "pendiente", comentario: null, archivos: [], requerido: true, grupo: "vehiculo", revisado_por: null, revisado_en: null, orden: 0, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
   anuncios: () => ({ id: randomUUID(), numero: ++contadorAnuncios, estado: "por_publicar", baja_en: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
   anuncio_portales: () => ({ id: randomUUID(), estado: "pendiente", url: null, precio_publicado: null, publicado_en: null, vence_en: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
-  campanias: () => ({ id: randomUUID(), numero: ++contadorCampanias, estado: "borrador", presupuesto: 0, presupuesto_aprobado: 0, gasto: 0, alcance: 0, impresiones: 0, clics: 0, motivo_rechazo: null, aprobado_por: null, aprobado_en: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
+  campanias: () => ({ plataforma: null, externo_id: null, externo: {}, sync_en: null, sync_error: null, id: randomUUID(), numero: ++contadorCampanias, estado: "borrador", presupuesto: 0, presupuesto_aprobado: 0, gasto: 0, alcance: 0, impresiones: 0, clics: 0, motivo_rechazo: null, aprobado_por: null, aprobado_en: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
   publicaciones_rrss: () => ({ id: randomUUID(), numero: ++contadorPublicaciones, estado: "idea", tipo: "post", fecha_programada: null, texto: null, url: null, campania_id: null, vehiculo_id: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
   material_vehiculo: () => ({ id: randomUUID(), estado: "pendiente", url: null, notas: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
   compras: () => ({ id: randomUUID(), numero: ++contadorCompras, estado: "oferta", vehiculo: {}, motivo: null, monto_final: null, mes: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
@@ -204,6 +204,11 @@ export const meta = { llamadas: [], plantillas: [], fallarEnvio: "", archivos: {
  * Google (OAuth y Calendar API) simulado. `llamadas`: { metodo, url, cuerpo, auth }. `eventos`: id → evento vigente.
  * `fallar`: si es un número, la próxima llamada a Calendar responde con ese estado de error.
  */
+/** Meta Ads y Google Ads simulados: cuentas, campañas y métricas que devuelven las APIs de lectura. */
+export const ads = {
+  meta: { cuenta: { name: "Cuenta BuyCar", currency: "CLP", account_status: 1 }, campanias: [], insights: {}, fallar: "", llamadas: [] },
+  google: { cuenta: { descriptiveName: "BuyCar Google", currencyCode: "CLP" }, campanias: [], metricas: {}, fallar: 0, llamadas: [] },
+};
 export const google = { llamadas: [], eventos: {}, fallar: 0, n: 0, tokens: 0 };
 /** Variables de entorno de la función simulada (las pruebas pueden cambiarlas). */
 export let entorno = {};
@@ -216,7 +221,7 @@ export const iniciarFuncion = async () => {
   writeFileSync(fake, "export const createClient = () => globalThis.__baseFalsa.cliente;\n");
   const core = pathToFileURL(resolve("supabase/functions/api/crm-core.js")).href;
   let src = readFileSync("supabase/functions/api/index.ts", "utf8");
-  src = src.replace("npm:@supabase/supabase-js@2", pathToFileURL(fake).href).replace("./crm-core.js", core).replace("./ventas.ts", pathToFileURL(resolve("supabase/functions/api/ventas.ts")).href).replace("./publico.ts", pathToFileURL(resolve("supabase/functions/api/publico.ts")).href).replace("./alertas.ts", pathToFileURL(resolve("supabase/functions/api/alertas.ts")).href).replace("./patentes-core.js", pathToFileURL(resolve("supabase/functions/api/patentes-core.js")).href).replace("./whatsapp.ts", pathToFileURL(resolve("supabase/functions/api/whatsapp.ts")).href);
+  src = src.replace("npm:@supabase/supabase-js@2", pathToFileURL(fake).href).replace("./crm-core.js", core).replace("./ventas.ts", pathToFileURL(resolve("supabase/functions/api/ventas.ts")).href).replace("./publico.ts", pathToFileURL(resolve("supabase/functions/api/publico.ts")).href).replace("./alertas.ts", pathToFileURL(resolve("supabase/functions/api/alertas.ts")).href).replace("./patentes-core.js", pathToFileURL(resolve("supabase/functions/api/patentes-core.js")).href).replace("./whatsapp.ts", pathToFileURL(resolve("supabase/functions/api/whatsapp.ts")).href).replace("./ads.ts", pathToFileURL(resolve("supabase/functions/api/ads.ts")).href);
   const archivo = join(dir, "index.mts");
   writeFileSync(archivo, src);
   globalThis.__baseFalsa = db;
@@ -268,6 +273,18 @@ export const iniciarFuncion = async () => {
       meta.llamadas.push({ metodo, ruta: u.pathname, cuerpo, auth: init && init.headers && init.headers.authorization });
       const ok = (d) => new Response(JSON.stringify(d), { status: 200 });
       if (u.hostname === "lookaside.prueba") { const a = meta.archivos[u.pathname.slice(1)]; return a ? new Response(a.bytes, { status: 200 }) : new Response("", { status: 404 }); }
+      // Meta Ads (solo lectura): cuenta publicitaria, campañas y métricas (insights) de una campaña.
+      const mAct = /\/act_(\d+)(\/campaigns)?$/.exec(u.pathname);
+      const mIns = /\/(\d+)\/insights$/.exec(u.pathname);
+      if (mAct || mIns) {
+        ads.meta.llamadas.push({ ruta: u.pathname, query: Object.fromEntries(u.searchParams), auth: init && init.headers && init.headers.authorization });
+        if (ads.meta.fallar) { const m = ads.meta.fallar; ads.meta.fallar = ""; return new Response(JSON.stringify({ error: { message: m, code: 190 } }), { status: 400 }); }
+        if (mAct && mAct[2]) return ok({ data: ads.meta.campanias });
+        if (mAct) return ok(ads.meta.cuenta);
+        const rango = JSON.parse(u.searchParams.get("time_range") || "{}");
+        const fila = ads.meta.insights[mIns[1]];
+        return ok({ data: fila ? [{ ...fila, date_start: rango.since, date_stop: rango.until }] : [] });
+      }
       if (u.pathname.endsWith("/message_templates")) {
         if (metodo === "POST") {
           if (meta.plantillas.some((p) => p.name === cuerpo.name)) return new Response(JSON.stringify({ error: { message: "Ya existe una plantilla con ese nombre", error_user_msg: "Ya existe una plantilla con ese nombre", code: 100 } }), { status: 400 });
@@ -287,6 +304,21 @@ export const iniciarFuncion = async () => {
       const mid = u.pathname.split("/").pop();
       if (metodo === "GET" && meta.archivos[mid]) return ok({ url: "https://lookaside.prueba/" + mid, mime_type: meta.archivos[mid].mime, file_size: meta.archivos[mid].bytes.length, id: mid });
       return new Response(JSON.stringify({ error: { message: "no encontrado", code: 100 } }), { status: 404 });
+    }
+    if (String(url).startsWith("https://googleads.googleapis.com/")) {
+      const cuerpo = JSON.parse(init.body);
+      ads.google.llamadas.push({ url: String(url), query: cuerpo.query, headers: init.headers });
+      if (ads.google.fallar) { const st = ads.google.fallar; ads.google.fallar = 0; return new Response(JSON.stringify({ error: { code: st, message: "falla simulada", details: [{ errors: [{ message: "El token de desarrollador no está aprobado" }] }] } }), { status: st }); }
+      const q = cuerpo.query;
+      if (/FROM customer/.test(q)) return new Response(JSON.stringify({ results: [{ customer: ads.google.cuenta }] }), { status: 200 });
+      const id = (/campaign\.id = (\d+)/.exec(q) || [])[1];
+      if (id) {
+        const m = ads.google.metricas[id];
+        const fecha = /BETWEEN '(\S+)' AND '(\S+)'/.exec(q);
+        // Dos filas por campaña (segmentadas por día) para comprobar que se suman.
+        return new Response(JSON.stringify({ results: m ? [{ campaign: { id }, metrics: { costMicros: String(Math.round(m.costMicros / 2)), impressions: String(Math.floor(m.impressions / 2)), clicks: String(Math.floor(m.clicks / 2)), conversions: m.conversions / 2 } }, { campaign: { id }, metrics: { costMicros: String(m.costMicros - Math.round(m.costMicros / 2)), impressions: String(m.impressions - Math.floor(m.impressions / 2)), clicks: String(m.clicks - Math.floor(m.clicks / 2)), conversions: m.conversions / 2 } }] : [], fechas: fecha && [fecha[1], fecha[2]] }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ results: ads.google.campanias.map((c) => ({ campaign: c })) }), { status: 200 });
     }
     if (String(url).startsWith("https://api.resend.com/")) { correos.push(JSON.parse(init.body)); return new Response("{}", { status: 200 }); }
     return fetchReal(url, init);

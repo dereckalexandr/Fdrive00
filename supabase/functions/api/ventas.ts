@@ -21,6 +21,8 @@ import {
 } from "./ventas-core.js";
 import { whatsappOp } from "./whatsapp.ts";
 import { finanzasOp } from "./finanzas.ts";
+import { PLATAFORMAS, validarVinculo, validarImportacion, excedePresupuesto, errorLegible } from "./ads-core.js";
+import { estadoConexion, listarExternas, configurado as adsConfigurado, sincronizarCampanias } from "./ads.ts";
 import { googleConfigurado, crearVisitaGoogle, moverVisitaGoogle, cancelarVisitaGoogle } from "./google-calendar.ts";
 import { tramosEfectivos, calcularProduccion } from "./comisiones-core.js";
 import { enviarAviso, enSegundoPlano, correoActivo, enviarInvitacionVisita } from "./correo.ts";
@@ -1100,7 +1102,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       const ventas = new Map<string, { monto: number }>(cierres.map((c: any) => [c.lead_id, { monto: Number(c.precio_final) }]));
       return { leads, ventas };
     }
-    const conMetricas = (camps: any[], base: { leads: any[]; ventas: Map<string, any> }) => camps.map((c) => ({ ...c, folio: folioCampania(c.numero), metricas: metricasCampania(c, base.leads, base.ventas) }));
+    const conMetricas = (camps: any[], base: { leads: any[]; ventas: Map<string, any> }) => camps.map((c) => ({ ...c, folio: folioCampania(c.numero), metricas: metricasCampania(c, base.leads, base.ventas), excedePresupuesto: !!c.externo_id && excedePresupuesto(c) }));
     async function cargarCampania(id: string) {
       const { data, error } = await scoped(sb.from("campanias").select("*").eq("id", id)).maybeSingle();
       if (error) throw error;
@@ -1194,6 +1196,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       if (!c) return err("no_existe", 404);
       const tr = validarTransicionCampania(c.estado, "resultados");
       if (!tr.ok) return err(tr.error!);
+      if (c.externo_id) return err("resultados_automaticos", 409); // vinculada a Meta o Google: los números vienen de la plataforma
       const r = validarResultadosCampania(body.datos, c.presupuesto_aprobado);
       if (!r.ok) return err(r.error!);
       const { data, error } = await sb.from("campanias").update({ ...r.value, actualizado_en: new Date().toISOString() }).eq("id", c.id).select().single();
@@ -1212,6 +1215,90 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       if (error) return fallar(error);
       await audit(ctx.actor, fin ? "campania.finalizar" : "campania.cancelar", "campania", c.id, { numero: c.numero });
       return json(await campaniaDetalle(data));
+    }
+
+    /* ----- plataformas de anuncios (Meta y Google Ads): el CRM lee el gasto y los resultados de las campañas vinculadas ----- */
+    if (op.startsWith("marketing.ads.")) {
+      if (!gestiona && !esSupervisor) return err("forbidden", 403);
+      const plataforma = String(body.plataforma ?? "");
+      const yaVinculada = async (plat: string, externoId: string) => {
+        const { data } = await sb.from("campanias").select("id, nombre, numero, plataforma, externo_id");
+        return (data ?? []).find((c: any) => c.plataforma === plat && c.externo_id === externoId) || null;
+      };
+      /** La campaña externa tal como la ve la plataforma (se confirma que existe y se toma su nombre). */
+      const buscarExterna = async (plat: string, externoId: string) => {
+        if (!adsConfigurado(plat)) return { error: err("ads_no_configurado", 503) };
+        try { const lista = await listarExternas(plat); const e = lista.find((x: any) => x.id === externoId); return e ? { externa: e } : { error: err("externo_no_existe", 404) }; }
+        catch (e) { return { error: json({ error: "ads_error", detalle: errorLegible(plat, e) }, 502) }; }
+      };
+
+      if (op === "marketing.ads.estado") return json({ plataformas: await Promise.all(PLATAFORMAS.map((p) => estadoConexion(p.id))), puedeGestionar: gestiona || esSupervisor });
+
+      if (op === "marketing.ads.externas") {
+        if (!PLATAFORMAS.some((p) => p.id === plataforma)) return err("plataforma_invalida");
+        if (!adsConfigurado(plataforma)) return err("ads_no_configurado", 503);
+        let lista: any[];
+        try { lista = await listarExternas(plataforma); } catch (e) { return json({ error: "ads_error", detalle: errorLegible(plataforma, e) }, 502); }
+        const { data } = await sb.from("campanias").select("id, nombre, numero, plataforma, externo_id");
+        const vinc = (data ?? []).filter((c: any) => c.plataforma === plataforma && c.externo_id);
+        return json({ plataforma, campanias: lista.map((e: any) => { const v = vinc.find((c: any) => c.externo_id === e.id); return { ...e, vinculada: v ? { id: v.id, nombre: v.nombre, folio: folioCampania(v.numero) } : null }; }) });
+      }
+
+      // Vincular, importar y desvincular cambian los datos de la campaña: solo Marketing (igual que editar una campaña).
+      if (["marketing.ads.vincular", "marketing.ads.importar", "marketing.ads.desvincular"].includes(op) && !gestiona) return err("forbidden", 403);
+
+      if (op === "marketing.ads.vincular") {
+        const c = await cargarCampania(String(body.id ?? ""));
+        if (!c) return err("no_existe", 404);
+        if (c.estado === "cancelada") return err("campania_estado_invalido");
+        const v = validarVinculo(body);
+        if (!v.ok) return err(v.error!);
+        const otra = await yaVinculada(v.value.plataforma, v.value.externo_id);
+        if (otra && otra.id !== c.id) return err("externo_ya_vinculado", 409);
+        const b = await buscarExterna(v.value.plataforma, v.value.externo_id);
+        if (b.error) return b.error;
+        const { error } = await sb.from("campanias").update({ ...v.value, externo: { nombre: b.externa!.nombre, estado: b.externa!.estado }, sync_error: null, actualizado_en: new Date().toISOString() }).eq("id", c.id);
+        if (error) return fallar(error);
+        await audit(ctx.actor, "campania.vincular", "campania", c.id, { numero: c.numero, plataforma: v.value.plataforma, externo_id: v.value.externo_id });
+        await sincronizarCampanias(sb, { id: c.id });
+        return json(await campaniaDetalle((await cargarCampania(c.id))!));
+      }
+
+      if (op === "marketing.ads.importar") {
+        const local = await localParaCrear();
+        if (!local) return err("sin_local");
+        const v0 = validarVinculo(body);
+        if (!v0.ok) return err(v0.error!);
+        if (await yaVinculada(v0.value.plataforma, v0.value.externo_id)) return err("externo_ya_vinculado", 409);
+        const b = await buscarExterna(v0.value.plataforma, v0.value.externo_id);
+        if (b.error) return b.error;
+        const hoy = new Date().toLocaleDateString("en-CA", { timeZone: "America/Santiago" });
+        const v = validarImportacion(body, b.externa, hoy);
+        if (!v.ok) return err(v.error!);
+        const { plataforma: plat, externo_id, ...campos } = v.value;
+        const ins = await sb.from("campanias").insert({ ...campos, local_id: local, plataforma: plat, externo_id, externo: { nombre: b.externa!.nombre, estado: b.externa!.estado }, creado_por: userName }).select().single();
+        if (ins.error) return fallar(ins.error);
+        await audit(ctx.actor, "campania.importar", "campania", ins.data.id, { numero: ins.data.numero, plataforma: plat, externo_id });
+        await sincronizarCampanias(sb, { id: ins.data.id });
+        return json(await campaniaDetalle((await cargarCampania(ins.data.id))!));
+      }
+
+      if (op === "marketing.ads.desvincular") {
+        const c = await cargarCampania(String(body.id ?? ""));
+        if (!c) return err("no_existe", 404);
+        if (!c.externo_id) return err("sin_vinculo", 409);
+        const { error } = await sb.from("campanias").update({ plataforma: null, externo_id: null, externo: {}, sync_en: null, sync_error: null, actualizado_en: new Date().toISOString() }).eq("id", c.id);
+        if (error) return fallar(error);
+        await audit(ctx.actor, "campania.desvincular", "campania", c.id, { numero: c.numero, plataforma: c.plataforma, externo_id: c.externo_id });
+        return json(await campaniaDetalle((await cargarCampania(c.id))!));
+      }
+
+      if (op === "marketing.ads.sync") {
+        const id = body.id ? String(body.id) : undefined;
+        if (id && !(await cargarCampania(id))) return err("no_existe", 404);
+        return json({ resumen: await sincronizarCampanias(sb, { id, local: localId }) });
+      }
+      return err("unknown_op");
     }
 
     /* ----- calendario de contenido ----- */

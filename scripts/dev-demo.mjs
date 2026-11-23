@@ -8,7 +8,7 @@
 //   Jefe Local 12.345.678-5 · Ejecutivo 6.000.000-K · Tasador 5.555.555-9 · Inspector 12.000.000-4
 //   Validador 13.000.000-2 · Anunciante 14.000.000-0 · Marketing 10.000.013-K
 import { createServer as crearHttp } from "node:http";
-import { iniciarFuncion, api, nuevaIp, loginAdmin, crm, manejar, db, boostr, ADMIN_EMAIL, ADMIN_PW } from "../tests/helpers/api-env.mjs";
+import { iniciarFuncion, api, nuevaIp, loginAdmin, crm, manejar, db, boostr, ads, entorno, ADMIN_EMAIL, ADMIN_PW } from "../tests/helpers/api-env.mjs";
 
 const CLAVE = "Prueba12345";
 const PUERTO_API = 54321;
@@ -34,6 +34,18 @@ await crear("insp", "Ivo Inspector", "12.000.000-4", ["inspector"]);
 await crear("val", "Vera Validadora", "13.000.000-2", ["validador"]);
 await crear("anu", "Ana Anunciante", "14.000.000-0", ["anunciante"]);
 await crear("mkt", "Marta Marketing", "10.000.013-K", ["marketing"]);
+
+// Meta Ads y Google Ads simulados (la demo no sale a internet): una cuenta conectada con algunas campañas, para ver Marketing → Campañas.
+Object.assign(entorno, { META_AD_ACCOUNT_ID: "act_100200300", GOOGLE_ADS_DEVELOPER_TOKEN: "demo", GOOGLE_ADS_CUSTOMER_ID: "123-456-7890", GOOGLE_ADS_REFRESH_TOKEN: "demo", GOOGLE_CLIENT_ID: "demo", GOOGLE_CLIENT_SECRET: "demo" });
+ads.meta.campanias = [
+  { id: "120200000001", name: "SUV usados · Santiago", status: "ACTIVE", effective_status: "ACTIVE" },
+  { id: "120200000002", name: "Retargeting visitantes del sitio", status: "ACTIVE", effective_status: "ACTIVE" },
+  { id: "120200000003", name: "Verano 2026 (pausada)", status: "PAUSED", effective_status: "PAUSED" },
+];
+ads.meta.insights["120200000001"] = { spend: "238500", reach: "41200", impressions: "96000", clicks: "1480", actions: [{ action_type: "lead", value: "17" }, { action_type: "onsite_conversion.messaging_conversation_started_7d", value: "9" }] };
+ads.meta.insights["120200000002"] = { spend: "86400", reach: "12800", impressions: "31000", clicks: "420", actions: [{ action_type: "lead", value: "4" }] };
+ads.google.campanias = [{ id: "7700110022", name: "Búsqueda: autos usados Las Condes", status: "ENABLED" }, { id: "7700110033", name: "Performance Max inventario", status: "ENABLED" }];
+ads.google.metricas["7700110022"] = { costMicros: 154_300_000_000, impressions: 18400, clicks: 612, conversions: 11 };
 
 // Patentes de ejemplo para la consulta de datos por patente (la API real está simulada).
 boostr.respuestas.GPDD74 = { status: "success", data: { plate: "GPDD74", dv: "8", make: "SUBARU", model: "NEW WRX S AWD CVT 2.0T", year: 2014, type: "AUTOMOVIL", engine: "H983322" } };

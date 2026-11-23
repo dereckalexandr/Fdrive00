@@ -22,6 +22,7 @@ import { limiteDiario, limiteWeb } from "./patentes-core.js";
 import { publicOp } from "./publico.ts";
 import { correrAlertas } from "./alertas.ts";
 import { webhookWhatsapp } from "./whatsapp.ts";
+import { sincronizarCampanias } from "./ads.ts";
 
 const sb = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -606,6 +607,15 @@ Deno.serve(async (req) => {
       if (esperado.length < 16 || recibido.length !== esperado.length || !safeEqual(new TextEncoder().encode(recibido), new TextEncoder().encode(esperado))) return json({ error: "unauthorized" }, 401);
       try { return json({ ok: true, ...(await correrAlertas({ sb, rolePermOverrides, audit })) }); }
       catch (e) { console.error("cronAlertas:", e); return json({ error: "server_error", detalle: String((e as any)?.message ?? e).slice(0, 200) }, 500); }
+    }
+
+    // Tarea programada (pg_cron): lee de Meta y Google Ads el gasto y los resultados de las campañas vinculadas. Solo con CRON_SECRET.
+    if (action === "cronAds") {
+      const esperado = Deno.env.get("CRON_SECRET") ?? "";
+      const recibido = String(body?.secreto ?? "");
+      if (esperado.length < 16 || recibido.length !== esperado.length || !safeEqual(new TextEncoder().encode(recibido), new TextEncoder().encode(esperado))) return json({ error: "unauthorized" }, 401);
+      try { return json({ ok: true, resumen: await sincronizarCampanias(sb) }); }
+      catch (e) { console.error("cronAds:", e); return json({ error: "server_error", detalle: String((e as any)?.message ?? e).slice(0, 200) }, 500); }
     }
 
     /* ----- autenticación ----- */
