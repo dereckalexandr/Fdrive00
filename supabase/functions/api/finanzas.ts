@@ -13,6 +13,7 @@ import { validarArchivo } from "./validaciones-core.js";
 import { conciliar, categoriaSugerida, leerFecha } from "./conciliacion-core.js";
 import { etiquetaCuenta, medioNombre } from "./pagos-core.js";
 import { armarLiquidacion } from "./liquidacion-core.js";
+import { armarInforme, periodoAnterior } from "./informe-core.js";
 import { validarTrabajador, armarNomina, parametrosNomina, CONCEPTOS_NOMINA, montoConcepto, VARIABLES_VACIAS } from "./nomina-core.js";
 
 export type FinCtx = {
@@ -439,6 +440,47 @@ export async function finanzasOp(h: FinCtx, op: string, body: any): Promise<Resp
     }
 
     if (op === "fin.categorias") return json({ categorias: CATEGORIAS_FIN, puedeEditar });
+
+    /**
+     * Informe del mes (o del año) para el dueño: junta lo que calculan las demás pestañas (mismos números), lo compara con el período
+     * anterior y lista lo que falta resolver. La pantalla lo convierte en PDF.
+     */
+    if (op === "fin.informe") {
+      const hoy = hoyCL();
+      const periodoTxt = String(body.periodo || hoy.slice(0, 7));
+      if (!periodo(periodoTxt)) return err("mes_invalido");
+      const sub = async (o: string, b: any) => {
+        const r = await finanzasOp(h, o, { ...body, ...b });
+        if (!r.ok) { const e = await r.json().catch(() => ({})); throw Object.assign(new Error(e.error || "error"), { code: e.error }); }
+        return await r.json();
+      };
+      const esMes = periodoTxt.length === 7;
+      const [resumen, resumenAnterior, rentabilidad, gastos, conc] = await Promise.all([
+        sub("fin.resumen", { periodo: periodoTxt }), sub("fin.resumen", { periodo: periodoAnterior(periodoTxt) }),
+        sub("fin.rentabilidad", { periodo: periodoTxt }), sub("fin.gastos", { hasta: esMes ? periodoTxt : `${periodoTxt}-12`, meses: 1 }),
+        sub("fin.conciliaciones", {}),
+      ]);
+      let fijos = 0; let nomina: any = null;
+      if (esMes) {
+        try { fijos = (await sub("fin.fijos", { mes: periodoTxt })).pendientes.length; } catch { fijos = 0; }
+        try {
+          const n = await sub("fin.nomina", { mes: periodoTxt });
+          const activos = (n.trabajadores || []).filter((t: any) => t.activo).length;
+          nomina = { aplica: activos > 0 && periodoTxt <= hoy.slice(0, 7), guardada: !!n.nomina, trabajadores: activos };
+        } catch { nomina = null; }
+      }
+      const emp = await sb.from("kv_store").select("value").eq("key", "empresa::datos").maybeSingle();
+      let empresa: any = {};
+      try { empresa = emp.data && emp.data.value ? JSON.parse(emp.data.value) : {}; } catch { empresa = {}; }
+      let localNombre = "";
+      if (local) { const { data: l } = await sb.from("locales").select("nombre").eq("id", local).maybeSingle(); localNombre = (l && l.nombre) || ""; }
+      const informe = armarInforme({
+        periodo: periodoTxt, hoy, empresa: { razonSocial: empresa.razon_social || "", rut: empresa.rut || "", local: localNombre },
+        resumen, resumenAnterior, rentabilidad, sinRespaldo: gastos.sinRespaldo, conciliaciones: conc.conciliaciones, fijosPendientes: fijos, nomina,
+      });
+      await h.audit(h.actor, "finanzas.informe", "finanzas", periodoTxt, { periodo: periodoTxt });
+      return json({ informe });
+    }
 
     /* ================= Nómina ================= */
     const esMesValido = (m: any) => /^\d{4}-(0[1-9]|1[0-2])$/.test(String(m || ""));

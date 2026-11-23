@@ -12,6 +12,7 @@ import React, { useState, useMemo, useEffect } from "react";
 import { InputDinero } from "./campo-dinero.jsx";
 import { Nomina } from "./crm-nomina.jsx";
 import { Conciliacion } from "./crm-conciliacion.jsx";
+import { buildInformeMensualPdf } from "./pdf-report.js";
 import {
   CATEGORIAS_FIN, DOCUMENTOS_FIN, MEDIOS_FIN, categoriaFin, categoriaConVehiculo, validarMovimiento, movimientosCsv, claveDe,
   categoriasAgrupadas, GRUPOS_FIN, MAX_ARCHIVOS_FIN, faltaRespaldo,
@@ -112,9 +113,26 @@ function Fila({ texto, monto, fuerte, sangria, negativo }) {
 }
 
 /* ================= Resumen ================= */
+/** Genera y descarga el informe financiero del período (mes o año) en PDF. */
+async function descargarInforme(api, periodo) {
+  const { informe } = await api("fin.informe", { periodo });
+  const bytes = buildInformeMensualPdf(informe, { fmt: clpBase });
+  const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+  const a = document.createElement("a");
+  a.href = url; a.download = `Informe-financiero_${periodo}.pdf`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 3000);
+}
+
 function Resumen({ api, irA }) {
   const [per, setPer] = useState(hoyCL().slice(0, 7));
   const { cargando, error, datos } = useCarga(() => api("fin.resumen", { periodo: per }), [api, per]);
+  const [informe, setInforme] = useState({ ocupado: false, error: "" });
+  const bajarInforme = async () => {
+    setInforme({ ocupado: true, error: "" });
+    try { await descargarInforme(api, per); setInforme({ ocupado: false, error: "" }); }
+    catch (e) { setInforme({ ocupado: false, error: mensajeError(e) }); }
+  };
   if (cargando && !datos) return <Cargando />;
   if (error && !datos) return <Aviso>{error}</Aviso>;
   const d = datos;
@@ -124,6 +142,8 @@ function Resumen({ api, irA }) {
       <div className="flex flex-wrap items-center gap-3">
         <span className="text-sm text-stone-600">Período:</span>
         <SelectorPeriodo valor={per} onCambio={setPer} />
+        <button type="button" onClick={bajarInforme} disabled={informe.ocupado} className={BTN} title="Resumen del período en PDF: cifras clave, resultados, ventas, caja, por cobrar y por pagar, inventario y pendientes">{informe.ocupado ? "Generando…" : `Informe ${per.length === 4 ? "del año" : "del mes"} (PDF)`}</button>
+        {informe.error && <span className="text-sm text-rose-600">{informe.error}</span>}
         {cargando && <span className="text-xs text-stone-400">Actualizando…</span>}
       </div>
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">

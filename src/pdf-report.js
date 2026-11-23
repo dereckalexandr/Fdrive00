@@ -722,6 +722,79 @@ export function buildLiquidacionesPdf(docs, { fmt }) {
   return pdf.build();
 }
 
+/**
+ * Informe financiero del mes (o del año) para el dueño: cifras clave contra el período anterior, estado de resultados, gastos por grupo,
+ * ventas con su margen, caja y bancos, por cobrar y por pagar, inventario y pendientes. Ver armarInforme (informe-core.js).
+ */
+export function buildInformeMensualPdf(d, { fmt: fmtBase }) {
+  const fmt = (n) => (Number(n) < 0 ? `-${fmtBase(-Number(n))}` : fmtBase(n));
+  const pdf = new PdfDoc(`${d.titulo}${d.empresa.razonSocial ? ` · ${d.empresa.razonSocial}` : ""}`);
+  const pct = (v) => (v === null || v === undefined ? "" : `${v > 0 ? "+" : ""}${String(v).replace(".", ",")}% vs ${d.anterior}`);
+  const ant = (v) => (v === null || v === undefined ? "" : `${d.anterior}: ${fmt(v)}`);
+  pdf.title(d.titulo, [d.empresa.rut ? `RUT ${d.empresa.rut}` : "", d.empresa.local ? `Local ${d.empresa.local}` : "", `Generado el ${fechaLarga(d.generado)}`].filter(Boolean).join(" · "), (d.empresa.razonSocial || "DRIVE FUTURO").toUpperCase());
+
+  pdf.sectionBar("Cifras clave");
+  for (const c of d.cifras) pdf.item(c.nombre, c.anterior === null ? "" : pct(c.variacion) || ant(c.anterior), fmt(c.monto));
+  pdf.y -= 4;
+
+  if (d.alertas.length) {
+    pdf.sectionBar(`Pendientes y alertas (${d.alertas.length})`);
+    for (const a of d.alertas) {
+      const lineas = wrapText(`${a.nivel === "alta" ? "[!] " : "- "}${a.texto}`, CONTENT_W - 12, 9.5);
+      pdf.ensure(lineas.length * 12 + 2);
+      lineas.forEach((ln, k) => pdf.text(MARGIN + 6, pdf.y - 10 - k * 12, ln, { size: 9.5, gray: a.nivel === "alta" ? 0.05 : 0.25 }));
+      pdf.y -= lineas.length * 12 + 2;
+    }
+    pdf.y -= 4;
+  }
+
+  const r = d.resultados;
+  pdf.sectionBar("Estado de resultados");
+  pdf.item("Ventas de vehículos", r.anterior ? ant(r.anterior.ingresosVentas) : "", fmt(r.ingresosVentas));
+  pdf.item("Costo de los vehículos vendidos", r.anterior ? ant(r.anterior.costoVentas) : "", fmt(-r.costoVentas));
+  pdf.totalLine("Margen bruto", fmt(r.margenBruto));
+  for (const x of r.otrosIngresos) pdf.item(x.nombre, "", fmt(x.monto));
+  for (const g of r.grupos) pdf.item(g.nombre, g.anterior ? ant(g.anterior) : "", fmt(-g.monto));
+  pdf.totalLine("Resultado del período", fmt(r.resultado), { big: true });
+
+  if (d.ventas.length) {
+    pdf.sectionBar(`Ventas del período (${d.ventas.length})`);
+    pdf.table([{ title: "Venta", w: 66 }, { title: "Vehículo", w: 166 }, { title: "Precio", w: 82, align: "right" }, { title: "Costo", w: 82, align: "right" }, { title: "Margen", w: 111, align: "right" }],
+      d.ventas.map((v) => [v.folio, v.vehiculo, fmt(v.precio), fmt(v.costo), `${fmt(v.margen)}${v.margenPct !== null && v.margenPct !== undefined ? ` (${String(v.margenPct).replace(".", ",")}%)` : ""}`]));
+  }
+
+  pdf.sectionBar("Caja y bancos");
+  for (const c of d.caja.cuentas) {
+    const u = c.conciliacion;
+    const det = c.tipo !== "banco" ? "" : !u ? "sin conciliar" : u.faltan || u.diferencia ? `conciliación con diferencias (${u.hasta})` : `cuadrada al ${u.hasta}`;
+    pdf.item(c.nombre.length > 52 ? `${c.nombre.slice(0, 50)}...` : c.nombre, det, fmt(c.saldo));
+  }
+  pdf.totalLine("Saldo total", fmt(d.caja.saldoTotal));
+  pdf.item("Entró en el período", "", fmt(d.caja.entradas));
+  pdf.item("Salió en el período", "", fmt(-d.caja.salidas));
+  pdf.totalLine("Flujo neto del período", fmt(d.caja.neto));
+
+  pdf.sectionBar("Por cobrar y por pagar");
+  pdf.totalLine("Por cobrar (ventas con saldo pendiente)", fmt(d.porCobrar.total), { bold: true });
+  for (const x of d.porCobrar.items.slice(0, 8)) pdf.item(`${x.folio} · ${x.vehiculo}`.slice(0, 60), x.estado === "pendiente" ? "por aprobar" : "", fmt(x.falta));
+  pdf.totalLine("Por pagar (compras, consignaciones y nómina)", fmt(d.porPagar.total), { bold: true });
+  for (const x of d.porPagar.items.slice(0, 8)) pdf.item(`${x.folio} · ${x.vehiculo}`.slice(0, 60), x.tipo === "nomina" ? "nómina" : x.tipo === "consignacion" ? "consignación" : "compra", fmt(x.falta));
+
+  pdf.sectionBar("Inventario");
+  pdf.item(`Autos propios en stock: ${d.inventario.propios}${d.inventario.consignados ? ` (y ${d.inventario.consignados} consignados)` : ""}`, "invertido", fmt(d.inventario.invertido));
+  pdf.item("Margen esperado si se venden a precio de lista", "", fmt(d.inventario.margenEsperado));
+  if (d.inventario.masAntiguos.length) {
+    pdf.y -= 4;
+    pdf.text(MARGIN + 6, pdf.y - 8, "Más tiempo en stock", { size: 7.5, gray: 0.5 });
+    pdf.y -= 12;
+    for (const v of d.inventario.masAntiguos) pdf.item(v.vehiculo.slice(0, 60), `${v.dias} días`, fmt(v.invertido));
+  }
+  pdf.y -= 12;
+
+  pdf.paragraph("", "Montos tal como se registraron en el CRM (con IVA si el documento lo incluye). Es un informe de gestión: la contabilidad oficial y las declaraciones de impuestos las lleva el contador.");
+  return pdf.build();
+}
+
 /** Nombre de archivo seguro: Inspeccion_TTHY51_2026-10-06.pdf */
 export function pdfFileName(prefix, record) {
   const id = String(record.inscripcion || record.patente || "").replace(/[^A-Za-z0-9]+/g, "") || "sin-patente";
