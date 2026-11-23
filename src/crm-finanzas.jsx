@@ -10,6 +10,7 @@
  */
 import React, { useState, useMemo } from "react";
 import { InputDinero } from "./campo-dinero.jsx";
+import { Nomina } from "./crm-nomina.jsx";
 import {
   CATEGORIAS_FIN, DOCUMENTOS_FIN, MEDIOS_FIN, categoriaFin, categoriaConVehiculo, validarMovimiento, movimientosCsv, claveDe,
 } from "../supabase/functions/api/finanzas-core.js";
@@ -107,7 +108,7 @@ function Resumen({ api, irA }) {
         <Cifra titulo="Saldo en bancos y caja" valor={d.saldoTotal} detalle={<button type="button" onClick={() => irA("bancos")} className="hover:underline">Ver por cuenta →</button>} />
         <Cifra titulo={`Resultado ${per.length === 4 ? "del año" : "del mes"}`} valor={r.resultado} detalle={`${r.unidades} ${r.unidades === 1 ? "venta" : "ventas"} · margen bruto ${clp(r.margenBruto)}`} />
         <Cifra titulo="Por cobrar" valor={d.totalPorCobrar} detalle={`${d.porCobrar.length} ${d.porCobrar.length === 1 ? "venta" : "ventas"} con saldo`} tono="text-sky-800" />
-        <Cifra titulo="Por pagar" valor={d.totalPorPagar} detalle={`${d.porPagar.length} a dueños de autos`} tono="text-amber-800" />
+        <Cifra titulo="Por pagar" valor={d.totalPorPagar} detalle={`${d.porPagar.length} ${d.porPagar.length === 1 ? "pendiente" : "pendientes"}: dueños de autos y nómina`} tono="text-amber-800" />
       </div>
       <div className="grid lg:grid-cols-2 gap-5">
         <Tarjeta titulo={`Estado de resultados · ${nombreMes(per)}`} ayuda="Lo ganado en el período: las ventas aprobadas (precio menos costo del auto y sus gastos), más otros ingresos y menos los gastos. Los aportes, préstamos y retiros del dueño no son resultado.">
@@ -144,7 +145,7 @@ function Resumen({ api, irA }) {
           {d.porPagar.length === 0 ? <p className="text-sm text-stone-500">Nada pendiente.</p> : (
             <div className="text-sm divide-y divide-stone-100">
               {d.porPagar.map((x) => (
-                <div key={x.id} className="flex justify-between gap-3 py-1.5"><span><span className="font-mono text-xs text-stone-500 mr-2">{x.folio}</span>{x.vehiculo}<span className="text-xs text-stone-500 ml-2">{x.tipo === "consignacion" ? "consignación" : "compra"}</span></span><span className="font-medium whitespace-nowrap">{clp(x.falta)}</span></div>
+                <div key={x.id} className="flex justify-between gap-3 py-1.5"><span><span className="font-mono text-xs text-stone-500 mr-2">{x.folio}</span>{x.vehiculo}<span className="text-xs text-stone-500 ml-2">{x.tipo === "consignacion" ? "consignación" : x.tipo === "nomina" ? "nómina" : "compra"}</span></span><span className="font-medium whitespace-nowrap">{clp(x.falta)}</span></div>
               ))}
             </div>
           )}
@@ -493,13 +494,14 @@ function Rentabilidad({ api }) {
 }
 
 export function ModuloFinanzas({ api }) {
-  const [tab, setTab] = useGuardado("finanzas", "resumen", ["resumen", "movimientos", "bancos", "rentabilidad"]);
+  const [tab, setTab] = useGuardado("finanzas", "resumen", ["resumen", "movimientos", "bancos", "nomina", "rentabilidad"]);
   return (
     <div className="flex flex-col gap-5">
-      <Pestanas valor={tab} onCambio={setTab} opciones={[["resumen", "Resumen"], ["movimientos", "Movimientos"], ["bancos", "Bancos y caja"], ["rentabilidad", "Rentabilidad"]]} />
+      <Pestanas valor={tab} onCambio={setTab} opciones={[["resumen", "Resumen"], ["movimientos", "Movimientos"], ["bancos", "Bancos y caja"], ["nomina", "Nómina"], ["rentabilidad", "Rentabilidad"]]} />
       {tab === "resumen" && <Resumen api={api} irA={setTab} />}
       {tab === "movimientos" && <Movimientos api={api} />}
       {tab === "bancos" && <BancosYCaja api={api} />}
+      {tab === "nomina" && <Nomina api={api} />}
       {tab === "rentabilidad" && <Rentabilidad api={api} />}
     </div>
   );

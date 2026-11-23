@@ -10,6 +10,7 @@ import {
   POR_DEPOSITAR, CATEGORIAS_FIN,
 } from "./finanzas-core.js";
 import { etiquetaCuenta, medioNombre } from "./pagos-core.js";
+import { validarTrabajador, armarNomina, parametrosNomina, CONCEPTOS_NOMINA, montoConcepto, VARIABLES_VACIAS } from "./nomina-core.js";
 
 export type FinCtx = {
   sb: any;
@@ -24,6 +25,8 @@ export type FinCtx = {
   localId: string | null;
   localParaCrear: () => Promise<string | null>;
   porIds: (tabla: string, ids: string[]) => Promise<any[]>;
+  /** Comisiones del mes (ventas, compras, consignaciones e inspecciones) por id de usuario, según el CRM. */
+  comisionesDelMes: (mes: string) => Promise<Record<string, number>>;
 };
 
 const hoyCL = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Santiago" });
@@ -186,6 +189,15 @@ export async function finanzasOp(h: FinCtx, op: string, body: any): Promise<Resp
       return { id: c.id, folio: folio("CMP", c.numero), tipo: "compra", vehiculo: nombreVeh({ ...(c.vehiculo || {}), patente: c.patente }), total, pagado, falta: total - pagado };
     }).filter((x: any) => x.falta > 0);
     // Consignaciones vendidas: al dueño se le debe su precio piso, menos lo ya registrado como «Pago al dueño de un auto consignado».
+    // Nóminas guardadas con pagos aún sin registrar (sueldos, Previred, impuesto único).
+    const nominas = await leer(scoped(sb.from("fin_nominas").select("*")));
+    for (const n of nominas) {
+      for (const c of CONCEPTOS_NOMINA) {
+        const total = montoConcepto(n.totales || {}, c.id);
+        const pagado = movs.some((m) => m.origen === "manual" && m.nomina_id === n.id && m.nomina_concepto === c.id);
+        if (total > 0 && !pagado) porPagar.push({ id: `${n.id}-${c.id}`, folio: `Nómina ${n.mes}`, tipo: "nomina", vehiculo: c.nombre, total, pagado: 0, falta: total });
+      }
+    }
     for (const c of consigs) {
       const pagado = movs.filter((m) => m.origen === "manual" && m.categoria === "pago_consignante" && m.vehiculo_id && m.vehiculo_id === c.vehiculo_id).reduce((s, m) => s + Number(m.monto), 0);
       const total = Number(c.precio_piso) || 0;
@@ -208,7 +220,8 @@ export async function finanzasOp(h: FinCtx, op: string, body: any): Promise<Resp
       for (const [clave, s] of Object.entries(saldos) as any) if (!cuentasConSaldo.some((c) => c.clave === clave) && s.saldo !== 0) cuentasConSaldo.push({ clave, nombre: "Otra cuenta", tipo: "banco", activa: false, local_id: null, ...s });
       const gastos = gastosPorVehiculo(movs);
       const ventas = await ventasDelPeriodo(per.desde, per.hasta, gastos);
-      const manualesPer = movs.filter((m) => m.origen === "manual" && m.fecha >= per.desde && m.fecha <= per.hasta);
+      // Un gasto cuenta en el mes al que corresponde (la nómina de octubre pagada en noviembre es gasto de octubre).
+      const manualesPer = movs.filter((m) => { const f = m.mes_resultado ? `${m.mes_resultado}-15` : m.fecha; return m.origen === "manual" && f >= per.desde && f <= per.hasta; });
       const resultados = estadoResultados({ ventas: ventas.map((v: any) => ({ precio: v.precio, costo: v.costo })), manuales: manualesPer });
       const flujo = flujoMensual(movs.filter((m) => m.fecha >= `${Number(hoy.slice(0, 4)) - 1}${hoy.slice(4, 7)}-01`));
       const flujoPer = flujoMensual(movs.filter((m) => m.fecha >= per.desde && m.fecha <= per.hasta));
@@ -329,6 +342,143 @@ export async function finanzasOp(h: FinCtx, op: string, body: any): Promise<Resp
     }
 
     if (op === "fin.categorias") return json({ categorias: CATEGORIAS_FIN, puedeEditar });
+
+    /* ================= Nómina ================= */
+    const esMesValido = (m: any) => /^\d{4}-(0[1-9]|1[0-2])$/.test(String(m || ""));
+
+    /** Trabajadores (fichas) del local y personas del equipo del CRM que aún no tienen ficha. */
+    if (op === "fin.trabajadores") {
+      const loc = local ?? (await h.localParaCrear());
+      const trabajadores = loc ? await leer(sb.from("fin_trabajadores").select("*").eq("local_id", loc)) : [];
+      const usuarios = loc ? await leer(sb.from("usuarios").select("id, nombre, rut, activo, local_id").eq("local_id", loc)) : [];
+      const conFicha = new Set(trabajadores.map((t: any) => t.usuario_id).filter(Boolean));
+      return json({
+        trabajadores: trabajadores.sort((a: any, b: any) => Number(b.activo) - Number(a.activo) || a.nombre.localeCompare(b.nombre)),
+        equipo: usuarios.filter((u: any) => u.activo && !conFicha.has(u.id)).map((u: any) => ({ id: u.id, nombre: u.nombre, rut: u.rut })),
+        puedeEditar,
+      });
+    }
+
+    if (op === "fin.trabajador_guardar") {
+      if (!puedeEditar) return err("forbidden", 403);
+      const v = validarTrabajador(body.trabajador);
+      if (!v.ok) return err(v.error!);
+      const ahora = new Date().toISOString();
+      if (body.id) {
+        const { data: t } = await sb.from("fin_trabajadores").select("*").eq("id", String(body.id)).maybeSingle();
+        if (!t || (local && t.local_id !== local)) return err("no_existe", 404);
+        const { data, error } = await sb.from("fin_trabajadores").update({ ...v.value, actualizado_en: ahora }).eq("id", t.id).select().single();
+        if (error) return fallo(error);
+        await h.audit(h.actor, "finanzas.trabajador_editar", "fin_trabajador", t.id, { nombre: data.nombre, sueldoBase: data.ficha.sueldoBase, activo: data.activo });
+        return json({ trabajador: data });
+      }
+      const loc = await h.localParaCrear();
+      if (!loc) return err("sin_local");
+      const { data, error } = await sb.from("fin_trabajadores").insert({ ...v.value, local_id: loc, creado_en: ahora, actualizado_en: ahora }).select().single();
+      if (error) return fallo(error);
+      await h.audit(h.actor, "finanzas.trabajador_crear", "fin_trabajador", data.id, { nombre: data.nombre, sueldoBase: data.ficha.sueldoBase });
+      return json({ trabajador: data });
+    }
+
+    /** Pagos registrados de una nómina, por concepto. */
+    async function pagosNomina(nominaId: string) {
+      const movs = await leer(sb.from("fin_movimientos").select("*").eq("nomina_id", nominaId).eq("estado", "vigente"));
+      const out: Record<string, any> = {};
+      for (const c of CONCEPTOS_NOMINA) {
+        const suyos = movs.filter((m: any) => m.nomina_concepto === c.id);
+        out[c.id] = suyos.length ? { pagado: true, fecha: suyos[0].fecha, monto: suyos.reduce((s: number, m: any) => s + Number(m.monto), 0), cuenta_id: suyos[0].cuenta_id, movimientos: suyos.length } : { pagado: false };
+      }
+      return out;
+    }
+
+    /** La nómina del mes: la guardada o, si no hay, una propuesta con los trabajadores activos y las comisiones del CRM. */
+    if (op === "fin.nomina") {
+      const mes = String(body.mes || "");
+      if (!esMesValido(mes)) return err("mes_invalido");
+      const loc = local ?? (await h.localParaCrear());
+      if (!loc) return err("sin_local");
+      const [nomQ, trabajadores, comisiones] = await Promise.all([
+        leer(sb.from("fin_nominas").select("*").eq("local_id", loc).eq("mes", mes)),
+        leer(sb.from("fin_trabajadores").select("*").eq("local_id", loc)),
+        h.comisionesDelMes(mes).catch(() => ({} as Record<string, number>)),
+      ]);
+      const comisionDe = (t: any) => (t.usuario_id ? Math.round(comisiones[t.usuario_id] || 0) : 0);
+      const sugeridas: Record<string, number> = {};
+      for (const t of trabajadores) sugeridas[t.id] = comisionDe(t);
+      const nomina = nomQ[0] || null;
+      if (nomina) return json({ mes, nomina, pagos: await pagosNomina(nomina.id), trabajadores, comisionesCrm: sugeridas, puedeEditar });
+      const activos = trabajadores.filter((t: any) => t.activo);
+      const propuesta = activos.length ? armarNomina({
+        parametros: parametrosNomina(),
+        filas: activos.map((t: any) => ({ trabajadorId: t.id, nombre: t.nombre, rut: t.rut, ficha: t.ficha, variables: { ...VARIABLES_VACIAS, comisiones: comisionDe(t) } })),
+      }) : null;
+      return json({ mes, nomina: null, propuesta: propuesta && propuesta.ok ? propuesta.value : null, trabajadores, comisionesCrm: sugeridas, puedeEditar });
+    }
+
+    if (op === "fin.nomina_guardar") {
+      if (!puedeEditar) return err("forbidden", 403);
+      const mes = String(body.mes || "");
+      if (!esMesValido(mes) || mes > hoyCL().slice(0, 7)) return err("mes_invalido");
+      const loc = await h.localParaCrear();
+      if (!loc) return err("sin_local");
+      // Los datos fijos salen de la ficha guardada del trabajador; de la pantalla solo vienen las variables del mes.
+      const trabajadores = await leer(sb.from("fin_trabajadores").select("*").eq("local_id", loc));
+      const filasIn: any[] = Array.isArray(body.filas) ? body.filas : [];
+      const filas = [];
+      for (const f of filasIn) {
+        const t = trabajadores.find((x: any) => x.id === f.trabajadorId);
+        if (!t) return err("nomina_filas");
+        filas.push({ trabajadorId: t.id, nombre: t.nombre, rut: t.rut, ficha: t.ficha, variables: f.variables });
+      }
+      const v = armarNomina({ filas, parametros: body.parametros });
+      if (!v.ok) return err(v.error!);
+      const ahora = new Date().toISOString();
+      const existente = (await leer(sb.from("fin_nominas").select("*").eq("local_id", loc).eq("mes", mes)))[0];
+      if (existente) {
+        const pagos = await pagosNomina(existente.id);
+        if (Object.values(pagos).some((p: any) => p.pagado)) return err("fin_nomina_pagada", 409);
+        const { data, error } = await sb.from("fin_nominas").update({ filas: v.value.filas, parametros: v.value.parametros, totales: v.value.totales, actualizado_por: h.userName, actualizado_en: ahora }).eq("id", existente.id).select().single();
+        if (error) return fallo(error);
+        await h.audit(h.actor, "finanzas.nomina_guardar", "fin_nomina", data.id, { mes, costoEmpresa: v.value.totales.costoEmpresa });
+        return json({ nomina: data });
+      }
+      const { data, error } = await sb.from("fin_nominas").insert({ local_id: loc, mes, filas: v.value.filas, parametros: v.value.parametros, totales: v.value.totales, actualizado_por: h.userName, creado_en: ahora, actualizado_en: ahora }).select().single();
+      if (error) return fallo(error);
+      await h.audit(h.actor, "finanzas.nomina_guardar", "fin_nomina", data.id, { mes, costoEmpresa: v.value.totales.costoEmpresa });
+      return json({ nomina: data });
+    }
+
+    /** Registra un pago de la nómina: crea los egresos (uno por trabajador para los sueldos; uno para Previred; uno para el impuesto). */
+    if (op === "fin.nomina_pagar") {
+      if (!puedeEditar) return err("forbidden", 403);
+      const mes = String(body.mes || "");
+      const concepto = CONCEPTOS_NOMINA.find((c) => c.id === body.concepto);
+      if (!esMesValido(mes) || !concepto) return err("nomina_filas");
+      const loc = await h.localParaCrear();
+      if (!loc) return err("sin_local");
+      const n = (await leer(sb.from("fin_nominas").select("*").eq("local_id", loc).eq("mes", mes)))[0];
+      if (!n) return err("nomina_sin_guardar", 409);
+      const pagos = await pagosNomina(n.id);
+      if (pagos[concepto.id].pagado) return err("fin_nomina_pagada", 409);
+      const cuentaId = String(body.cuentaId || "") || null;
+      const base = { tipo: "egreso", categoria: "sueldos", fecha: String(body.fecha || ""), cuentaId, medio: cuentaId ? "transferencia" : "efectivo", documentoTipo: "comprobante" };
+      const items = concepto.id === "sueldos"
+        ? (n.filas || []).filter((f: any) => f.resultado.liquido > 0).map((f: any) => ({ ...base, monto: f.resultado.liquido, descripcion: `Sueldo líquido ${mes} · ${f.nombre}`, contraparte: f.nombre }))
+        : [{ ...base, monto: montoConcepto(n.totales, concepto.id), descripcion: `${concepto.nombre} · nómina ${mes}`, contraparte: concepto.id === "previred" ? "Previred" : "Servicio de Impuestos Internos" }];
+      const filas: any[] = [];
+      for (const it of items) {
+        if (!(it.monto > 0)) continue;
+        const v = validarMovimiento(it, { hoy: hoyCL() });
+        if (!v.ok) return err(v.error!);
+        filas.push({ ...v.value, local_id: loc, estado: "vigente", registrado_por: h.userName, nomina_id: n.id, nomina_concepto: concepto.id, mes_resultado: mes });
+      }
+      if (filas.length === 0) return err("fin_monto");
+      const ahora = new Date().toISOString();
+      const { error } = await sb.from("fin_movimientos").insert(filas.map((f) => ({ ...f, creado_en: ahora, actualizado_en: ahora })));
+      if (error) return fallo(error);
+      await h.audit(h.actor, "finanzas.nomina_pagar", "fin_nomina", n.id, { mes, concepto: concepto.id, monto: filas.reduce((s, f) => s + f.monto, 0), movimientos: filas.length });
+      return json({ ok: true, movimientos: filas.length });
+    }
     return err("unknown_op");
   } catch (e) {
     return fallo(e);

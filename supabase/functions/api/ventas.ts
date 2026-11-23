@@ -596,7 +596,22 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
   /* ---------- inventario ---------- */
   /* ---- Finanzas: el Administrador registra; el Jefe Local mira lo de su local. ---- */
   if (op.startsWith("fin.")) {
-    return await finanzasOp({ sb, json, err, fallo, audit, actor: ctx.actor, userName, esAdmin: ctx.esAdmin, esSupervisor, localId, localParaCrear, porIds }, op, body);
+    /** Comisiones del mes por persona, con las mismas cuentas de «Ventas» e «Inspecciones» (la nómina las propone). */
+    const comisionesDelMes = async (mes: string) => {
+      const out: Record<string, number> = {};
+      const sumar = async (sub: string, lista: string, total: (x: any) => number) => {
+        try {
+          const r = await ventasOp(ctx, { op: sub, mes, ...(localId ? { localId } : {}) });
+          if (!r.ok) return;
+          const d = await r.json();
+          for (const x of d[lista] ?? []) out[x.id] = (out[x.id] ?? 0) + (Number(total(x)) || 0);
+        } catch { /* sin comisiones de esa fuente */ }
+      };
+      await sumar("comisiones.resumen", "ejecutivos", (x) => x.produccion?.total);
+      await sumar("inspecciones.resumen", "inspectores", (x) => x.produccion?.total);
+      return out;
+    };
+    return await finanzasOp({ sb, json, err, fallo, audit, actor: ctx.actor, userName, esAdmin: ctx.esAdmin, esSupervisor, localId, localParaCrear, porIds, comisionesDelMes }, op, body);
   }
 
   if (op.startsWith("inventario.")) {
