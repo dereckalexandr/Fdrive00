@@ -24,6 +24,7 @@ import { correrAlertas } from "./alertas.ts";
 import { webhookWhatsapp } from "./whatsapp.ts";
 import { sincronizarCampanias } from "./ads.ts";
 import { avisoPaginaMeta, webhookLeadsGoogle } from "./leads-ads.ts";
+import { catalogoGet } from "./catalogo.ts";
 
 const sb = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -573,6 +574,11 @@ Deno.serve(async (req) => {
   if (new URL(req.url).searchParams.has("whatsapp")) {
     try { const deps = { sb, audit, rolePermOverrides }; return await webhookWhatsapp(req, { ...deps, pagina: (payload: any) => avisoPaginaMeta(deps, payload) }); }
     catch (e) { console.error("whatsapp:", e); return new Response("error", { status: 500 }); }
+  }
+  // Catálogo de autos para Meta y fotos de los autos del catálogo (públicos, solo lectura): ?catalogo=meta-vehiculos · ?vfoto=<id>&f=<foto>.
+  if (req.method === "GET" && (new URL(req.url).searchParams.has("catalogo") || new URL(req.url).searchParams.has("vfoto"))) {
+    try { return await catalogoGet(req, sb); }
+    catch (e) { console.error("catalogo:", e); return new Response("error", { status: 500 }); }
   }
   // Formularios de Google Ads: .../functions/v1/api?googleleads=1. Se autentican con la clave del formulario (GOOGLE_ADS_LEAD_KEY), no con sesión.
   if (new URL(req.url).searchParams.has("googleleads")) {

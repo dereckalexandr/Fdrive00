@@ -282,6 +282,31 @@ function Resumen({ api, version, onAbrir }) {
 /* =========================================================
    MÓDULO
 ========================================================= */
+/** Catálogo de autos para Meta: las direcciones que se pegan en Commerce Manager y qué autos entran. */
+function CatalogoMeta({ api, version }) {
+  const { cargando, datos } = useCarga(() => api("anuncios.catalogo").catch(() => null), [api, version]);
+  const [ver, setVer] = useState(false);
+  const [copiado, setCopiado] = useState("");
+  if (cargando && !datos) return null;
+  if (!datos) return null;
+  const copiar = (t) => { try { navigator.clipboard.writeText(t); setCopiado(t); setTimeout(() => setCopiado(""), 2000); } catch (e) { /* sin portapapeles */ } };
+  return (
+    <Tarjeta titulo="Catálogo de autos para Meta" ayuda="Meta lee solo esta dirección (cada hora o cada día) y arma anuncios con cada auto disponible: los vendidos o reservados salen solos. Pégala en Commerce Manager → Catálogo → Fuentes de datos → «Feed programado». Google no ofrece anuncios de autos en Chile.">
+      <p className="text-sm text-stone-700"><strong>{datos.incluidos}</strong> {datos.incluidos === 1 ? "auto entra" : "autos entran"} al catálogo{datos.excluidos.length ? <> · <button type="button" onClick={() => setVer(!ver)} className="text-sky-700 hover:underline">{datos.excluidos.length} no entran</button></> : ""}.</p>
+      {ver && <ul className="text-xs text-stone-600 mt-2 flex flex-col gap-0.5">{datos.excluidos.map((x) => <li key={x.id}>{x.nombre || "Auto"}: <span className="text-amber-700">{x.motivo}</span></li>)}</ul>}
+      {datos.faltaDireccion && <p className="text-xs text-amber-700 mt-2">Falta la dirección de la empresa (domicilio y comuna en «Datos de la empresa»): Meta la pide para mostrar dónde está el auto.</p>}
+      <div className="flex flex-col gap-2 mt-3">
+        {datos.formatos.map((f) => (
+          <div key={f.id} className="flex flex-col gap-1">
+            <span className="text-xs text-stone-500">{f.nombre}{f.id === "meta-vehiculos" ? " · recomendado" : " · si tu país no tiene anuncios de vehículos"}</span>
+            <div className="flex gap-1.5"><input readOnly value={f.url} onFocus={(e) => e.target.select()} className={`${INPUT} !text-xs font-mono`} /><button type="button" onClick={() => copiar(f.url)} className={BTN}>{copiado === f.url ? "Copiado" : "Copiar"}</button><a href={f.url} target="_blank" rel="noreferrer" className={BTN}>Ver</a></div>
+          </div>
+        ))}
+      </div>
+    </Tarjeta>
+  );
+}
+
 export function ModuloAnuncios({ api: apiProp, permisos = [], esAdmin = false }) {
   const puedeGestionar = !esAdmin && permisos.includes("anuncios.gestionar");
   const api = apiProp || apiPorDefecto;
@@ -296,6 +321,7 @@ export function ModuloAnuncios({ api: apiProp, permisos = [], esAdmin = false })
   return (
     <div className="flex flex-col gap-5">
       <Pestanas valor={tab} onCambio={setTab} opciones={opciones} />
+      {tab === "resumen" && <CatalogoMeta api={api} version={version} />}
       {tab === "cola" && <Cola api={api} version={version} puedeGestionar={puedeGestionar} onCreado={(id) => { subir(); setTab("avisos"); setAbierto(id); }} />}
       {tab === "avisos" && <ListaAvisos api={api} version={version} onAbrir={setAbierto} />}
       {tab === "resumen" && <Resumen api={api} version={version} onAbrir={setAbierto} />}

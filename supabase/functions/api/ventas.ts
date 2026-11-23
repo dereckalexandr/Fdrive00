@@ -24,6 +24,7 @@ import { finanzasOp } from "./finanzas.ts";
 import { PLATAFORMAS, validarVinculo, validarImportacion, excedePresupuesto, errorLegible } from "./ads-core.js";
 import { estadoConexion, listarExternas, configurado as adsConfigurado, sincronizarCampanias } from "./ads.ts";
 import { estadoLeadsAds, reintentarLead } from "./leads-ads.ts";
+import { estadoCatalogo } from "./catalogo.ts";
 import { googleConfigurado, crearVisitaGoogle, moverVisitaGoogle, cancelarVisitaGoogle } from "./google-calendar.ts";
 import { tramosEfectivos, calcularProduccion } from "./comisiones-core.js";
 import { enviarAviso, enSegundoPlano, correoActivo, enviarInvitacionVisita } from "./correo.ts";
@@ -1457,6 +1458,11 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
     if (!gestiona && !esSupervisor && !can("anuncios.gestionar")) return err("forbidden", 403);
     const fallar = (e: any) => fallo(e);
     const sinCostoV = ({ costo, ...v }: any) => v;
+
+    /** Catálogo de autos para Meta: direcciones para Commerce Manager y qué autos entran (y por qué no los demás). */
+    if (op === "anuncios.catalogo") {
+      try { return json(await estadoCatalogo(sb)); } catch (e) { return fallar(e); }
+    }
 
     async function cargarAnuncio(id: string) {
       const { data, error } = await scoped(sb.from("anuncios").select("*").eq("id", id)).maybeSingle();
