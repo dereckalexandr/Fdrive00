@@ -8,12 +8,17 @@
  * desde «Movimientos» se le descarga el detalle en CSV.
  * ----------------------------------------------------------------
  */
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { InputDinero } from "./campo-dinero.jsx";
 import { Nomina } from "./crm-nomina.jsx";
 import {
   CATEGORIAS_FIN, DOCUMENTOS_FIN, MEDIOS_FIN, categoriaFin, categoriaConVehiculo, validarMovimiento, movimientosCsv, claveDe,
+  categoriasAgrupadas, GRUPOS_FIN, MAX_ARCHIVOS_FIN, faltaRespaldo,
 } from "../supabase/functions/api/finanzas-core.js";
+import { MAX_BYTES_ARCHIVO } from "../supabase/functions/api/validaciones-core.js";
+import { compressImage, makePhotoId } from "./photos.js";
+import { subirRespaldos, limpiarRespaldos } from "./crm-pagos.jsx";
+import { abrirArchivo } from "./crm-validaciones.jsx";
 import { INPUT, BTN, BTN_PRIMARIO, clp as clpBase, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, useCarga, useGuardado, mensajeError } from "./crm-ui.jsx";
 
 /** Pesos con el signo menos delante ($-350.000 → −$350.000). */
@@ -25,6 +30,22 @@ const mesCorto = (m) => { const [a, n] = String(m).split("-"); return `${MESES[N
 const fechaCL = (f) => (f ? new Date(`${f}T12:00:00`).toLocaleDateString("es-CL", { day: "2-digit", month: "2-digit", year: "numeric" }) : "—");
 const ORIGEN = { manual: "Manual", venta: "Venta", reserva: "Reserva", compra: "Compra" };
 const signo = (m) => (m.tipo === "egreso" ? -1 : 1);
+const leerComoDataUrl = (file) => new Promise((resolve, reject) => {
+  const fr = new FileReader();
+  fr.onload = () => resolve(fr.result);
+  fr.onerror = () => reject(new Error("archivo_ilegible"));
+  fr.readAsDataURL(file);
+});
+const nuevoNs = () => `fin-${(window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : "00000000-0000-4000-8000-" + Date.now().toString(16).padStart(12, "0").slice(-12)}`;
+
+/** Respaldos de un movimiento (para abrirlos). */
+function ChipsRespaldo({ archivos }) {
+  return (archivos || []).map((a) => (
+    <button key={a.id} type="button" onClick={() => abrirArchivo(null, a)} className="inline-flex items-center gap-1 text-xs text-sky-700 hover:underline mr-2" title="Abrir respaldo">
+      {a.tipo === "application/pdf" ? "📄" : "🖼"} <span className="max-w-[140px] truncate">{a.nombre}</span>
+    </button>
+  ));
+}
 
 /** Períodos para elegir: los últimos 12 meses y los últimos 2 años. */
 function opcionesPeriodo() {
@@ -159,18 +180,41 @@ function Resumen({ api, irA }) {
 /* ================= Registrar / editar un movimiento ================= */
 const VACIO = { tipo: "egreso", categoria: "", monto: "", fecha: "", descripcion: "", contraparte: "", documentoTipo: "factura", documentoNumero: "", medio: "efectivo", cuentaId: "", cuentaDestinoId: "", vehiculoId: "", notas: "" };
 
-function FormMovimiento({ api, cuentas, inicial, onCerrar, onListo }) {
-  const [f, setF] = useState(() => (inicial ? {
-    tipo: inicial.tipo, categoria: inicial.categoria, monto: String(inicial.monto), fecha: inicial.fecha, descripcion: inicial.descripcion || "", contraparte: inicial.contraparte || "",
-    documentoTipo: inicial.documento_tipo || "sin_documento", documentoNumero: inicial.documento_numero || "", medio: inicial.medio || "transferencia",
-    cuentaId: inicial.cuenta_id || "", cuentaDestinoId: inicial.cuenta_destino_id || "", vehiculoId: inicial.vehiculo_id || "", notas: inicial.notas || "",
+function FormMovimiento({ api, cuentas, inicial, plantilla, onCerrar, onListo }) {
+  const base = inicial || plantilla;
+  const [f, setF] = useState(() => (base ? {
+    tipo: base.tipo, categoria: base.categoria, monto: String(base.monto), fecha: inicial ? inicial.fecha : hoyCL(), descripcion: base.descripcion || "", contraparte: base.contraparte || "",
+    documentoTipo: base.documento_tipo || "sin_documento", documentoNumero: inicial ? inicial.documento_numero || "" : "", medio: base.medio || "transferencia",
+    cuentaId: base.cuenta_id || "", cuentaDestinoId: base.cuenta_destino_id || "", vehiculoId: base.vehiculo_id || "", notas: inicial ? inicial.notas || "" : "",
+    recurrente: !!base.recurrente, serieId: plantilla ? plantilla.serie_id : (inicial && inicial.serie_id) || "",
   } : { ...VACIO, fecha: hoyCL() }));
   const [msg, setMsg] = useState("");
   const [ocupado, setOcupado] = useState(false);
+  const [ns] = useState(nuevoNs);
+  const [guardados, setGuardados] = useState(() => (inicial && inicial.archivos) || []);
+  const [nuevos, setNuevos] = useState([]);
+  const totalArchivos = guardados.length + nuevos.length;
+  const elegirArchivos = async (ev) => {
+    const lista = Array.from(ev.target.files || []);
+    ev.target.value = "";
+    setMsg("");
+    let actuales = totalArchivos;
+    for (const file of lista) {
+      try {
+        if (actuales >= MAX_ARCHIVOS_FIN) throw new Error("demasiados_archivos");
+        const esPdf = file.type === "application/pdf";
+        if (!esPdf && !file.type.startsWith("image/")) throw new Error("archivo_tipo_invalido");
+        if (esPdf && file.size > MAX_BYTES_ARCHIVO) throw new Error("archivo_muy_grande");
+        const dataUrl = esPdf ? await leerComoDataUrl(file) : await compressImage(file);
+        actuales += 1;
+        setNuevos((a) => [...a, { id: makePhotoId(), nombre: file.name, tipo: esPdf ? "application/pdf" : "image/jpeg", tam: Math.round(dataUrl.length * 0.75), dataUrl }]);
+      } catch (e) { setMsg(mensajeError(e)); }
+    }
+  };
   const conVeh = categoriaConVehiculo(f.categoria);
   const vehs = useCarga(() => (conVeh ? api("fin.vehiculos", {}) : Promise.resolve(null)), [api, conVeh]);
   const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
-  const cats = CATEGORIAS_FIN.filter((c) => c.tipo === f.tipo);
+  const grupos = categoriasAgrupadas(f.tipo);
   // La caja del local es «sin cuenta»; las demás cuentas (bancos y «por depositar») se eligen por su clave.
   const opcionesCuenta = cuentas.filter((c) => c.activa && c.tipo !== "caja");
   const guardar = async () => {
@@ -178,8 +222,13 @@ function FormMovimiento({ api, cuentas, inicial, onCerrar, onListo }) {
     const v = validarMovimiento(f, { hoy: hoyCL() });
     if (!v.ok) { setMsg(mensajeError({ message: v.error })); return; }
     setOcupado(true);
-    try { await api("fin.mov_guardar", { mov: f, ...(inicial ? { id: inicial.id } : {}) }); onListo(); }
-    catch (e) { setMsg(mensajeError(e)); setOcupado(false); }
+    let subidos = [];
+    try {
+      subidos = await subirRespaldos(ns, nuevos);
+      const archivos = [...guardados, ...subidos.map(({ id, nombre, tipo, tam }) => ({ id, nombre, tipo, tam, v: ns }))];
+      await api("fin.mov_guardar", { mov: f, archivos, ...(inicial ? { id: inicial.id } : {}) });
+      onListo();
+    } catch (e) { await limpiarRespaldos(ns, subidos); setMsg(mensajeError(e)); setOcupado(false); }
   };
   const selectCuenta = (valor, onCambio) => (
     <select value={valor} onChange={(e) => onCambio(e.target.value)} className={INPUT}>
@@ -188,9 +237,9 @@ function FormMovimiento({ api, cuentas, inicial, onCerrar, onListo }) {
     </select>
   );
   return (
-    <Modal titulo={inicial ? `Editar ${inicial.folio}` : "Registrar movimiento"} onCerrar={onCerrar}>
+    <Modal titulo={inicial ? `Editar ${inicial.folio}` : plantilla ? "Registrar gasto fijo del mes" : "Registrar movimiento"} onCerrar={onCerrar}>
       <div className="flex flex-col gap-3">
-        {!inicial && (
+        {!inicial && !plantilla && (
           <div className="flex border border-stone-300 self-start">
             {[["egreso", "Gasto / egreso"], ["ingreso", "Ingreso"], ["traspaso", "Traspaso entre cuentas"]].map(([id, t]) => (
               <button key={id} type="button" onClick={() => setF((x) => ({ ...x, tipo: id, categoria: id === "traspaso" ? "traspaso" : "" }))} className={`px-3 py-1.5 text-sm ${f.tipo === id ? "bg-stone-900 text-white" : "bg-white text-stone-700"}`}>{t}</button>
@@ -202,7 +251,11 @@ function FormMovimiento({ api, cuentas, inicial, onCerrar, onListo }) {
             <Campo etiqueta="Categoría">
               <select value={f.categoria} onChange={(e) => set("categoria", e.target.value)} className={INPUT}>
                 <option value="">Elige…</option>
-                {cats.map((c) => <option key={c.id} value={c.id}>{c.nombre}{c.resultado ? "" : " (no es resultado)"}</option>)}
+                {grupos.map((g) => (
+                  <optgroup key={g.id} label={g.nombre}>
+                    {g.categorias.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                  </optgroup>
+                ))}
               </select>
             </Campo>
           )}
@@ -240,6 +293,31 @@ function FormMovimiento({ api, cuentas, inicial, onCerrar, onListo }) {
             <Campo etiqueta="N° documento"><input value={f.documentoNumero} maxLength={40} disabled={f.documentoTipo === "sin_documento"} onChange={(e) => set("documentoNumero", e.target.value)} className={INPUT} /></Campo>
           </div>
         )}
+        {f.tipo !== "traspaso" && (
+          <div className="flex flex-col gap-2 border border-stone-200 bg-stone-50 p-3">
+            <span className="text-sm text-stone-700">Respaldo (factura, boleta o comprobante){totalArchivos === 0 && <span className="text-amber-700"> · sin respaldo todavía</span>}</span>
+            <div className="flex flex-wrap items-center gap-2">
+              {guardados.map((a) => (
+                <span key={a.id} className="inline-flex items-center gap-1 border border-stone-300 bg-white px-2 py-1 text-xs">
+                  <button type="button" onClick={() => abrirArchivo(null, a)} className="hover:underline">{a.tipo === "application/pdf" ? "📄" : "🖼"} <span className="max-w-[160px] truncate inline-block align-bottom">{a.nombre}</span></button>
+                  <button type="button" onClick={() => setGuardados((l) => l.filter((x) => x.id !== a.id))} className="text-rose-600 px-1" aria-label="Quitar archivo">✕</button>
+                </span>
+              ))}
+              {nuevos.map((a) => (
+                <span key={a.id} className="inline-flex items-center gap-1 border border-amber-300 bg-white px-2 py-1 text-xs">
+                  {a.tipo === "application/pdf" ? "📄" : "🖼"} <span className="max-w-[160px] truncate">{a.nombre}</span>
+                  <button type="button" onClick={() => setNuevos((l) => l.filter((x) => x.id !== a.id))} className="text-rose-600 px-1" aria-label="Quitar archivo">✕</button>
+                </span>
+              ))}
+              {totalArchivos < MAX_ARCHIVOS_FIN && (
+                <label className={`${BTN} cursor-pointer`}>＋ Adjuntar foto o PDF<input type="file" accept="image/*,application/pdf" multiple className="hidden" onChange={elegirArchivos} /></label>
+              )}
+            </div>
+          </div>
+        )}
+        {f.tipo === "egreso" && (
+          <label className="text-sm text-stone-700 flex items-center gap-2"><input type="checkbox" checked={f.recurrente} onChange={(e) => set("recurrente", e.target.checked)} /> Gasto fijo: se repite cada mes (arriendo, internet, contador…). Cada mes se propondrá registrarlo.</label>
+        )}
         <Campo etiqueta="Notas (opcional)"><textarea rows={2} value={f.notas} maxLength={500} onChange={(e) => set("notas", e.target.value)} className={INPUT} /></Campo>
         <div className="flex flex-wrap items-center gap-3">
           <button type="button" onClick={guardar} disabled={ocupado} className={BTN_PRIMARIO}>{ocupado ? "Guardando…" : "Guardar"}</button>
@@ -276,9 +354,9 @@ function AnularMovimiento({ api, mov, onCerrar, onListo }) {
 }
 
 /* ================= Movimientos ================= */
-function Movimientos({ api }) {
+function Movimientos({ api, filtroInicial }) {
   const hoy = hoyCL();
-  const [filtro, setFiltro] = useState({ desde: `${hoy.slice(0, 7)}-01`, hasta: hoy, tipo: "", origen: "", cuenta: "", categoria: "", q: "", conAnulados: false });
+  const [filtro, setFiltro] = useState({ desde: `${hoy.slice(0, 7)}-01`, hasta: hoy, tipo: "", origen: "", cuenta: "", categoria: "", q: "", conAnulados: false, sinRespaldo: false, ...(filtroInicial || {}) });
   const { cargando, error, datos, recargar } = useCarga(() => api("fin.movimientos", filtro), [api, JSON.stringify(filtro)]);
   const [form, setForm] = useState(null); // null | "nuevo" | movimiento
   const [anular, setAnular] = useState(null);
@@ -312,7 +390,9 @@ function Movimientos({ api }) {
           <select value={filtro.categoria} onChange={(e) => set("categoria", e.target.value)} className={INPUT}>
             <option value="">Todas</option>
             <option value="venta_vehiculo">Pago de venta de vehículo</option><option value="reserva">Pago de reserva</option><option value="compra_vehiculo">Pago por compra de vehículo</option>
-            {CATEGORIAS_FIN.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+            {[...categoriasAgrupadas("egreso"), ...categoriasAgrupadas("ingreso"), ...categoriasAgrupadas("traspaso")].map((g, i) => (
+              <optgroup key={`${g.id}-${i}`} label={g.nombre}>{g.categorias.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}</optgroup>
+            ))}
           </select>
         </Campo>
         <Campo etiqueta="Buscar" className="col-span-2"><input value={filtro.q} onChange={(e) => set("q", e.target.value)} placeholder="Descripción, proveedor, folio, N° documento…" className={INPUT} /></Campo>
@@ -321,6 +401,8 @@ function Movimientos({ api }) {
         {datos && datos.puedeEditar && <button type="button" onClick={() => { setAviso(""); setForm("nuevo"); }} className={BTN_PRIMARIO}>+ Registrar movimiento</button>}
         <button type="button" onClick={descargar} disabled={!datos || !datos.movimientos.length} className={BTN}>Descargar CSV (para el contador)</button>
         <label className="text-sm text-stone-600 flex items-center gap-1.5"><input type="checkbox" checked={filtro.conAnulados} onChange={(e) => set("conAnulados", e.target.checked)} /> Ver anulados</label>
+        <label className="text-sm text-stone-600 flex items-center gap-1.5"><input type="checkbox" checked={filtro.sinRespaldo} onChange={(e) => set("sinRespaldo", e.target.checked)} /> Solo sin respaldo</label>
+        {datos && datos.sinRespaldo > 0 && !filtro.sinRespaldo && <button type="button" onClick={() => set("sinRespaldo", true)} className="text-sm text-amber-700 hover:underline">⚠ {datos.sinRespaldo} sin respaldo</button>}
         {aviso && <span className="text-sm text-emerald-700">{aviso}</span>}
         {cargando && <span className="text-xs text-stone-400">Cargando…</span>}
       </div>
@@ -345,8 +427,11 @@ function Movimientos({ api }) {
                     <tr key={m.id} className={anulado ? "text-stone-400 line-through" : ""}>
                       <td className="px-3 py-2 whitespace-nowrap">{fechaCL(m.fecha)}</td>
                       <td className="px-3 py-2 whitespace-nowrap"><span className="font-mono text-xs">{m.folio}</span><span className="block text-[11px] text-stone-400 no-underline">{ORIGEN[m.origen] || m.origen}</span></td>
-                      <td className="px-3 py-2 min-w-[14rem]">{m.descripcion}{m.contraparte && <span className="block text-xs text-stone-500">{m.contraparte}</span>}{m.vehiculo && <span className="block text-xs text-stone-500">🚗 {m.vehiculo}</span>}{m.documento_numero && <span className="block text-xs text-stone-500">{(DOCUMENTOS_FIN.find((d) => d.id === m.documento_tipo) || { nombre: "Ref." }).nombre} {m.documento_numero}</span>}{anulado && m.motivo_anulacion && <span className="block text-xs">Anulado: {m.motivo_anulacion}</span>}</td>
-                      <td className="px-3 py-2">{(categoriaFin(m.categoria) || { nombre: m.categoria }).nombre}</td>
+                      <td className="px-3 py-2 min-w-[14rem]">{m.descripcion}{m.contraparte && <span className="block text-xs text-stone-500">{m.contraparte}</span>}{m.vehiculo && <span className="block text-xs text-stone-500">🚗 {m.vehiculo}</span>}{m.documento_numero && <span className="block text-xs text-stone-500">{(DOCUMENTOS_FIN.find((d) => d.id === m.documento_tipo) || { nombre: "Ref." }).nombre} {m.documento_numero}</span>}{anulado && m.motivo_anulacion && <span className="block text-xs">Anulado: {m.motivo_anulacion}</span>}
+                        {(m.archivos || []).length > 0 && <span className="block mt-0.5"><ChipsRespaldo archivos={m.archivos} /></span>}
+                        {faltaRespaldo(m) && <span className="block mt-0.5 text-xs text-amber-700">⚠ Falta respaldo{datos.puedeEditar && <> · <button type="button" onClick={() => { setAviso(""); setForm(m); }} className="underline">adjuntar</button></>}</span>}
+                        {m.recurrente && <span className="block text-[11px] text-stone-400">Gasto fijo mensual</span>}</td>
+                      <td className="px-3 py-2 min-w-[10rem]">{(categoriaFin(m.categoria) || { nombre: m.categoria }).nombre}</td>
                       <td className="px-3 py-2 text-xs">{nombreCuenta(m.cuenta_id, m.local_id)}{m.tipo === "traspaso" && <> → {nombreCuenta(m.cuenta_destino_id, m.local_id)}</>}</td>
                       <td className={`px-3 py-2 text-right whitespace-nowrap font-medium ${m.tipo === "ingreso" ? "text-emerald-700" : m.tipo === "egreso" ? "text-rose-700" : "text-stone-700"}`}>{m.tipo === "traspaso" ? "⇄ " : ""}{clp(signo(m) * m.monto)}</td>
                       {datos.puedeEditar && (
@@ -493,13 +578,97 @@ function Rentabilidad({ api }) {
   );
 }
 
-export function ModuloFinanzas({ api }) {
-  const [tab, setTab] = useGuardado("finanzas", "resumen", ["resumen", "movimientos", "bancos", "nomina", "rentabilidad"]);
+/* ================= Gastos de operación ================= */
+function GastosFijos({ api, mes, cuentas, onListo }) {
+  const { cargando, datos, recargar } = useCarga(() => api("fin.fijos", { mes }), [api, mes]);
+  const [form, setForm] = useState(null);
+  if (cargando && !datos) return null;
+  if (!datos || datos.pendientes.length === 0) return null;
+  return (
+    <Tarjeta titulo={`Gastos fijos por registrar · ${nombreMes(mes)}`} ayuda="Gastos marcados como fijos que se registraron el mes anterior y aún no se registran este mes. Revisa el monto, adjunta la factura y guarda.">
+      <div className="text-sm divide-y divide-stone-100">
+        {datos.pendientes.map((p) => (
+          <div key={p.serie_id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+            <span><span className="font-medium">{p.descripcion}</span><span className="text-stone-500"> · {(categoriaFin(p.categoria) || {}).nombre}{p.contraparte ? ` · ${p.contraparte}` : ""}</span><span className="block text-xs text-stone-500">Último: {clp(p.monto)} el {fechaCL(p.fecha)}</span></span>
+            {datos.puedeEditar && <button type="button" onClick={() => setForm(p)} className={BTN}>Registrar este mes</button>}
+          </div>
+        ))}
+      </div>
+      {form && <FormMovimiento api={api} cuentas={cuentas} plantilla={form} onCerrar={() => setForm(null)} onListo={() => { setForm(null); recargar(); onListo(); }} />}
+    </Tarjeta>
+  );
+}
+
+function Gastos({ api, irA }) {
+  const meses = useMemo(() => opcionesPeriodo().filter((p) => p.length === 7), []);
+  const [hasta, setHasta] = useState(meses[0]);
+  const [n, setN] = useState(6);
+  const { cargando, error, datos, recargar } = useCarga(() => api("fin.gastos", { hasta, meses: n }), [api, hasta, n]);
+  const [form, setForm] = useState(false);
+  if (cargando && !datos) return <Cargando />;
+  if (error && !datos) return <Aviso>{error}</Aviso>;
+  const d = datos;
+  const celda = (x) => (x ? clpBase(x) : <span className="text-stone-300">—</span>);
   return (
     <div className="flex flex-col gap-5">
-      <Pestanas valor={tab} onCambio={setTab} opciones={[["resumen", "Resumen"], ["movimientos", "Movimientos"], ["bancos", "Bancos y caja"], ["nomina", "Nómina"], ["rentabilidad", "Rentabilidad"]]} />
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="text-sm text-stone-600">Hasta:</span>
+        <select value={hasta} onChange={(e) => setHasta(e.target.value)} className={`${INPUT} !w-auto`}>{meses.map((m) => <option key={m} value={m}>{nombreMes(m).replace(/^./, (c) => c.toUpperCase())}</option>)}</select>
+        <select value={n} onChange={(e) => setN(Number(e.target.value))} className={`${INPUT} !w-auto`}><option value={3}>Últimos 3 meses</option><option value={6}>Últimos 6 meses</option><option value={12}>Últimos 12 meses</option></select>
+        {d.puedeEditar && <button type="button" onClick={() => setForm(true)} className={BTN_PRIMARIO}>+ Registrar gasto</button>}
+        {cargando && <span className="text-xs text-stone-400">Actualizando…</span>}
+      </div>
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+        <Cifra titulo={`Gastos de ${nombreMes(hasta)}`} valor={d.totales[hasta]} tono="text-rose-700" />
+        <Cifra titulo="Promedio mensual" valor={d.promedio} detalle={`últimos ${n} meses`} />
+        <Cifra titulo="Sin respaldo" texto={String(d.sinRespaldo.cantidad)} tono={d.sinRespaldo.cantidad ? "text-amber-700" : "text-emerald-700"}
+          detalle={d.sinRespaldo.cantidad ? <button type="button" onClick={() => irA("movimientos", { sinRespaldo: true, desde: "2000-01-01" })} className="hover:underline">{clp(d.sinRespaldo.monto)} sin factura o boleta → adjuntar</button> : "Todo con respaldo"} />
+        <Cifra titulo="Gastos fijos por registrar" texto={String(d.fijosPendientes)} tono={d.fijosPendientes ? "text-amber-700" : "text-stone-900"} detalle={`en ${nombreMes(hasta)}`} />
+      </div>
+      <GastosFijos api={api} mes={hasta} cuentas={d.cuentas} onListo={recargar} />
+      <Tarjeta titulo="Gastos por categoría" ayuda="Lo que se gastó en el negocio cada mes (cuenta en el mes al que corresponde; la nómina pagada al mes siguiente queda en su mes). No incluye los pagos por compras de autos, los gastos asociados a un auto (son parte de su costo) ni los retiros del dueño.">
+        {d.grupos.length === 0 ? <p className="text-sm text-stone-500">No hay gastos registrados en estos meses.</p> : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-xs uppercase tracking-wide text-stone-500">
+                <tr><th className="text-left py-2 pr-3">Categoría</th>{d.meses.map((m) => <th key={m} className="text-right py-2 px-2 whitespace-nowrap">{mesCorto(m)}</th>)}<th className="text-right py-2 pl-2">Total</th></tr>
+              </thead>
+              <tbody>
+                {d.grupos.map((g) => (
+                  <React.Fragment key={g.id}>
+                    <tr className="bg-stone-50 font-semibold text-stone-800"><td className="py-1.5 pr-3">{g.nombre}</td>{d.meses.map((m) => <td key={m} className="text-right py-1.5 px-2 whitespace-nowrap">{celda(g.meses[m])}</td>)}<td className="text-right py-1.5 pl-2 whitespace-nowrap">{clpBase(g.total)}</td></tr>
+                    {g.categorias.map((c) => (
+                      <tr key={c.id} className="border-b border-stone-100">
+                        <td className="py-1.5 pr-3 pl-4"><button type="button" onClick={() => irA("movimientos", { categoria: c.id, desde: `${d.meses[0]}-01` })} className="text-left hover:underline">{c.nombre}</button></td>
+                        {d.meses.map((m) => <td key={m} className="text-right py-1.5 px-2 whitespace-nowrap">{celda(c.meses[m])}</td>)}
+                        <td className="text-right py-1.5 pl-2 whitespace-nowrap">{clpBase(c.total)}</td>
+                      </tr>
+                    ))}
+                  </React.Fragment>
+                ))}
+              </tbody>
+              <tfoot className="font-semibold text-stone-900 border-t border-stone-300">
+                <tr><td className="py-2 pr-3">Total</td>{d.meses.map((m) => <td key={m} className="text-right py-2 px-2 whitespace-nowrap">{clpBase(d.totales[m])}</td>)}<td className="text-right py-2 pl-2 whitespace-nowrap">{clpBase(d.total)}</td></tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
+      </Tarjeta>
+      {form && <FormMovimiento api={api} cuentas={d.cuentas} inicial={null} onCerrar={() => setForm(false)} onListo={() => { setForm(false); recargar(); }} />}
+    </div>
+  );
+}
+
+export function ModuloFinanzas({ api }) {
+  const [tab, setTabBase] = useGuardado("finanzas", "resumen", ["resumen", "movimientos", "gastos", "bancos", "nomina", "rentabilidad"]);
+  const [filtroMov, setFiltroMov] = useState(null);
+  const setTab = (t, filtro = null) => { setFiltroMov(filtro); setTabBase(t); };
+  return (
+    <div className="flex flex-col gap-5">
+      <Pestanas valor={tab} onCambio={setTab} opciones={[["resumen", "Resumen"], ["movimientos", "Movimientos"], ["gastos", "Gastos"], ["bancos", "Bancos y caja"], ["nomina", "Nómina"], ["rentabilidad", "Rentabilidad"]]} />
       {tab === "resumen" && <Resumen api={api} irA={setTab} />}
-      {tab === "movimientos" && <Movimientos api={api} />}
+      {tab === "movimientos" && <Movimientos key={JSON.stringify(filtroMov)} api={api} filtroInicial={filtroMov} />}
+      {tab === "gastos" && <Gastos api={api} irA={setTab} />}
       {tab === "bancos" && <BancosYCaja api={api} />}
       {tab === "nomina" && <Nomina api={api} />}
       {tab === "rentabilidad" && <Rentabilidad api={api} />}

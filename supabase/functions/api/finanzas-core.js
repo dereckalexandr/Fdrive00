@@ -5,37 +5,118 @@
 /**
  * Categorías. `resultado: false` = no es ingreso ni gasto del negocio (aporte de capital, préstamo, retiro del dueño):
  * mueve la caja pero no el estado de resultados. `vehiculo: true` = costo de un vehículo (se suma a su costo y pasa a
- * «costo de ventas» cuando se vende; mientras está en stock es inventario, no gasto).
+ * «costo de ventas» cuando se vende; mientras está en stock es inventario, no gasto). `grupo` ordena los gastos en pantalla y en el informe.
  */
-export const CATEGORIAS_FIN = [
-  // Egresos
-  { id: "arriendo", nombre: "Arriendo", tipo: "egreso", resultado: true },
-  { id: "sueldos", nombre: "Sueldos y leyes sociales", tipo: "egreso", resultado: true },
-  { id: "comisiones", nombre: "Comisiones a ejecutivos", tipo: "egreso", resultado: true },
-  { id: "publicidad", nombre: "Publicidad y marketing", tipo: "egreso", resultado: true },
-  { id: "servicios", nombre: "Servicios básicos e internet", tipo: "egreso", resultado: true },
-  { id: "reparacion", nombre: "Reparación y preparación de vehículos", tipo: "egreso", resultado: true, vehiculo: true },
-  { id: "traslado", nombre: "Traslado de vehículos", tipo: "egreso", resultado: true, vehiculo: true },
-  { id: "tramites", nombre: "Trámites, transferencias y documentos", tipo: "egreso", resultado: true, vehiculo: true },
-  { id: "mantencion_local", nombre: "Mantención del local", tipo: "egreso", resultado: true },
-  { id: "honorarios", nombre: "Contador y asesorías", tipo: "egreso", resultado: true },
-  { id: "bancos", nombre: "Gastos bancarios", tipo: "egreso", resultado: true },
-  { id: "impuestos", nombre: "Impuestos, patentes y contribuciones", tipo: "egreso", resultado: true },
-  { id: "combustible", nombre: "Combustible y movilización", tipo: "egreso", resultado: true },
-  { id: "otros_gastos", nombre: "Otros gastos", tipo: "egreso", resultado: true },
-  { id: "pago_consignante", nombre: "Pago al dueño de un auto consignado", tipo: "egreso", resultado: false, conVehiculo: true },
-  { id: "devolucion_reserva", nombre: "Devolución de reserva", tipo: "egreso", resultado: false },
-  { id: "retiro_dueno", nombre: "Retiro del dueño", tipo: "egreso", resultado: false },
-  { id: "pago_prestamo", nombre: "Pago de préstamo", tipo: "egreso", resultado: false },
-  // Ingresos
-  { id: "comision_financiera", nombre: "Comisiones de financieras", tipo: "ingreso", resultado: true },
-  { id: "otros_servicios", nombre: "Otros servicios", tipo: "ingreso", resultado: true },
-  { id: "otros_ingresos", nombre: "Otros ingresos", tipo: "ingreso", resultado: true },
-  { id: "aporte_capital", nombre: "Aporte de capital", tipo: "ingreso", resultado: false },
-  { id: "prestamo", nombre: "Préstamo recibido", tipo: "ingreso", resultado: false },
-  // Traspaso entre cuentas (por ejemplo, depositar el efectivo de la caja en el banco)
-  { id: "traspaso", nombre: "Traspaso entre cuentas", tipo: "traspaso", resultado: false },
+export const GRUPOS_FIN = [
+  { id: "operacion", nombre: "Gastos de operación" },
+  { id: "personal", nombre: "Personal" },
+  { id: "comercial", nombre: "Marketing y ventas" },
+  { id: "vehiculos", nombre: "Vehículos" },
+  { id: "impuestos", nombre: "Impuestos y patentes" },
+  { id: "financieros", nombre: "Gastos financieros" },
+  { id: "otros", nombre: "Otros" },
+  { id: "no_resultado", nombre: "No son gasto (mueven caja)" },
+  { id: "ingresos", nombre: "Ingresos" },
 ];
+export const CATEGORIAS_FIN = [
+  // Egresos: operación de la oficina y el local
+  { id: "arriendo", nombre: "Arriendo de oficina y local", tipo: "egreso", resultado: true, grupo: "operacion" },
+  { id: "gastos_comunes", nombre: "Gastos comunes, aseo y seguridad", tipo: "egreso", resultado: true, grupo: "operacion" },
+  { id: "servicios", nombre: "Luz, agua, internet y teléfono", tipo: "egreso", resultado: true, grupo: "operacion" },
+  { id: "insumos", nombre: "Insumos y artículos de oficina", tipo: "egreso", resultado: true, grupo: "operacion" },
+  { id: "software", nombre: "Software, sistemas y suscripciones", tipo: "egreso", resultado: true, grupo: "operacion" },
+  { id: "mantencion_local", nombre: "Mantención y reparaciones del local", tipo: "egreso", resultado: true, grupo: "operacion" },
+  { id: "seguros", nombre: "Seguros", tipo: "egreso", resultado: true, grupo: "operacion" },
+  { id: "honorarios", nombre: "Contador, abogado y asesorías", tipo: "egreso", resultado: true, grupo: "operacion" },
+  { id: "combustible", nombre: "Combustible, peajes y movilización", tipo: "egreso", resultado: true, grupo: "operacion" },
+  // Personal
+  { id: "sueldos", nombre: "Sueldos y leyes sociales", tipo: "egreso", resultado: true, grupo: "personal" },
+  { id: "comisiones", nombre: "Comisiones (fuera de la nómina)", tipo: "egreso", resultado: true, grupo: "personal" },
+  // Marketing y ventas
+  { id: "publicidad", nombre: "Publicidad y marketing digital", tipo: "egreso", resultado: true, grupo: "comercial" },
+  { id: "portales", nombre: "Portales de avisos (Chileautos, Yapo…)", tipo: "egreso", resultado: true, grupo: "comercial" },
+  // Vehículos (con vehículo asociado, se suman a su costo)
+  { id: "reparacion", nombre: "Reparación y preparación de vehículos", tipo: "egreso", resultado: true, vehiculo: true, grupo: "vehiculos" },
+  { id: "traslado", nombre: "Traslado de vehículos", tipo: "egreso", resultado: true, vehiculo: true, grupo: "vehiculos" },
+  { id: "tramites", nombre: "Trámites, transferencias y documentos", tipo: "egreso", resultado: true, vehiculo: true, grupo: "vehiculos" },
+  // Impuestos
+  { id: "impuestos", nombre: "Impuestos (renta, multas, otros)", tipo: "egreso", resultado: true, grupo: "impuestos" },
+  { id: "patentes", nombre: "Patente municipal y contribuciones", tipo: "egreso", resultado: true, grupo: "impuestos" },
+  // Financieros
+  { id: "bancos", nombre: "Comisiones y mantención bancaria", tipo: "egreso", resultado: true, grupo: "financieros" },
+  { id: "intereses", nombre: "Intereses de créditos", tipo: "egreso", resultado: true, grupo: "financieros" },
+  { id: "otros_gastos", nombre: "Otros gastos", tipo: "egreso", resultado: true, grupo: "otros" },
+  // No son gasto del negocio
+  { id: "pago_consignante", nombre: "Pago al dueño de un auto consignado", tipo: "egreso", resultado: false, conVehiculo: true, grupo: "no_resultado" },
+  { id: "devolucion_reserva", nombre: "Devolución de reserva", tipo: "egreso", resultado: false, grupo: "no_resultado" },
+  { id: "retiro_dueno", nombre: "Retiro del dueño", tipo: "egreso", resultado: false, grupo: "no_resultado" },
+  { id: "pago_prestamo", nombre: "Pago de capital de un préstamo", tipo: "egreso", resultado: false, grupo: "no_resultado" },
+  // Ingresos
+  { id: "comision_financiera", nombre: "Comisiones de financieras", tipo: "ingreso", resultado: true, grupo: "ingresos" },
+  { id: "otros_servicios", nombre: "Otros servicios", tipo: "ingreso", resultado: true, grupo: "ingresos" },
+  { id: "otros_ingresos", nombre: "Otros ingresos", tipo: "ingreso", resultado: true, grupo: "ingresos" },
+  { id: "aporte_capital", nombre: "Aporte de capital", tipo: "ingreso", resultado: false, grupo: "no_resultado" },
+  { id: "prestamo", nombre: "Préstamo recibido", tipo: "ingreso", resultado: false, grupo: "no_resultado" },
+  // Traspaso entre cuentas (por ejemplo, depositar el efectivo de la caja en el banco)
+  { id: "traspaso", nombre: "Traspaso entre cuentas", tipo: "traspaso", resultado: false, grupo: "no_resultado" },
+];
+/** Categorías de un tipo, agrupadas para mostrarlas en un selector. */
+export const categoriasAgrupadas = (tipo) => GRUPOS_FIN
+  .map((g) => ({ ...g, categorias: CATEGORIAS_FIN.filter((c) => c.tipo === tipo && c.grupo === g.id) }))
+  .filter((g) => g.categorias.length > 0);
+
+/* ---------- Respaldos ---------- */
+export const MAX_ARCHIVOS_FIN = 5;
+/** Espacio de los archivos de un movimiento en el almacén: dval::fin-<uuid>::<archivo>. */
+export const NS_FIN = /^fin-[0-9a-f-]{36}$/;
+/** ¿El movimiento debería tener respaldo y no lo tiene? (los manuales; los del CRM traen el suyo en la venta o compra). */
+export const faltaRespaldo = (m) => m.origen === "manual" && m.estado !== "anulado" && m.tipo !== "traspaso" && !((m.archivos || []).length > 0);
+
+/**
+ * Gastos del negocio por categoría y mes (lo que entra al estado de resultados), para el informe de gastos de operación.
+ * movs: movimientos manuales vigentes { tipo, categoria, monto, fecha, mes_resultado, vehiculo_id }. meses: ["2026-06", …].
+ * Los gastos de un vehículo asociado no van (son costo del auto).
+ */
+export function gastosPorMes(movs, meses) {
+  const filas = {};
+  const totales = Object.fromEntries(meses.map((m) => [m, 0]));
+  for (const m of movs || []) {
+    if (m.tipo !== "egreso" || m.estado === "anulado") continue;
+    const cat = categoriaFin(m.categoria);
+    if (!cat || !cat.resultado || (cat.vehiculo && m.vehiculo_id)) continue;
+    const mes = m.mes_resultado || String(m.fecha).slice(0, 7);
+    if (!(mes in totales)) continue;
+    const f = filas[cat.id] || (filas[cat.id] = { id: cat.id, nombre: cat.nombre, grupo: cat.grupo, meses: Object.fromEntries(meses.map((x) => [x, 0])), total: 0 });
+    f.meses[mes] += Number(m.monto) || 0;
+    f.total += Number(m.monto) || 0;
+    totales[mes] += Number(m.monto) || 0;
+  }
+  const grupos = GRUPOS_FIN.map((g) => {
+    const cats = CATEGORIAS_FIN.filter((c) => c.grupo === g.id).map((c) => filas[c.id]).filter(Boolean);
+    const meses_ = Object.fromEntries(meses.map((x) => [x, cats.reduce((s, c) => s + c.meses[x], 0)]));
+    return { id: g.id, nombre: g.nombre, categorias: cats, meses: meses_, total: cats.reduce((s, c) => s + c.total, 0) };
+  }).filter((g) => g.categorias.length > 0);
+  const total = Object.values(totales).reduce((s, x) => s + x, 0);
+  return { meses, grupos, totales, total, promedio: meses.length ? Math.round(total / meses.length) : 0 };
+}
+
+/**
+ * Gastos fijos que faltan registrar en un mes: la última versión de cada serie de gastos marcados como fijos (por ejemplo, el arriendo)
+ * que todavía no tiene un movimiento en ese mes. movs: manuales vigentes con { id, serie_id, recurrente, fecha, mes_resultado }.
+ */
+export function gastosFijosPendientes(movs, mes) {
+  const series = {};
+  for (const m of movs || []) {
+    if (m.estado === "anulado") continue;
+    const serie = m.serie_id || m.id;
+    const mesM = m.mes_resultado || String(m.fecha).slice(0, 7);
+    const s = series[serie] || (series[serie] = { ultimo: null, meses: new Set() });
+    s.meses.add(mesM);
+    if (m.recurrente && mesM < mes && (!s.ultimo || m.fecha > s.ultimo.fecha)) s.ultimo = m;
+  }
+  return Object.entries(series).filter(([, s]) => s.ultimo && !s.meses.has(mes)).map(([serie, s]) => ({ ...s.ultimo, serie_id: serie }))
+    .sort((a, b) => a.categoria.localeCompare(b.categoria) || b.monto - a.monto);
+}
 /** Categorías de los movimientos que vienen solos del CRM (no se registran a mano). */
 export const CATEGORIAS_AUTO = {
   venta_vehiculo: { id: "venta_vehiculo", nombre: "Pago de venta de vehículo", tipo: "ingreso", resultado: false },
@@ -82,9 +163,11 @@ export function validarMovimiento(input, { hoy } = {}) {
   if (descripcion.length < 3) return { ok: false, error: "fin_descripcion" };
   const documento = DOCUMENTOS_FIN.some((d) => d.id === i.documentoTipo) ? i.documentoTipo : "sin_documento";
   const medio = MEDIOS_FIN.some((m) => m.id === i.medio) ? i.medio : (cuenta ? "transferencia" : "efectivo");
+  const recurrente = tipo === "egreso" && !!i.recurrente;
   return {
     ok: true,
     value: {
+      recurrente, serie_id: recurrente && /^[0-9a-f-]{36}$/.test(String(i.serieId || "")) ? String(i.serieId) : null,
       tipo, categoria: cat.id, monto, fecha: String(i.fecha), descripcion, contraparte: texto(i.contraparte, 120) || null,
       documento_tipo: documento, documento_numero: texto(i.documentoNumero, 40) || null, medio,
       cuenta_id: cuenta, cuenta_destino_id: tipo === "traspaso" ? destino : null,
@@ -189,12 +272,13 @@ export function periodo(p) {
 /** Texto CSV (separado por punto y coma, como lo abre Excel en Chile) de los movimientos, para el contador. */
 export function movimientosCsv(movs, nombreCuenta = (id) => id || "Caja") {
   const esc = (v) => { const t = String(v ?? ""); return /[;"\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
-  const filas = [["Fecha", "Tipo", "Categoría", "Descripción", "Contraparte", "Documento", "N° documento", "Medio", "Cuenta", "Cuenta destino", "Monto", "Origen", "Estado"]];
+  const filas = [["Fecha", "Tipo", "Categoría", "Descripción", "Contraparte", "Documento", "N° documento", "Medio", "Cuenta", "Cuenta destino", "Monto", "Origen", "Estado", "Respaldos"]];
   for (const m of movs) {
     const cat = categoriaFin(m.categoria);
     filas.push([m.fecha, m.tipo, cat ? cat.nombre : m.categoria, m.descripcion, m.contraparte || "", (DOCUMENTOS_FIN.find((d) => d.id === m.documento_tipo) || {}).nombre || "",
       m.documento_numero || "", (MEDIOS_FIN.find((x) => x.id === m.medio) || {}).nombre || m.medio || "", nombreCuenta(m.cuenta_id),
-      m.tipo === "traspaso" ? nombreCuenta(m.cuenta_destino_id) : "", m.tipo === "egreso" ? -Number(m.monto) : Number(m.monto), m.origen === "manual" ? "Manual" : `CRM (${m.folio || m.origen})`, m.estado === "anulado" ? "Anulado" : "Vigente"]);
+      m.tipo === "traspaso" ? nombreCuenta(m.cuenta_destino_id) : "", m.tipo === "egreso" ? -Number(m.monto) : Number(m.monto), m.origen === "manual" ? "Manual" : `CRM (${m.folio || m.origen})`, m.estado === "anulado" ? "Anulado" : "Vigente",
+      m.origen === "manual" ? ((m.archivos || []).length ? String((m.archivos || []).length) : (m.tipo === "traspaso" ? "" : "FALTA")) : "En el CRM"]);
   }
   return filas.map((f) => f.map(esc).join(";")).join("\r\n");
 }

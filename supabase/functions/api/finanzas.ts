@@ -7,8 +7,9 @@
 // - No reemplaza la contabilidad oficial (la lleva el contador): ordena caja, bancos, resultados y rentabilidad.
 import {
   validarMovimiento, calcularSaldos, flujoMensual, estadoResultados, rentabilidadVehiculo, periodo, categoriaFin, claveCaja, claveDe,
-  POR_DEPOSITAR, CATEGORIAS_FIN,
+  POR_DEPOSITAR, CATEGORIAS_FIN, MAX_ARCHIVOS_FIN, NS_FIN, faltaRespaldo, gastosPorMes, gastosFijosPendientes,
 } from "./finanzas-core.js";
+import { validarArchivo } from "./validaciones-core.js";
 import { etiquetaCuenta, medioNombre } from "./pagos-core.js";
 import { validarTrabajador, armarNomina, parametrosNomina, CONCEPTOS_NOMINA, montoConcepto, VARIABLES_VACIAS } from "./nomina-core.js";
 
@@ -249,6 +250,7 @@ export async function finanzasOp(h: FinCtx, op: string, body: any): Promise<Resp
         .filter((m) => !body.categoria || m.categoria === body.categoria)
         .filter((m) => !body.origen || (body.origen === "manual" ? m.origen === "manual" : m.origen !== "manual"))
         .filter((m) => !body.cuenta || claveDe(m.cuenta_id, m.local_id) === body.cuenta || (m.tipo === "traspaso" && claveDe(m.cuenta_destino_id, m.local_id) === body.cuenta))
+        .filter((m) => !body.sinRespaldo || faltaRespaldo(m))
         .filter((m) => !q || [m.descripcion, m.contraparte, m.documento_numero, m.folio, (categoriaFin(m.categoria) || {}).nombre].some((x) => String(x || "").toLowerCase().includes(q)));
       const vig = lista.filter((m) => m.estado !== "anulado");
       const vehIds = Array.from(new Set(lista.map((m) => m.vehiculo_id).filter(Boolean)));
@@ -259,6 +261,7 @@ export async function finanzasOp(h: FinCtx, op: string, body: any): Promise<Resp
         total: lista.length,
         ingresos: vig.filter((m) => m.tipo === "ingreso").reduce((s, m) => s + m.monto, 0),
         egresos: vig.filter((m) => m.tipo === "egreso").reduce((s, m) => s + m.monto, 0),
+        sinRespaldo: lista.filter(faltaRespaldo).length,
         cuentas: ctas, puedeEditar,
       });
     }
@@ -289,7 +292,20 @@ export async function finanzasOp(h: FinCtx, op: string, body: any): Promise<Resp
       if (!puedeEditar) return err("forbidden", 403);
       const v = validarMovimiento(body.mov, { hoy: hoyCL() });
       if (!v.ok) return err(v.error!);
+      // Respaldos (factura, boleta, comprobante): ya subidos al almacén bajo dval::fin-<uuid>::<archivo>; aquí solo se anotan.
+      let archivos: any[] | undefined;
+      if (Array.isArray(body.archivos)) {
+        archivos = [];
+        for (const a of body.archivos) {
+          const r = validarArchivo(a);
+          if (!r.ok) return err(r.error!);
+          if (!NS_FIN.test(String(a.v || ""))) return err("archivo_invalido");
+          archivos.push({ ...r.value, v: String(a.v) });
+        }
+        if (archivos.length > MAX_ARCHIVOS_FIN) return err("demasiados_archivos");
+      }
       const ahora = new Date().toISOString();
+      if (archivos) (v.value as any).archivos = archivos;
       if (body.id) {
         const { data: antes } = await sb.from("fin_movimientos").select("*").eq("id", String(body.id)).maybeSingle();
         if (!antes || (local && antes.local_id !== local)) return err("no_existe", 404);
@@ -303,8 +319,31 @@ export async function finanzasOp(h: FinCtx, op: string, body: any): Promise<Resp
       if (!loc) return err("sin_local");
       const { data, error } = await sb.from("fin_movimientos").insert({ ...v.value, local_id: loc, estado: "vigente", registrado_por: h.userName, creado_en: ahora, actualizado_en: ahora }).select().single();
       if (error) return fallo(error);
-      await h.audit(h.actor, "finanzas.registrar", "fin_movimiento", data.id, { tipo: data.tipo, categoria: data.categoria, monto: data.monto, fecha: data.fecha });
+      await h.audit(h.actor, "finanzas.registrar", "fin_movimiento", data.id, { tipo: data.tipo, categoria: data.categoria, monto: data.monto, fecha: data.fecha, respaldos: (data.archivos || []).length });
       return json({ movimiento: data });
+    }
+
+    /** Gastos del negocio por categoría y mes (los últimos N meses hasta «hasta»), y cuántos movimientos no tienen respaldo. */
+    if (op === "fin.gastos") {
+      const hasta = /^\d{4}-(0[1-9]|1[0-2])$/.test(String(body.hasta || "")) ? String(body.hasta) : hoyCL().slice(0, 7);
+      const n = Math.min(12, Math.max(1, Number(body.meses) || 6));
+      const meses: string[] = [];
+      let [a, m] = hasta.split("-").map(Number);
+      for (let i = 0; i < n; i++) { meses.unshift(`${a}-${String(m).padStart(2, "0")}`); m--; if (m === 0) { m = 12; a--; } }
+      const movs = (await movimientos()).filter((x) => x.origen === "manual");
+      const sin = movs.filter(faltaRespaldo);
+      return json({
+        ...gastosPorMes(movs, meses), puedeEditar, cuentas: await cuentas(),
+        sinRespaldo: { cantidad: sin.length, monto: sin.reduce((s, x) => s + x.monto, 0) },
+        fijosPendientes: gastosFijosPendientes(movs, hasta).length,
+      });
+    }
+
+    /** Gastos fijos (marcados «se repite cada mes») que aún no se registran en el mes. */
+    if (op === "fin.fijos") {
+      const mes = /^\d{4}-(0[1-9]|1[0-2])$/.test(String(body.mes || "")) ? String(body.mes) : hoyCL().slice(0, 7);
+      const movs = (await movimientos()).filter((x) => x.origen === "manual");
+      return json({ mes, pendientes: gastosFijosPendientes(movs, mes), puedeEditar, cuentas: await cuentas() });
     }
 
     if (op === "fin.mov_anular") {

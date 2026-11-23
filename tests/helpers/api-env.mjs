@@ -54,7 +54,7 @@ const DEFAULTS = {
   bitacora: () => ({ id: Math.floor(Math.random() * 1e9), creado_en: new Date().toISOString() }),
   fin_trabajadores: () => ({ id: randomUUID(), activo: true, usuario_id: null, rut: null, cargo: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
   fin_nominas: () => ({ id: randomUUID(), creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
-  fin_movimientos: () => ({ id: randomUUID(), nomina_id: null, nomina_concepto: null, mes_resultado: null, numero: ++contadorFin, estado: "vigente", cuenta_id: null, cuenta_destino_id: null, vehiculo_id: null, contraparte: null, documento_numero: null, notas: null, anulado_por: null, anulado_en: null, motivo_anulacion: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
+  fin_movimientos: () => ({ id: randomUUID(), archivos: [], recurrente: false, serie_id: null, nomina_id: null, nomina_concepto: null, mes_resultado: null, numero: ++contadorFin, estado: "vigente", cuenta_id: null, cuenta_destino_id: null, vehiculo_id: null, contraparte: null, documento_numero: null, notas: null, anulado_por: null, anulado_en: null, motivo_anulacion: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
 };
 const UNICOS = { wa_conversaciones: ["telefono"], vehiculos: ["patente"], usuarios: ["rut"], locales: ["nombre"], roles_permisos: ["rol"], config_negocio: ["clave"], kv_store: ["key"], patentes_consultadas: ["patente"] };
 
