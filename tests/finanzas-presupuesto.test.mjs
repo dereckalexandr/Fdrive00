@@ -73,7 +73,7 @@ test("Servidor: presupuesto (solo el Administrador lo cambia) y su comparación 
 test("Servidor: publicidad de Meta y Google por mes contra lo registrado; se registra con el mes al que corresponde", async () => {
   let r = await ve(jefe, "fin.publicidad", { hasta: mes, meses: 2 });
   assert.deepEqual([r.filas.length, r.conectadas.length], [0, 0], "sin plataformas conectadas no hay nada que comparar");
-  Object.assign(entorno, { META_AD_ACCOUNT_ID: "998877", GOOGLE_ADS_DEVELOPER_TOKEN: "t", GOOGLE_ADS_CUSTOMER_ID: "1234567890", GOOGLE_ADS_REFRESH_TOKEN: "r", GOOGLE_CLIENT_ID: "c", GOOGLE_CLIENT_SECRET: "s" });
+  Object.assign(entorno, { META_AD_ACCOUNT_ID: "998877", GOOGLE_ADS_CUSTOMER_ID: "1234567890", GOOGLE_ADS_REFRESH_TOKEN: "r", GOOGLE_CLIENT_ID: "c", GOOGLE_CLIENT_SECRET: "s" });
   ads.meta.gastoMensual = { [mesAnt]: 238500, [mes]: 90000 };
   ads.google.gastoMensual = { [mes]: 154300 };
   r = await ve(jefe, "fin.publicidad", { hasta: mes, meses: 2 });

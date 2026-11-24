@@ -100,8 +100,8 @@ export const horasDesdeSync = (c, ahora = Date.now()) => (c.sync_en ? Math.max(0
 /** Mensaje claro para un error de la plataforma. */
 export function errorLegible(plataforma, e) {
   const t = String((e && e.message) || e || "");
-  // El del token de desarrollador va primero: su texto también contiene «token» y se confundiría con un token vencido.
-  if (/developer.?token|desarrollador|DEVELOPER_TOKEN/i.test(t)) return "Google Ads: el token de desarrollador no está aprobado todavía (solo sirve con cuentas de prueba).";
+  // Va primero: su texto puede contener «token» y se confundiría con un token vencido. Desde sep-2026 el acceso es del proyecto de Google Cloud.
+  if (/CLOUD_PROJECT_NOT_APPROVED_FOR_PRODUCTION|ACTION_NOT_PERMITTED|not approved for production|developer.?token|desarrollador|DEVELOPER_TOKEN/i.test(t)) return "Google Ads: el proyecto de Google Cloud aún tiene acceso de prueba y no puede usar cuentas reales. Solicita el nivel Explorer en la consola de Google Cloud (API de Google Ads → Descripción general).";
   if (/token|OAuth|expired|invalid_grant|401|190/i.test(t)) return `${plataformaNombre(plataforma)} rechazó el acceso: el token venció o no tiene permiso. Genera uno nuevo.`;
   if (/permission|permiso|403|PERMISSION_DENIED|ads_read/i.test(t)) return `${plataformaNombre(plataforma)}: falta permiso para leer esta cuenta publicitaria.`;
   if (/rate|limit|429|quota/i.test(t)) return `${plataformaNombre(plataforma)}: demasiadas consultas, se reintenta en la próxima actualización.`;

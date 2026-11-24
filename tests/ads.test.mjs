@@ -46,7 +46,8 @@ test("Reglas: ventana de fechas, moneda, vínculo, importación, exceso de presu
   assert.equal(excedePresupuesto({ presupuesto_aprobado: 100000, gasto: 90000, estado: "aprobada" }), false);
   assert.equal(excedePresupuesto({ presupuesto_aprobado: 0, gasto: 5000, estado: "aprobada" }), true); // gasta sin tener presupuesto aprobado
   assert.match(errorLegible("meta", new Error("Error validating access token: Session has expired (190)")), /token venció/);
-  assert.match(errorLegible("google", new Error("El token de desarrollador no está aprobado (403)")), /desarrollador/);
+  assert.match(errorLegible("google", new Error("El token de desarrollador no está aprobado (403)")), /acceso de prueba/);
+  assert.match(errorLegible("google", new Error("CLOUD_PROJECT_NOT_APPROVED_FOR_PRODUCTION (403)")), /Explorer/);
 });
 
 const ve = (token, op, extra = {}) => api({ action: "ventas", token, op, ...extra });
@@ -86,7 +87,7 @@ test("Sin conectar: el estado lo dice y no se puede listar ni vincular", async (
   assert.equal((await ve(U.mkt.token, "marketing.ads.externas", { plataforma: "meta" })).error, "ads_no_configurado");
   const c = await aprobada();
   assert.equal((await ve(U.mkt.token, "marketing.ads.vincular", { id: c.id, plataforma: "meta", externoId: "111222333" })).error, "ads_no_configurado");
-  Object.assign(entorno, { META_AD_ACCOUNT_ID: "act_998877", GOOGLE_ADS_DEVELOPER_TOKEN: "devtok", GOOGLE_ADS_CUSTOMER_ID: "123-456-7890", GOOGLE_ADS_REFRESH_TOKEN: "1//refresco", GOOGLE_CLIENT_ID: "cid", GOOGLE_CLIENT_SECRET: "csecreto", GOOGLE_ADS_LOGIN_CUSTOMER_ID: "555-666-7777" });
+  Object.assign(entorno, { META_AD_ACCOUNT_ID: "act_998877", GOOGLE_ADS_CUSTOMER_ID: "123-456-7890", GOOGLE_ADS_REFRESH_TOKEN: "1//refresco", GOOGLE_CLIENT_ID: "cid", GOOGLE_CLIENT_SECRET: "csecreto", GOOGLE_ADS_LOGIN_CUSTOMER_ID: "555-666-7777" });
   assert.ok(antes);
 });
 
@@ -149,7 +150,7 @@ test("Google: vincula, suma las filas, convierte micros a pesos y usa los encabe
   assert.equal(r.campania.alcance, 0, "Google no informa alcance: no se pisa");
   const ll = ads.google.llamadas.pop();
   assert.match(ll.url, /\/customers\/1234567890\/googleAds:search$/);
-  assert.equal(ll.headers["developer-token"], "devtok");
+  assert.equal(ll.headers["developer-token"], undefined, "Google ya no usa token de desarrollador");
   assert.equal(ll.headers["login-customer-id"], "5556667777");
   assert.match(ll.query, /campaign\.id = 777001/);
   assert.ok(ll.headers.authorization.startsWith("Bearer ya29."));
@@ -183,7 +184,7 @@ test("Actualizar: lee de nuevo; un error deja los números anteriores y avisa; u
 
   ads.google.fallar = 403;
   r = await ve(U.mkt.token, "marketing.ads.sync", { id: CAMPG.id });
-  assert.match(r.resumen.errores[0].error, /desarrollador/);
+  assert.match(r.resumen.errores[0].error, /acceso de prueba/);
 });
 
 test("Importar y desvincular: crea la campaña del CRM desde la de la plataforma (en borrador) y se puede soltar", async () => {

@@ -7,7 +7,9 @@
 //   META_AD_ACCOUNT_ID  número de la cuenta publicitaria (con o sin «act_»)
 //   META_ADS_TOKEN      token de un usuario del sistema con el permiso ads_read (si falta, se usa WA_TOKEN: debe tener ads_read también)
 // Secretos de Google Ads:
-//   GOOGLE_ADS_DEVELOPER_TOKEN, GOOGLE_ADS_CUSTOMER_ID (cuenta publicitaria, sin guiones), GOOGLE_ADS_REFRESH_TOKEN (permiso adwords),
+//   GOOGLE_ADS_CUSTOMER_ID (cuenta publicitaria, sin guiones), GOOGLE_ADS_REFRESH_TOKEN (permiso adwords),
+//   (desde el 9-sep-2026 Google ya no usa token de desarrollador: el acceso es del proyecto de Google Cloud dueño de GOOGLE_CLIENT_ID,
+//   con nivel Explorer o Basic aprobado en la consola de Google Cloud → API de Google Ads)
 //   GOOGLE_CLIENT_ID y GOOGLE_CLIENT_SECRET (los mismos del calendario). Opcionales: GOOGLE_ADS_LOGIN_CUSTOMER_ID (cuenta de
 //   administrador, si la cuenta publicitaria está bajo una) y GOOGLE_ADS_VERSION (por defecto v24; Google retira versiones cada año).
 import {
@@ -57,7 +59,7 @@ export async function metricasMeta(id: string, desde: string, hasta: string) {
 /* ---------------- Google Ads ---------------- */
 const clienteGoogle = () => env("GOOGLE_ADS_CUSTOMER_ID").replace(/\D/g, "");
 const versionGoogle = () => env("GOOGLE_ADS_VERSION") || "v24";
-export const googleAdsConfigurado = () => !!(env("GOOGLE_CLIENT_ID") && env("GOOGLE_CLIENT_SECRET") && env("GOOGLE_ADS_REFRESH_TOKEN") && env("GOOGLE_ADS_DEVELOPER_TOKEN") && clienteGoogle());
+export const googleAdsConfigurado = () => !!(env("GOOGLE_CLIENT_ID") && env("GOOGLE_CLIENT_SECRET") && env("GOOGLE_ADS_REFRESH_TOKEN") && clienteGoogle());
 
 let tokenGoogle: { valor: string; vence: number } | null = null;
 async function accesoGoogleAds(forzar = false): Promise<string> {
@@ -84,7 +86,7 @@ async function gaql(consulta: string): Promise<any[]> {
       const r = await fetch(`https://googleads.googleapis.com/${versionGoogle()}/customers/${clienteGoogle()}/googleAds:search`, {
         method: "POST",
         headers: {
-          authorization: `Bearer ${acceso}`, "developer-token": env("GOOGLE_ADS_DEVELOPER_TOKEN"), "content-type": "application/json",
+          authorization: `Bearer ${acceso}`, "content-type": "application/json",
           ...(env("GOOGLE_ADS_LOGIN_CUSTOMER_ID") ? { "login-customer-id": env("GOOGLE_ADS_LOGIN_CUSTOMER_ID").replace(/\D/g, "") } : {}),
         },
         body: JSON.stringify({ query: consulta, ...(pagina ? { pageToken: pagina } : {}) }),
@@ -113,7 +115,7 @@ async function mutarGoogle(operaciones: any[]): Promise<any> {
     const r = await fetch(`https://googleads.googleapis.com/${versionGoogle()}/customers/${clienteGoogle()}/googleAds:mutate`, {
       method: "POST",
       headers: {
-        authorization: `Bearer ${acceso}`, "developer-token": env("GOOGLE_ADS_DEVELOPER_TOKEN"), "content-type": "application/json",
+        authorization: `Bearer ${acceso}`, "content-type": "application/json",
         ...(env("GOOGLE_ADS_LOGIN_CUSTOMER_ID") ? { "login-customer-id": env("GOOGLE_ADS_LOGIN_CUSTOMER_ID").replace(/\D/g, "") } : {}),
       },
       body: JSON.stringify({ mutateOperations: operaciones }),

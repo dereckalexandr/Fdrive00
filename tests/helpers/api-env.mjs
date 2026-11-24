@@ -336,7 +336,7 @@ export const iniciarFuncion = async () => {
     if (String(url).startsWith("https://googleads.googleapis.com/")) {
       const cuerpo = JSON.parse(init.body);
       ads.google.llamadas.push({ url: String(url), query: cuerpo.query, headers: init.headers });
-      if (ads.google.fallar) { const st = ads.google.fallar; ads.google.fallar = 0; return new Response(JSON.stringify({ error: { code: st, message: "falla simulada", details: [{ errors: [{ message: "El token de desarrollador no está aprobado" }] }] } }), { status: st }); }
+      if (ads.google.fallar) { const st = ads.google.fallar; ads.google.fallar = 0; return new Response(JSON.stringify({ error: { code: st, message: "falla simulada", details: [{ errors: [{ message: "CLOUD_PROJECT_NOT_APPROVED_FOR_PRODUCTION" }] }] } }), { status: st }); }
       const q = cuerpo.query;
       if (/segments\.month/.test(q)) return new Response(JSON.stringify({ results: Object.entries(ads.google.gastoMensual).map(([mes, pesos]) => ({ segments: { month: `${mes}-01` }, metrics: { costMicros: String(pesos * 1_000_000) } })) }), { status: 200 });
       if (/FROM customer/.test(q)) return new Response(JSON.stringify({ results: [{ customer: ads.google.cuenta }] }), { status: 200 });

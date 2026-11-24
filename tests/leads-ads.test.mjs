@@ -162,7 +162,7 @@ test("Google: exige la clave del formulario, ignora los datos de prueba, crea el
   ads.google.metricas["7700110022"] = { costMicros: 5_000_000, impressions: 10, clicks: 1, conversions: 0 };
   const CG = (await ve(U.mkt.token, "marketing.campanias.save", { datos: { nombre: "Búsqueda SUV", canal: "google", objetivo: "x", desde: `${mes}-01`, hasta: `${mes}-28`, presupuesto: 0 } })).campania;
   await ve(U.mkt.token, "marketing.campanias.enviar", { id: CG.id });
-  Object.assign(entorno, { GOOGLE_ADS_DEVELOPER_TOKEN: "t", GOOGLE_ADS_CUSTOMER_ID: "1234567890", GOOGLE_ADS_REFRESH_TOKEN: "r", GOOGLE_CLIENT_ID: "c", GOOGLE_CLIENT_SECRET: "s" });
+  Object.assign(entorno, { GOOGLE_ADS_CUSTOMER_ID: "1234567890", GOOGLE_ADS_REFRESH_TOKEN: "r", GOOGLE_CLIENT_ID: "c", GOOGLE_CLIENT_SECRET: "s" });
   assert.equal((await ve(U.mkt.token, "marketing.ads.vincular", { id: CG.id, plataforma: "google", externoId: "7700110022" })).status, 200);
   const cuerpo = { lead_id: "g-1001", campaign_id: 7700110022, form_id: 55, google_key: "clave-del-formulario-google", is_test: false, user_column_data: [
     { column_id: "FULL_NAME", string_value: "Pedro Rojas" }, { column_id: "PHONE_NUMBER", string_value: "+56 9 3333 4444" }, { column_id: "EMAIL", string_value: "pedro@correo.cl" }, { column_id: "CUSTOM_1", column_name: "¿Cuándo quieres comprar?", string_value: "Este mes" }] };

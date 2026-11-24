@@ -60,7 +60,7 @@ before(async () => {
   L1 = (await crm(admin, "locales.create", { nombre: "Casa matriz" })).local.id;
   await crear("jefe", "Julia Jefa", "12.345.678-5", ["jefe_local"]);
   await crear("mkt", "Marta Marketing", "10.000.013-K", ["marketing"]);
-  Object.assign(entorno, { GOOGLE_ADS_DEVELOPER_TOKEN: "t", GOOGLE_ADS_CUSTOMER_ID: "123-456-7890", GOOGLE_ADS_REFRESH_TOKEN: "r", GOOGLE_CLIENT_ID: "c", GOOGLE_CLIENT_SECRET: "s" });
+  Object.assign(entorno, { GOOGLE_ADS_CUSTOMER_ID: "123-456-7890", GOOGLE_ADS_REFRESH_TOKEN: "r", GOOGLE_CLIENT_ID: "c", GOOGLE_CLIENT_SECRET: "s" });
   db.tablas.kv_store.push({ key: "empresa::datos", value: JSON.stringify({ razon_social: "Empresa SpA", rut: "76557869-8", comuna: "Las Condes" }) });
 });
 

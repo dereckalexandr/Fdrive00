@@ -37,7 +37,7 @@ await crear("anu", "Ana Anunciante", "14.000.000-0", ["anunciante"]);
 await crear("mkt", "Marta Marketing", "10.000.013-K", ["marketing"]);
 
 // Meta Ads y Google Ads simulados (la demo no sale a internet): una cuenta conectada con algunas campañas, para ver Marketing → Campañas.
-Object.assign(entorno, { GOOGLE_ADS_LEAD_KEY: "clave-demo-formulario-google", META_AD_ACCOUNT_ID: "act_100200300", GOOGLE_ADS_DEVELOPER_TOKEN: "demo", GOOGLE_ADS_CUSTOMER_ID: "123-456-7890", GOOGLE_ADS_REFRESH_TOKEN: "demo", GOOGLE_CLIENT_ID: "demo", GOOGLE_CLIENT_SECRET: "demo" });
+Object.assign(entorno, { GOOGLE_ADS_LEAD_KEY: "clave-demo-formulario-google", META_AD_ACCOUNT_ID: "act_100200300", GOOGLE_ADS_CUSTOMER_ID: "123-456-7890", GOOGLE_ADS_REFRESH_TOKEN: "demo", GOOGLE_CLIENT_ID: "demo", GOOGLE_CLIENT_SECRET: "demo" });
 ads.meta.campanias = [
   { id: "120200000001", name: "SUV usados · Santiago", status: "ACTIVE", effective_status: "ACTIVE" },
   { id: "120200000002", name: "Retargeting visitantes del sitio", status: "ACTIVE", effective_status: "ACTIVE" },
