@@ -68,7 +68,16 @@ function ArchivoMensaje({ api, m }) {
     } catch (e) { setEstado(e && e.message === "archivo_muy_grande" ? "grande" : "error"); }
   };
   if (media.muy_grande) return <p className="text-xs italic text-stone-500">Archivo muy grande para el CRM: ábrelo en el teléfono de la empresa.</p>;
-  if (src) return <img src={src} alt="Foto del mensaje" className="max-w-[240px] max-h-[240px] object-contain rounded-lg cursor-zoom-in" onClick={() => window.open(src, "_blank")} />;
+  // Los navegadores no dejan abrir direcciones «data:» en una pestaña nueva (queda en blanco): se abre un enlace temporal «blob:».
+  const abrirGrande = async () => {
+    try {
+      const blob = await (await fetch(src)).blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank", "noopener");
+      setTimeout(() => URL.revokeObjectURL(url), 5 * 60_000);
+    } catch (e) { setEstado("error"); }
+  };
+  if (src) return <img src={src} alt="Foto del mensaje" title="Abrir en una ventana nueva" className="max-w-[240px] max-h-[240px] object-contain rounded-lg cursor-zoom-in" onClick={abrirGrande} />;
   const etiqueta = { image: "📷 Ver foto", sticker: "Ver sticker", document: `📄 ${media.nombre || "Abrir documento"}`, audio: "🎤 Escuchar audio", video: "🎬 Ver video" }[m.tipo] || "Abrir archivo";
   return (
     <button type="button" onClick={cargar} disabled={estado === "cargando"} className="text-sm text-sky-700 hover:underline text-left">
