@@ -11,6 +11,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { compressImage } from "./photos.js";
 import { webmOpusAOgg } from "./webm-ogg.js";
+import { RESTRICCIONES_MICROFONO, armarCadenaVoz, nivelAnalizador } from "./voz-audio.js";
 import { MAX_BYTES_MEDIA, TIPOS_AUDIO, CATEGORIAS_PLANTILLA, validarPlantillaNueva, variablesDe, nombrePlantilla, aplicarRespuesta, validarRespuestas, MAX_RESPUESTAS } from "../supabase/functions/api/whatsapp-core.js";
 import { INPUT, BTN, BTN_PRIMARIO, Aviso, Cargando, Tarjeta, Campo, useCarga, mensajeError } from "./crm-ui.jsx";
 
@@ -166,11 +167,14 @@ const mmss = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 function BotonGrabar({ onListo, onError, disabled }) {
   const [grabando, setGrabando] = useState(false);
   const [seg, setSeg] = useState(0);
-  const r = useRef({ rec: null, stream: null, timer: null, cancelar: false });
+  const [nivel, setNivel] = useState(0);
+  const [bajo, setBajo] = useState(false);
+  const r = useRef({ rec: null, stream: null, ctx: null, timer: null, medidor: null, cancelar: false });
   const limpiar = () => {
-    clearInterval(r.current.timer);
+    clearInterval(r.current.timer); clearInterval(r.current.medidor);
     if (r.current.stream) r.current.stream.getTracks().forEach((t) => t.stop());
-    r.current.stream = null; r.current.timer = null;
+    try { if (r.current.ctx) r.current.ctx.close(); } catch (e) { /* ya cerrado */ }
+    r.current.stream = null; r.current.timer = null; r.current.medidor = null; r.current.ctx = null;
   };
   useEffect(() => () => {
     r.current.cancelar = true;
@@ -185,13 +189,23 @@ function BotonGrabar({ onListo, onError, disabled }) {
     const tipo = tipoGrabacion();
     if (!tipo || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { onError("Este navegador no puede grabar notas de voz. Usa Chrome, Edge, Firefox o Safari actualizados, o adjunta un archivo de audio con 📎."); return; }
     let stream;
-    try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+    try { stream = await navigator.mediaDevices.getUserMedia(RESTRICCIONES_MICROFONO); }
     catch (e) { onError("No se pudo usar el micrófono. Permite el acceso al micrófono en el candado de la barra de direcciones y vuelve a intentar."); return; }
     try {
-      const rec = new MediaRecorder(stream, { mimeType: tipo });
+      // La voz pasa por filtro de zumbido, compresor, ganancia y limitador (se oye más fuerte y pareja); si el navegador no puede, se graba directo.
+      let ctx = null; let analizador = null; let origen = stream;
+      try {
+        ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const cadena = armarCadenaVoz(ctx, ctx.createMediaStreamSource(stream));
+        const destino = ctx.createMediaStreamDestination();
+        destino.channelCount = 1; destino.channelCountMode = "explicit";
+        cadena.salida.connect(destino);
+        analizador = cadena.analizador; origen = destino.stream;
+      } catch (e) { try { if (ctx) ctx.close(); } catch (e2) { /* nada */ } ctx = null; analizador = null; origen = stream; }
+      const rec = new MediaRecorder(origen, { mimeType: tipo, audioBitsPerSecond: 48000 });
       const trozos = [];
       const base = tipo.split(";")[0];
-      r.current = { rec, stream, timer: null, cancelar: false };
+      r.current = { rec, stream, ctx, timer: null, medidor: null, cancelar: false };
       rec.ondataavailable = (e) => { if (e.data && e.data.size) trozos.push(e.data); };
       rec.onstop = async () => {
         const cancelar = r.current.cancelar;
@@ -209,14 +223,22 @@ function BotonGrabar({ onListo, onError, disabled }) {
         } catch (e) { onError("No se pudo preparar la nota de voz. Graba de nuevo o adjunta un archivo de audio con 📎."); }
       };
       rec.start();
-      setSeg(0); setGrabando(true);
+      setSeg(0); setNivel(0); setBajo(false); setGrabando(true);
+      // Barra de volumen: si en los primeros segundos casi no hay señal, se avisa (micrófono lejos, silenciado o equivocado).
+      let maximo = 0; let ticks = 0;
+      if (analizador) r.current.medidor = setInterval(() => {
+        const v = nivelAnalizador(analizador); maximo = Math.max(maximo, v); ticks++;
+        setNivel(v); if (ticks === 25) setBajo(maximo < 0.08);
+      }, 120);
       r.current.timer = setInterval(() => setSeg((s) => { if (s + 1 >= MAX_SEG_VOZ) detener(false); return s + 1; }), 1000);
-    } catch (e) { stream.getTracks().forEach((t) => t.stop()); onError("No se pudo iniciar la grabación en este navegador."); }
+    } catch (e) { stream.getTracks().forEach((t) => t.stop()); limpiar(); onError("No se pudo iniciar la grabación en este navegador."); }
   };
   if (grabando) {
     return (
       <div className="flex items-center gap-2 shrink-0 text-sm">
         <span className="text-rose-600 font-mono animate-pulse">● {mmss(seg)}</span>
+        <span className="inline-block w-14 h-2 bg-stone-200 rounded overflow-hidden" title="Volumen del micrófono"><span className={`block h-full ${nivel > 0.9 ? "bg-rose-500" : "bg-emerald-500"}`} style={{ width: `${Math.round(Math.min(1, nivel * 1.6) * 100)}%` }} /></span>
+        {bajo && <span className="text-[11px] text-amber-700">Se oye muy bajo: acércate al micrófono</span>}
         <button type="button" onClick={() => detener(false)} className={BTN} title="Terminar y dejar la nota lista para enviar">⏹ Listo</button>
         <button type="button" onClick={() => detener(true)} className="text-xs text-rose-600 hover:underline">Cancelar</button>
       </div>
