@@ -16,6 +16,8 @@ import { permisosEfectivos } from "./crm-core.js";
 import { elegirAsignado, ETAPAS_CERRADAS } from "./ventas-core.js";
 import { permisoDeTipo, grupoDeReparto } from "./compras-core.js";
 import { enviarAviso, enSegundoPlano, correoActivo } from "./correo.ts";
+import { procesarBot, cargarConfigBot, CLAVE_BOT } from "./wa-bot.ts";
+import { validarConfigBot, estaAbierto, proximaApertura, textoHorario } from "./wa-bot-core.js";
 
 const env = (k: string) => (globalThis as any).Deno.env.get(k) ?? "";
 export const waConfigurado = () => !!(env("WA_TOKEN") && env("WA_PHONE_NUMBER_ID"));
@@ -114,14 +116,14 @@ export type DepsWebhook = {
 };
 
 /** Ejecutivo al que le toca un lead nuevo de venta en un local (reparto por turnos entre los habilitados), con el equipo del local para los avisos. */
-export async function elegirEjecutivo(d: DepsWebhook, local: string) {
+export async function elegirEjecutivo(d: DepsWebhook, local: string, tipo = "venta") {
   const { sb } = d;
   const overrides = await d.rolePermOverrides();
   const uq = await sb.from("usuarios").select("id, nombre, roles, permisos_extra, activo, local_id, email").eq("local_id", local);
   const usuarios = uq.data ?? [];
-  const elegibles = usuarios.filter((u: any) => u.activo && (() => { const p = permisosEfectivos(u.roles ?? [], overrides, u.permisos_extra); return p.includes("leads.propios") && p.includes(permisoDeTipo("venta")); })()).map((u: any) => ({ id: u.id, nombre: u.nombre }));
+  const elegibles = usuarios.filter((u: any) => u.activo && (() => { const p = permisosEfectivos(u.roles ?? [], overrides, u.permisos_extra); return p.includes("leads.propios") && p.includes(permisoDeTipo(tipo)); })()).map((u: any) => ({ id: u.id, nombre: u.nombre }));
   const ultimas: Record<string, string> = {};
-  const grupo = grupoDeReparto("venta");
+  const grupo = grupoDeReparto(tipo);
   const lastQ = await sb.from("leads").select("asignado_a, creado_en, tipo").eq("local_id", local);
   for (const l of lastQ.data ?? []) if (l.asignado_a && grupoDeReparto(l.tipo || "venta") === grupo && (!ultimas[l.asignado_a] || l.creado_en > ultimas[l.asignado_a])) ultimas[l.asignado_a] = l.creado_en;
   return { asignado: elegirAsignado(elegibles, ultimas), usuarios, overrides };
@@ -229,6 +231,8 @@ export async function webhookWhatsapp(req: Request, d: DepsWebhook): Promise<Res
       }).eq("id", conv.id);
       if (conv.lead_id) await sb.from("leads").update({ ultima_actividad: ahora }).eq("id", conv.lead_id);
       if (m.media) await enSegundoPlano(guardarMediaEntrante(sb, msg.data));
+      // Asistente fuera de horario (apagado por defecto): atiende al cliente con botones y deja el lead listo para la mañana.
+      await procesarBot({ sb, graph, phoneNumberId: miNumero, elegirEjecutivo: (local, tipo) => elegirEjecutivo(d, local, tipo), audit: d.audit }, conv, m);
     }
     for (const s of estados) {
       if (miNumero && s.phoneNumberId && s.phoneNumberId !== miNumero) continue;
@@ -380,6 +384,7 @@ export async function whatsappOp(h: HerramientasWa, op: string, body: any): Prom
           no_leidos: Number(c.no_leidos) || 0, ultimo_mensaje_en: c.ultimo_mensaje_en, ultimo_texto: c.ultimo_texto, ultima_direccion: c.ultima_direccion,
           ventanaAbierta: ventanaAbierta(c.ultimo_entrante_en), lead_id: c.lead_id, etapa: l ? l.etapa : null, tipo: l ? l.tipo : null, asignado: u ? u.nombre : null,
           etiquetas: Array.isArray(c.etiquetas) ? c.etiquetas : [],
+          bot: c.bot_estado && c.bot_estado.paso ? (c.bot_estado.paso === "listo" ? "listo" : "en_curso") : null,
         };
       }),
     });
@@ -403,6 +408,23 @@ export async function whatsappOp(h: HerramientasWa, op: string, body: any): Prom
       lead = a.lead; escribir = a.escribir;
     }
     return json(await detalle(conv, lead, escribir));
+  }
+
+  /** Asistente fuera de horario: lo ve quien usa WhatsApp; lo configura el Administrador o el Jefe Local. */
+  if (op === "wa.bot_estado") {
+    const cfg = await cargarConfigBot(sb);
+    const ahora = new Date();
+    return json({ config: cfg, puedeConfigurar: h.esAdmin || h.esSupervisor, abierto: estaAbierto(cfg.horario, ahora), proxima: proximaApertura(cfg.horario, ahora), horarioTexto: textoHorario(cfg.horario) });
+  }
+  if (op === "wa.bot_guardar") {
+    if (!(h.esAdmin || h.esSupervisor)) return err("forbidden", 403);
+    const v = validarConfigBot(body.config);
+    if (!v.ok) return err(v.error!);
+    const up = await sb.from("kv_store").upsert({ key: CLAVE_BOT, value: JSON.stringify(v.value), shared: false, updated_at: new Date().toISOString() }, { onConflict: "key" });
+    if (up.error) return fallo(up.error);
+    await h.audit(h.actor, "whatsapp.bot_config", "whatsapp", "bot", { activo: v.value.activo, empresa: v.value.empresa });
+    const ahora = new Date();
+    return json({ config: v.value, puedeConfigurar: true, abierto: estaAbierto(v.value.horario, ahora), proxima: proximaApertura(v.value.horario, ahora), horarioTexto: textoHorario(v.value.horario) });
   }
 
   /** Etiquetas de una conversación (las pone quien la puede ver: el ejecutivo del lead o el Jefe Local). */

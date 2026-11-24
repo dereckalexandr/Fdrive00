@@ -68,6 +68,7 @@ function mensajeEntrante(m, nombres, phoneNumberId) {
   const tipo = String(m.type || "otro");
   let texto = "";
   let media = null;
+  let respuestaId = ""; // botón o fila de lista que tocó el cliente (lo usa el asistente fuera de horario)
   const conMedia = (o, extra = {}) => (o && o.id ? { id: String(o.id), mime: String(o.mime_type || ""), ...extra } : null);
   if (tipo === "text") texto = (m.text && m.text.body) || "";
   else if (tipo === "image") { media = conMedia(m.image); texto = (m.image && m.image.caption) || ""; }
@@ -82,6 +83,7 @@ function mensajeEntrante(m, nombres, phoneNumberId) {
   else if (tipo === "interactive") {
     const i = m.interactive || {};
     texto = (i.button_reply && i.button_reply.title) || (i.list_reply && i.list_reply.title) || "";
+    respuestaId = String((i.button_reply && i.button_reply.id) || (i.list_reply && i.list_reply.id) || "");
   } else if (tipo === "reaction") texto = m.reaction && m.reaction.emoji ? `Reaccionó ${m.reaction.emoji}` : "Quitó una reacción";
   else if (tipo === "contacts") texto = (m.contacts || []).map((c) => (c.name && c.name.formatted_name) || "").filter(Boolean).join(", ") || "Compartió un contacto";
   else texto = "Mensaje no compatible (ábrelo en el teléfono)";
@@ -89,7 +91,7 @@ function mensajeEntrante(m, nombres, phoneNumberId) {
   return {
     wamid: String(m.id || ""), telefono, nombre: nombres[soloDigitos(m.from)] || "", ts: isoDe(m.timestamp),
     tipo: ["text", "image", "document", "audio", "video", "sticker", "location", "reaction"].includes(tipo) ? tipo : tipo === "button" || tipo === "interactive" ? "text" : "otro",
-    texto: String(texto).slice(0, MAX_TEXTO_WA), media, phoneNumberId,
+    texto: String(texto).slice(0, MAX_TEXTO_WA), media, phoneNumberId, ...(respuestaId ? { respuestaId } : {}),
   };
 }
 

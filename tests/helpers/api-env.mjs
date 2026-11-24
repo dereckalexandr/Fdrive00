@@ -23,7 +23,7 @@ let contadorPublicaciones = 0;
 let relojWa = Date.now();
 const marcaWa = () => new Date(++relojWa).toISOString();
 const DEFAULTS = {
-  wa_conversaciones: () => ({ id: randomUUID(), etiquetas: [], no_leidos: 0, cliente_id: null, lead_id: null, local_id: null, ultimo_mensaje_en: null, ultimo_entrante_en: null, creado_en: marcaWa(), actualizado_en: marcaWa() }),
+  wa_conversaciones: () => ({ id: randomUUID(), etiquetas: [], bot_estado: null, bot_actualizado: null, no_leidos: 0, cliente_id: null, lead_id: null, local_id: null, ultimo_mensaje_en: null, ultimo_entrante_en: null, creado_en: marcaWa(), actualizado_en: marcaWa() }),
   wa_mensajes: () => ({ id: randomUUID(), estado: "recibido", media: null, wamid: null, creado_en: marcaWa() }),
   usuarios: () => ({ id: randomUUID(), comision: {}, activo: true, debe_cambiar_clave: true, roles: [], permisos_extra: { otorgar: [], quitar: [] },
     email: null, telefono: null, local_id: null, ultimo_acceso: null, creado_en: new Date().toISOString() }),

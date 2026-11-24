@@ -432,6 +432,53 @@ export function SeccionWhatsapp({ api, leadId, onCambio }) {
   );
 }
 
+const HORA = "border border-stone-300 bg-white px-2 py-1 text-sm w-28"; // casilla de hora compacta (INPUT ocupa todo el ancho)
+const DIAS_BOT = [["lun", "Lunes"], ["mar", "Martes"], ["mie", "Miércoles"], ["jue", "Jueves"], ["vie", "Viernes"], ["sab", "Sábado"], ["dom", "Domingo"]];
+
+/** Asistente de WhatsApp fuera de horario: se enciende y se fija el horario de atención (Administrador y Jefe Local). */
+function ConfigAsistente({ api }) {
+  const { cargando, datos, recargar } = useCarga(() => api("wa.bot_estado", {}), [api]);
+  const [f, setF] = useState(null);
+  const [msg, setMsg] = useState("");
+  const [ocupado, setOcupado] = useState(false);
+  useEffect(() => { if (datos && datos.puedeConfigurar && !f) setF(JSON.parse(JSON.stringify(datos.config))); }, [datos, f]);
+  if (cargando && !datos) return null;
+  if (!datos || !datos.puedeConfigurar || !f) return null;
+  const dia = (d, campo, valor) => setF((x) => ({ ...x, horario: { ...x.horario, [d]: { ...x.horario[d], [campo]: valor } } }));
+  const guardar = async () => {
+    setMsg(""); setOcupado(true);
+    try { await api("wa.bot_guardar", { config: f }); await recargar(); setMsg("Guardado."); } catch (e) { setMsg(mensajeError(e)); }
+    setOcupado(false);
+  };
+  return (
+    <Tarjeta titulo="Asistente fuera de horario" ayuda="Cuando un cliente escribe con el local cerrado, el asistente le pregunta con botones qué necesita, su nombre, el detalle del auto y cuándo prefiere que lo contacten; deja el lead con el tipo correcto (venta, compra o consignación), reasignado por tipo y rotación, y avisa al ejecutivo por correo. En horario de atención no interviene.">
+      <div className="flex flex-col gap-3 text-sm">
+        <label className="flex items-center gap-2"><input type="checkbox" checked={!!f.activo} onChange={(e) => setF((x) => ({ ...x, activo: e.target.checked }))} /> <b>Asistente encendido</b>
+          <span className={`text-xs px-2 py-0.5 ${datos.abierto ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>Ahora: {datos.abierto ? "dentro del horario" : `fuera de horario (atendemos ${datos.proxima})`}</span>
+        </label>
+        <Campo etiqueta="Nombre con que se presenta el asistente" ayuda="Por ejemplo: BuyCar. Dice «Soy el asistente de BuyCar».">
+          <input value={f.empresa} maxLength={60} onChange={(e) => setF((x) => ({ ...x, empresa: e.target.value }))} className={`${INPUT} md:w-72`} placeholder="Nombre de la automotora" />
+        </Campo>
+        <div className="flex flex-col gap-1">
+          <p className="text-xs text-stone-600">Horario de atención (hora de Chile). Fuera de estas horas actúa el asistente.</p>
+          {DIAS_BOT.map(([d, nombre]) => (
+            <div key={d} className="flex flex-wrap items-center gap-2">
+              <label className="flex items-center gap-2 w-28"><input type="checkbox" checked={!!f.horario[d].abierto} onChange={(e) => dia(d, "abierto", e.target.checked)} /> {nombre}</label>
+              {f.horario[d].abierto
+                ? <><input type="time" value={f.horario[d].desde} onChange={(e) => dia(d, "desde", e.target.value)} className={HORA} /> <span>a</span> <input type="time" value={f.horario[d].hasta} onChange={(e) => dia(d, "hasta", e.target.value)} className={HORA} /></>
+                : <span className="text-xs text-stone-500">Cerrado todo el día</span>}
+            </div>
+          ))}
+        </div>
+        <div className="flex items-center gap-3">
+          <button type="button" onClick={guardar} disabled={ocupado} className={BTN_PRIMARIO}>{ocupado ? "Guardando…" : "Guardar"}</button>
+          {msg && <span className="text-xs text-stone-600">{msg}</span>}
+        </div>
+      </div>
+    </Tarjeta>
+  );
+}
+
 /** Estado de la conexión y el local de los leads nuevos (solo el Administrador). */
 function ConfigWhatsapp({ api, locales }) {
   const { cargando, datos, recargar } = useCarga(() => api("wa.estado", {}), [api]);
@@ -687,6 +734,7 @@ export function BandejaWhatsapp({ api, abrirLead, locales, onCambio = () => {} }
   return (
     <div className="flex flex-col gap-4">
       <ConfigWhatsapp api={api} locales={locales} />
+      <ConfigAsistente api={api} />
       {(datos.puedePlantillas || datos.puedeRespuestas) && (
         <div className="flex border border-stone-300 self-start">
           <button type="button" onClick={() => setVista("conversaciones")} className={`px-3 py-1.5 text-sm ${vista === "conversaciones" ? "bg-stone-900 text-white" : "bg-white text-stone-700"}`}>Conversaciones</button>
@@ -718,6 +766,7 @@ export function BandejaWhatsapp({ api, abrirLead, locales, onCambio = () => {} }
                   </div>
                   <p className="text-xs text-stone-500 truncate">{c.ultima_direccion === "saliente" ? "Tú: " : ""}{c.ultimo_texto || "—"}</p>
                   {c.asignado && <p className="text-[11px] text-stone-400 truncate">Atiende {c.asignado}</p>}
+                  {c.bot && <p className="text-[11px] text-sky-700">🤖 {c.bot === "listo" ? "Asistente: datos recogidos" : "Asistente conversando con el cliente"}</p>}
                   {(c.etiquetas || []).length > 0 && <div className="flex flex-wrap gap-1 mt-0.5">{c.etiquetas.map((t) => <span key={t} className="text-[10px] bg-amber-100 text-amber-900 px-1.5 rounded-full">{t}</span>)}</div>}
                 </div>
                 {c.no_leidos > 0 && <span className="self-center text-xs bg-emerald-500 text-white rounded-full min-w-[1.4rem] text-center px-1.5 py-0.5">{c.no_leidos}</span>}
