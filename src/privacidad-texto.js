@@ -3,7 +3,7 @@
 // Marco legal: Ley N° 19.628 sobre protección de la vida privada y, desde su entrada en vigencia (1 de diciembre de 2026),
 // la Ley N° 21.719 que la reemplaza y crea la Agencia de Protección de Datos Personales.
 
-export const ACTUALIZADA = "19 de noviembre de 2026";
+export const ACTUALIZADA = "24 de noviembre de 2026";
 
 const limpio = (x) => String(x ?? "").replace(/\s+/g, " ").trim();
 
@@ -48,6 +48,7 @@ export function seccionesPrivacidad(d = {}) {
       titulo: "3. Para qué los usamos",
       lista: [
         "Responder tus consultas y solicitudes, y contactarte sobre ellas por teléfono, WhatsApp o correo.",
+        "Atenderte por WhatsApp fuera de nuestro horario con un asistente virtual, que usa inteligencia artificial para responder preguntas sobre los autos disponibles y dejar tu consulta anotada para un ejecutivo. El asistente te avisa que es automático, no negocia precios ni decide nada por nosotros, y siempre puedes pedir que te atienda una persona.",
         "Cotizar vehículos, evaluar financiamiento (solo si lo pides) y tasar el vehículo que nos ofreces.",
         "Preparar y cumplir la compraventa, la consignación o la reserva que acordemos, incluidos los contratos y la transferencia del vehículo.",
         "Cumplir obligaciones legales, tributarias y contables.",
@@ -68,7 +69,7 @@ export function seccionesPrivacidad(d = {}) {
       titulo: "5. Con quién los compartimos",
       parrafos: ["No vendemos ni arrendamos tus datos. Solo los compartimos cuando es necesario para atenderte:"],
       lista: [
-        "Proveedores tecnológicos que nos prestan servicios y tratan los datos por encargo nuestro: Supabase (base de datos y servidores), Vercel (alojamiento del sitio), Meta Platforms (WhatsApp Business), Resend (envío de correos) y Cloudflare (verificación contra robots).",
+        "Proveedores tecnológicos que nos prestan servicios y tratan los datos por encargo nuestro: Supabase (base de datos y servidores), Vercel (alojamiento del sitio), Meta Platforms (WhatsApp Business), Anthropic (inteligencia artificial del asistente virtual de WhatsApp), Resend (envío de correos) y Cloudflare (verificación contra robots).",
         "Instituciones financieras, solo si nos pides evaluar un crédito.",
         "Notarías, el Registro Civil y otras entidades que intervienen en la transferencia de un vehículo.",
         "Autoridades, cuando una ley o una resolución judicial lo exige.",

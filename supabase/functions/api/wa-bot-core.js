@@ -6,6 +6,8 @@
 // los datos anotados y el ejecutivo que corresponde. Las respuestas son botones y listas de WhatsApp: no interpreta texto libre
 // salvo para entender «quiero vender mi auto» y similares.
 
+import { validarIa, IA_DEFECTO } from "./wa-ia-core.js";
+
 export const ZONA_HORARIA = "America/Santiago";
 export const DIAS = ["dom", "lun", "mar", "mie", "jue", "vie", "sab"]; // posición = Date.getDay()
 const NOMBRE_DIA = { dom: "el domingo", lun: "el lunes", mar: "el martes", mie: "el miércoles", jue: "el jueves", vie: "el viernes", sab: "el sábado" };
@@ -25,12 +27,12 @@ export const HORARIO_DEFECTO = {
   sab: { abierto: true, desde: "10:00", hasta: "14:00" },
   dom: { abierto: false, desde: "10:00", hasta: "14:00" },
 };
-export const CONFIG_BOT_DEFECTO = { activo: false, empresa: "", horario: HORARIO_DEFECTO };
+export const CONFIG_BOT_DEFECTO = { activo: false, empresa: "", horario: HORARIO_DEFECTO, ia: IA_DEFECTO };
 
 const hhmm = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const minutos = (s) => { const m = hhmm.exec(String(s || "")); return m ? Number(m[1]) * 60 + Number(m[2]) : NaN; };
 
-/** Configuración del asistente que envía el Administrador o el Jefe Local: { activo, empresa, horario }. */
+/** Configuración del asistente que envía el Administrador o el Jefe Local: { activo, empresa, horario, ia: { activa, maxUsdMes, maxPorConversacion } }. */
 export function validarConfigBot(c) {
   if (!c || typeof c !== "object") return { ok: false, error: "bot_config_invalida" };
   const empresa = String(c.empresa ?? "").replace(/\s+/g, " ").trim();
@@ -45,7 +47,9 @@ export function validarConfigBot(c) {
     if (abierto && minutos(desde) >= minutos(hasta)) return { ok: false, error: "bot_horario_invalido" };
     horario[d] = { abierto, desde, hasta };
   }
-  return { ok: true, value: { activo: !!c.activo, empresa, horario } };
+  const ia = validarIa(c.ia);
+  if (!ia.ok) return ia;
+  return { ok: true, value: { activo: !!c.activo, empresa, horario, ia: ia.value } };
 }
 
 /** Configuración guardada (JSON o texto) con los valores por defecto para lo que falte. */
@@ -53,7 +57,7 @@ export function configBot(valor) {
   let o = valor;
   if (typeof o === "string") { try { o = JSON.parse(o); } catch { o = null; } }
   const v = validarConfigBot(o || CONFIG_BOT_DEFECTO);
-  return v.ok ? v.value : { activo: false, empresa: "", horario: HORARIO_DEFECTO };
+  return v.ok ? v.value : { activo: false, empresa: "", horario: HORARIO_DEFECTO, ia: IA_DEFECTO };
 }
 
 /** Día de la semana y minutos desde la medianoche, según la hora de Chile. */
@@ -156,7 +160,7 @@ function preguntaDetalle(nec, nombre) {
 /** Primer mensaje del asistente para un cliente nuevo (o que vuelve de cero) fuera de horario. */
 export function mensajeInicio(cfg, ahora = new Date()) {
   const empresa = cfg.empresa || "nuestro equipo";
-  return lista(`Hola 👋 Soy el asistente de ${empresa}. Ahora estamos fuera de horario (atendemos ${textoHorario(cfg.horario)}), pero te dejo registrado para que un ejecutivo te contacte ${proximaApertura(cfg.horario, ahora)}.\n\n¿Qué necesitas?`);
+  return lista(`Hola 👋 Soy el asistente virtual de ${empresa}. Ahora estamos fuera de horario (atendemos ${textoHorario(cfg.horario)}), pero te dejo registrado para que un ejecutivo te contacte ${proximaApertura(cfg.horario, ahora)}.\n\n¿Qué necesitas?`);
 }
 
 /** Aviso corto para un cliente que ya tiene ejecutivo: no se le vuelve a preguntar nada. */

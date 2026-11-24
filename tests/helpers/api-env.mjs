@@ -201,6 +201,11 @@ export const paginasMinimo = { llamadas: [], respuestas: {} };
  */
 export const meta = { llamadas: [], plantillas: [], fallarEnvio: "", archivos: {}, n: 0 };
 /**
+ * Claude simulado (asistente con IA de WhatsApp): `llamadas` guarda lo que se le pidió y `guion` son las respuestas que devuelve, en orden
+ * (un objeto de respuesta de la API o una función que recibe los parámetros). `error`: si es un texto, la próxima llamada lanza ese error.
+ */
+export const ia = { llamadas: [], guion: [], error: "" };
+/**
  * Google (OAuth y Calendar API) simulado. `llamadas`: { metodo, url, cuerpo, auth }. `eventos`: id → evento vigente.
  * `fallar`: si es un número, la próxima llamada a Calendar responde con ese estado de error.
  */
@@ -219,9 +224,23 @@ export const iniciarFuncion = async () => {
   const dir = mkdtempSync(join(tmpdir(), "df-api-"));
   const fake = join(dir, "fake-supabase.mjs");
   writeFileSync(fake, "export const createClient = () => globalThis.__baseFalsa.cliente;\n");
+  // Claude simulado: el asistente con IA de WhatsApp llama a «./claude.ts»; en las pruebas responde lo que diga el guion de `ia`.
+  const fakeClaude = join(dir, "fake-claude.mjs");
+  writeFileSync(fakeClaude, [
+    "export const llamarClaude = (p) => globalThis.__claudeFalso(p);",
+    "export const claudeConfigurado = () => !!globalThis.Deno.env.get('ANTHROPIC_API_KEY');",
+    "export const modeloClaude = () => globalThis.Deno.env.get('ANTHROPIC_MODEL_WA') || 'claude-haiku-5-5';",
+  ].join("\n") + "\n");
+  globalThis.__claudeFalso = async (p) => {
+    ia.llamadas.push(JSON.parse(JSON.stringify(p)));
+    if (ia.error) { const e = ia.error; ia.error = ""; throw new Error(e); }
+    const g = ia.guion.shift();
+    if (!g) throw new Error("Claude simulado: no hay más respuestas en el guion");
+    return typeof g === "function" ? g(p) : g;
+  };
   const core = pathToFileURL(resolve("supabase/functions/api/crm-core.js")).href;
   let src = readFileSync("supabase/functions/api/index.ts", "utf8");
-  src = src.replace("npm:@supabase/supabase-js@2", pathToFileURL(fake).href).replace("./crm-core.js", core).replace("./ventas.ts", pathToFileURL(resolve("supabase/functions/api/ventas.ts")).href).replace("./publico.ts", pathToFileURL(resolve("supabase/functions/api/publico.ts")).href).replace("./alertas.ts", pathToFileURL(resolve("supabase/functions/api/alertas.ts")).href).replace("./patentes-core.js", pathToFileURL(resolve("supabase/functions/api/patentes-core.js")).href).replace("./whatsapp.ts", pathToFileURL(resolve("supabase/functions/api/whatsapp.ts")).href).replace("./ads.ts", pathToFileURL(resolve("supabase/functions/api/ads.ts")).href).replace("./leads-ads.ts", pathToFileURL(resolve("supabase/functions/api/leads-ads.ts")).href).replace("./catalogo.ts", pathToFileURL(resolve("supabase/functions/api/catalogo.ts")).href);
+  src = src.replace("npm:@supabase/supabase-js@2", pathToFileURL(fake).href).replace("./crm-core.js", core).replace("./ventas.ts", pathToFileURL(resolve("supabase/functions/api/ventas.ts")).href).replace("./publico.ts", pathToFileURL(resolve("supabase/functions/api/publico.ts")).href).replace("./alertas.ts", pathToFileURL(resolve("supabase/functions/api/alertas.ts")).href).replace("./patentes-core.js", pathToFileURL(resolve("supabase/functions/api/patentes-core.js")).href).replace("./whatsapp.ts", pathToFileURL(resolve("supabase/functions/api/whatsapp.ts")).href).replace("./ads.ts", pathToFileURL(resolve("supabase/functions/api/ads.ts")).href).replace("./leads-ads.ts", pathToFileURL(resolve("supabase/functions/api/leads-ads.ts")).href).replace("./catalogo.ts", pathToFileURL(resolve("supabase/functions/api/catalogo.ts")).href).replace("./claude.ts", pathToFileURL(fakeClaude).href);
   const archivo = join(dir, "index.mts");
   writeFileSync(archivo, src);
   globalThis.__baseFalsa = db;

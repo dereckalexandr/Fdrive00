@@ -6,8 +6,9 @@
 // Meta y con la base. Nunca lanza: si algo falla, el mensaje del cliente igual quedó guardado y el ejecutivo lo verá en la mañana.
 import {
   configBot, estaAbierto, estadoInicial, avanzar, mensajeInicio, mensajeFueraDeHorario, resumenBot, cuerpoMeta, textoParaConversacion,
-  tipoLeadDeNecesidad, proximaApertura, HORAS_SIN_REPETIR, HORAS_HUMANO_ACTIVO,
+  tipoLeadDeNecesidad, proximaApertura, interpretarNecesidad, tituloNecesidad, HORAS_SIN_REPETIR, HORAS_HUMANO_ACTIVO,
 } from "./wa-bot-core.js";
+import { responderConIA, type DepsIa } from "./wa-ia.ts";
 import { telefonoVisible } from "./whatsapp-core.js";
 import { grupoDeReparto, tipoLeadNombre } from "./compras-core.js";
 import { ETAPAS_CERRADAS } from "./ventas-core.js";
@@ -23,6 +24,8 @@ export type DepsBot = {
   phoneNumberId: string;
   elegirEjecutivo: (local: string, tipo: string) => Promise<{ asignado: any; usuarios: any[]; overrides: any }>;
   audit: (actor: any, accion: string, entidad?: string, entidadId?: string, detalle?: Record<string, unknown>) => Promise<void>;
+  /** Claude (opcional): sin esto, o con la IA apagada en la configuración, el asistente funciona solo con el menú. */
+  ia?: DepsIa;
 };
 
 export async function cargarConfigBot(sb: any) {
@@ -31,14 +34,14 @@ export async function cargarConfigBot(sb: any) {
 }
 
 /** Envía un mensaje del asistente y lo deja en la conversación (con el nombre «Asistente»). Devuelve false si Meta lo rechazó. */
-async function enviar(deps: DepsBot, conv: any, mensaje: any): Promise<boolean> {
+async function enviar(deps: DepsBot, conv: any, mensaje: any, quien = { id: "bot", nombre: "Asistente" }): Promise<boolean> {
   const envio = { messaging_product: "whatsapp", recipient_type: "individual", to: conv.telefono, ...cuerpoMeta(mensaje) };
   const r = await deps.graph(`/${encodeURIComponent(deps.phoneNumberId)}/messages`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(envio) });
   if (!r.ok) { console.error("whatsapp bot:", r.error); return false; }
   const texto = textoParaConversacion(mensaje);
   await deps.sb.from("wa_mensajes").insert({
     conversacion_id: conv.id, wamid: String((((r.data || {}).messages || [])[0] || {}).id || "") || null, direccion: "saliente", tipo: "text", texto,
-    estado: "enviado", lead_id: conv.lead_id || null, usuario_id: "bot", usuario_nombre: "Asistente",
+    estado: "enviado", lead_id: conv.lead_id || null, usuario_id: quien.id, usuario_nombre: quien.nombre,
   });
   const ahora = new Date().toISOString();
   await deps.sb.from("wa_conversaciones").update({ ultimo_mensaje_en: ahora, ultimo_texto: texto.slice(0, 200), ultima_direccion: "saliente", actualizado_en: ahora }).eq("id", conv.id);
@@ -109,14 +112,33 @@ export async function procesarBot(deps: DepsBot, conv: any, m: any, ahora: Date 
     // Si un ejecutivo ya está conversando, no se mete.
     const salientes = (await sb.from("wa_mensajes").select("usuario_id, creado_en").eq("conversacion_id", conv.id).eq("direccion", "saliente")).data ?? [];
     const limite = ahora.getTime() - HORAS_HUMANO_ACTIVO * 3_600_000;
-    if (salientes.some((x: any) => x.usuario_id && x.usuario_id !== "bot" && Date.parse(x.creado_en) > limite)) return;
+    if (salientes.some((x: any) => x.usuario_id && x.usuario_id !== "bot" && x.usuario_id !== "bot-ia" && Date.parse(x.creado_en) > limite)) return;
 
     const estado = conv.bot_estado && conv.bot_estado.paso ? conv.bot_estado : null;
     const ult = Date.parse(conv.bot_actualizado || "");
     const vigente = Number.isFinite(ult) && ahora.getTime() - ult < HORAS_SIN_REPETIR * 3_600_000;
     const guardar = (e: any) => sb.from("wa_conversaciones").update({ bot_estado: e, bot_actualizado: ahora.toISOString() }).eq("id", conv.id);
 
+    // IA (Claude): responde las preguntas libres del cliente cuando el menú no está esperando un dato. Sin clave, apagada o con un tope
+    // alcanzado, no hace nada y el asistente de menú sigue como siempre.
+    const iaLista = !!(cfg.ia && cfg.ia.activa && deps.ia && deps.ia.claveCargada());
+    const textoLibre = m.tipo === "text" && !m.respuestaId && String(m.texto || "").trim().length >= 8;
+    const conIA = async (necesidad = ""): Promise<string> => {
+      const lead0 = conv.lead_id ? (await sb.from("leads").select("asignado_a, etapa").eq("id", conv.lead_id).maybeSingle()).data : null;
+      let ejecutivo = "";
+      if (lead0 && lead0.asignado_a && !ETAPAS_CERRADAS.includes(lead0.etapa)) ejecutivo = ((await sb.from("usuarios").select("nombre").eq("id", lead0.asignado_a).maybeSingle()).data || {}).nombre || "";
+      const cli0 = conv.cliente_id ? (await sb.from("clientes").select("nombre").eq("id", conv.cliente_id).maybeSingle()).data : null;
+      const nombre = cli0 && cli0.nombre && !/^WhatsApp /.test(cli0.nombre) ? cli0.nombre : "";
+      return await responderConIA(deps, deps.ia as DepsIa, conv, cfg, { nombre, ejecutivo, necesidad }, (t) => enviar(deps, conv, { tipo: "texto", texto: t }, { id: "bot-ia", nombre: "Asistente IA" }), ahora);
+    };
+    const atendida = (r: string) => r === "respondio" || r === "derivo";
+
     // Conversación en curso: sigue con la respuesta del cliente.
+    if (estado && estado.paso === "necesidad" && vigente && !estado.derivado && iaLista && textoLibre && interpretarNecesidad(m.texto) === null) {
+      // Escribió una pregunta en vez de elegir de la lista: la IA la responde y el menú queda esperando.
+      const r = await conIA();
+      if (atendida(r)) { await guardar(r === "derivo" ? { ...estado, derivado: true } : estado); return; }
+    }
     if (estado && estado.paso !== "listo" && vigente) {
       const r = avanzar(estado, { id: m.respuestaId || "", texto: m.texto || "", tipo: m.tipo }, cfg, ahora);
       let enviado = true;
@@ -128,7 +150,13 @@ export async function procesarBot(deps: DepsBot, conv: any, m: any, ahora: Date 
       return;
     }
     // Ya terminó hace poco: lo que escriba ahora queda en la conversación para el ejecutivo, sin respuesta.
-    if (estado && estado.paso === "listo" && vigente) return;
+    if (estado && estado.paso === "listo" && vigente) {
+      if (iaLista && textoLibre && !estado.derivado) {
+        const r = await conIA(tituloNecesidad(estado.datos && estado.datos.necesidad));
+        if (r === "derivo") await guardar({ ...estado, derivado: true });
+      }
+      return;
+    }
 
     // Conversación nueva (o que vuelve después de horas): ¿cliente nuevo o cliente que ya tiene ejecutivo?
     const lead = conv.lead_id ? (await sb.from("leads").select("id, etapa, fuente, creado_en, asignado_a").eq("id", conv.lead_id).maybeSingle()).data : null;
@@ -136,6 +164,11 @@ export async function procesarBot(deps: DepsBot, conv: any, m: any, ahora: Date 
     if (!lead || recien) {
       if (await enviar(deps, conv, mensajeInicio(cfg, ahora))) await guardar(estadoInicial(ahora));
       return;
+    }
+    // Cliente conocido que escribe una pregunta: la IA le responde; si no puede, el aviso corto de siempre.
+    if (iaLista && textoLibre) {
+      const r = await conIA();
+      if (atendida(r)) { await guardar({ paso: "listo", datos: {}, intentos: 0, aviso: true, ia: true, ...(r === "derivo" ? { derivado: true } : {}) }); return; }
     }
     // Cliente conocido: un aviso corto con el nombre de su ejecutivo (si el lead sigue abierto).
     let ejecutivo = "";

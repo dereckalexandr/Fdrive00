@@ -66,7 +66,7 @@ test("Conversación completa: lista → nombre → detalle → preferencia → c
   const noche = stgo("2026-11-24T22:00:00");
   const ini = mensajeInicio(CFG, noche);
   assert.equal(ini.tipo, "lista");
-  assert.match(ini.texto, /asistente de BuyCar/);
+  assert.match(ini.texto, /asistente virtual de BuyCar/);
   assert.match(ini.texto, /lunes a viernes de 09:00 a 19:00/);
   assert.match(ini.texto, /mañana desde las 09:00/);
   assert.deepEqual(ini.filas.map((f) => f.id), ["comprar", "vender", "consignar", "financiar", "otra"]);

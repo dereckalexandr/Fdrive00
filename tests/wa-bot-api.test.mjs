@@ -99,7 +99,7 @@ test("Cliente nuevo fuera de horario: lista → nombre → detalle → preferenc
   assert.equal(e.length, 1);
   assert.equal(e[0].cuerpo.type, "interactive");
   assert.equal(e[0].cuerpo.interactive.type, "list");
-  assert.match(e[0].cuerpo.interactive.body.text, /asistente de BuyCar/);
+  assert.match(e[0].cuerpo.interactive.body.text, /asistente virtual de BuyCar/);
   assert.deepEqual(e[0].cuerpo.interactive.action.sections[0].rows.map((r) => r.id), ["comprar", "vender", "consignar", "financiar", "otra"]);
   assert.equal(conv(T).bot_estado.paso, "necesidad");
   const salida = delBot(T)[0];

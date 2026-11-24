@@ -43,6 +43,7 @@ const MENSAJES = {
   google_palabras: "Escribe entre 1 y 30 palabras clave, de hasta 80 caracteres (una por línea).",
   bot_horario_invalido: "El horario no es válido: la hora de inicio debe ser anterior a la de término.",
   bot_config_invalida: "La configuración del asistente no es válida (el nombre de la empresa admite hasta 60 caracteres).",
+  ia_config_invalida: "La configuración de la IA no es válida: el tope mensual debe ser un monto en dólares y el máximo por conversación, un número entre 1 y 100.",
   etiquetas_invalidas: "Cada conversación admite hasta 5 etiquetas de 2 a 20 caracteres.",
   ads_no_configurado: "Esa plataforma aún no está conectada: el Administrador debe cargar las claves de la cuenta publicitaria en el servidor.",
   externo_no_existe: "Esa campaña ya no existe en la plataforma o no pertenece a la cuenta conectada.",

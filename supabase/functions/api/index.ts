@@ -22,6 +22,7 @@ import { limiteDiario, limiteWeb } from "./patentes-core.js";
 import { publicOp } from "./publico.ts";
 import { correrAlertas } from "./alertas.ts";
 import { webhookWhatsapp } from "./whatsapp.ts";
+import { llamarClaude, claudeConfigurado, modeloClaude } from "./claude.ts";
 import { sincronizarCampanias } from "./ads.ts";
 import { avisoPaginaMeta, webhookLeadsGoogle } from "./leads-ads.ts";
 import { catalogoGet } from "./catalogo.ts";
@@ -572,7 +573,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
   // Avisos de WhatsApp (Meta): .../functions/v1/api?whatsapp=1. Se autentican con la firma de Meta (WA_APP_SECRET), no con sesión.
   if (new URL(req.url).searchParams.has("whatsapp")) {
-    try { const deps = { sb, audit, rolePermOverrides }; return await webhookWhatsapp(req, { ...deps, pagina: (payload: any) => avisoPaginaMeta(deps, payload) }); }
+    try { const deps = { sb, audit, rolePermOverrides }; return await webhookWhatsapp(req, { ...deps, pagina: (payload: any) => avisoPaginaMeta(deps, payload), ia: { claude: llamarClaude, claveCargada: claudeConfigurado, modelo: modeloClaude(), urlSitio: String(Deno.env.get("SITIO_URL") || "https://fdrive02.vercel.app").replace(/[/]+$/, "") } }); }
     catch (e) { console.error("whatsapp:", e); return new Response("error", { status: 500 }); }
   }
   // Catálogo de autos para Meta y fotos de los autos del catálogo (públicos, solo lectura): ?catalogo=meta-vehiculos · ?vfoto=<id>&f=<foto>.

@@ -459,6 +459,20 @@ function ConfigAsistente({ api }) {
         <Campo etiqueta="Nombre con que se presenta el asistente" ayuda="Por ejemplo: BuyCar. Dice «Soy el asistente de BuyCar».">
           <input value={f.empresa} maxLength={60} onChange={(e) => setF((x) => ({ ...x, empresa: e.target.value }))} className={`${INPUT} md:w-72`} placeholder="Nombre de la automotora" />
         </Campo>
+        <div className="border border-stone-200 rounded p-3 flex flex-col gap-2">
+          <label className="flex items-center gap-2"><input type="checkbox" checked={!!f.ia.activa} onChange={(e) => setF((x) => ({ ...x, ia: { ...x.ia, activa: e.target.checked } }))} /> <b>Responder preguntas con inteligencia artificial (Claude)</b></label>
+          <p className="text-xs text-stone-600">Cuando el cliente escribe una pregunta fuera de horario (por ejemplo «¿tienen un Yaris automático bajo 10 millones?»), la IA busca en el inventario disponible y le responde con precios y enlaces del sitio, anota lo que le interesa en su ficha y lo deriva a un ejecutivo si quiere negociar, reservar, pagar o tiene un reclamo. No da descuentos ni ve costos. Siempre dice que es un asistente virtual.</p>
+          {!datos.ia.claveCargada && <p className="text-xs text-amber-700">Falta cargar la clave de Anthropic (ANTHROPIC_API_KEY) en Supabase: mientras tanto la IA no responde y el asistente funciona solo con el menú.</p>}
+          <div className="flex flex-wrap gap-4">
+            <Campo etiqueta="Tope de gasto al mes (US$)" ayuda="0 = sin tope. Al alcanzarlo la IA deja de responder hasta el mes siguiente.">
+              <input type="number" min="0" step="1" value={f.ia.maxUsdMes} onChange={(e) => setF((x) => ({ ...x, ia: { ...x.ia, maxUsdMes: e.target.value } }))} className={HORA} />
+            </Campo>
+            <Campo etiqueta="Máx. respuestas de IA por conversación" ayuda="En 12 horas; evita conversaciones sin fin.">
+              <input type="number" min="1" max="100" step="1" value={f.ia.maxPorConversacion} onChange={(e) => setF((x) => ({ ...x, ia: { ...x.ia, maxPorConversacion: e.target.value } }))} className={HORA} />
+            </Campo>
+          </div>
+          {datos.ia.uso && <p className="text-xs text-stone-600">Este mes: {datos.ia.uso.llamadas} {datos.ia.uso.llamadas === 1 ? "consulta" : "consultas"} a la IA · gasto estimado {datos.ia.uso.usd < 0.01 ? "menos de US$ 0,01" : `US$ ${datos.ia.uso.usd.toFixed(2)}`} · modelo {datos.ia.modelo}</p>}
+        </div>
         <div className="flex flex-col gap-1">
           <p className="text-xs text-stone-600">Horario de atención (hora de Chile). Fuera de estas horas actúa el asistente.</p>
           {DIAS_BOT.map(([d, nombre]) => (

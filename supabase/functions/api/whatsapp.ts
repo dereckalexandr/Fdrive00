@@ -17,6 +17,8 @@ import { elegirAsignado, ETAPAS_CERRADAS } from "./ventas-core.js";
 import { permisoDeTipo, grupoDeReparto } from "./compras-core.js";
 import { enviarAviso, enSegundoPlano, correoActivo } from "./correo.ts";
 import { procesarBot, cargarConfigBot, CLAVE_BOT } from "./wa-bot.ts";
+import { usoDelMes, type DepsIa } from "./wa-ia.ts";
+import { MODELO_IA_DEFECTO } from "./wa-ia-core.js";
 import { validarConfigBot, estaAbierto, proximaApertura, textoHorario } from "./wa-bot-core.js";
 
 const env = (k: string) => (globalThis as any).Deno.env.get(k) ?? "";
@@ -113,6 +115,8 @@ export type DepsWebhook = {
   sb: any; audit: (actor: any, accion: string, entidad?: string, entidadId?: string, detalle?: Record<string, unknown>) => Promise<void>; rolePermOverrides: () => Promise<Record<string, string[]>>;
   /** Avisos de la página de Facebook (formularios de anuncios): llegan por la misma dirección y la misma firma que los de WhatsApp. */
   pagina?: (payload: any) => Promise<Response>;
+  /** Claude (API de Anthropic) para el asistente con IA; sin esto el asistente funciona solo con el menú. */
+  ia?: DepsIa;
 };
 
 /** Ejecutivo al que le toca un lead nuevo de venta en un local (reparto por turnos entre los habilitados), con el equipo del local para los avisos. */
@@ -232,7 +236,7 @@ export async function webhookWhatsapp(req: Request, d: DepsWebhook): Promise<Res
       if (conv.lead_id) await sb.from("leads").update({ ultima_actividad: ahora }).eq("id", conv.lead_id);
       if (m.media) await enSegundoPlano(guardarMediaEntrante(sb, msg.data));
       // Asistente fuera de horario (apagado por defecto): atiende al cliente con botones y deja el lead listo para la mañana.
-      await procesarBot({ sb, graph, phoneNumberId: miNumero, elegirEjecutivo: (local, tipo) => elegirEjecutivo(d, local, tipo), audit: d.audit }, conv, m);
+      await procesarBot({ sb, graph, phoneNumberId: miNumero, elegirEjecutivo: (local, tipo) => elegirEjecutivo(d, local, tipo), audit: d.audit, ia: d.ia }, conv, m);
     }
     for (const s of estados) {
       if (miNumero && s.phoneNumberId && s.phoneNumberId !== miNumero) continue;
@@ -414,7 +418,8 @@ export async function whatsappOp(h: HerramientasWa, op: string, body: any): Prom
   if (op === "wa.bot_estado") {
     const cfg = await cargarConfigBot(sb);
     const ahora = new Date();
-    return json({ config: cfg, puedeConfigurar: h.esAdmin || h.esSupervisor, abierto: estaAbierto(cfg.horario, ahora), proxima: proximaApertura(cfg.horario, ahora), horarioTexto: textoHorario(cfg.horario) });
+    const ia = { claveCargada: !!env("ANTHROPIC_API_KEY"), modelo: env("ANTHROPIC_MODEL_WA") || MODELO_IA_DEFECTO, uso: (h.esAdmin || h.esSupervisor) ? await usoDelMes(sb, ahora) : null };
+    return json({ config: cfg, ia, puedeConfigurar: h.esAdmin || h.esSupervisor, abierto: estaAbierto(cfg.horario, ahora), proxima: proximaApertura(cfg.horario, ahora), horarioTexto: textoHorario(cfg.horario) });
   }
   if (op === "wa.bot_guardar") {
     if (!(h.esAdmin || h.esSupervisor)) return err("forbidden", 403);
