@@ -10,6 +10,7 @@
  */
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { compressImage } from "./photos.js";
+import { webmOpusAOgg } from "./webm-ogg.js";
 import { MAX_BYTES_MEDIA, TIPOS_AUDIO, CATEGORIAS_PLANTILLA, validarPlantillaNueva, variablesDe, nombrePlantilla, aplicarRespuesta, validarRespuestas, MAX_RESPUESTAS } from "../supabase/functions/api/whatsapp-core.js";
 import { INPUT, BTN, BTN_PRIMARIO, Aviso, Cargando, Tarjeta, Campo, useCarga, mensajeError } from "./crm-ui.jsx";
 
@@ -151,10 +152,13 @@ const leerArchivo = (file) => new Promise((resolve, reject) => {
 
 /* ---------- Notas de voz ---------- */
 const MAX_SEG_VOZ = 300; // 5 minutos
-/** Formato en que este navegador puede grabar y WhatsApp acepta: ogg/opus (Firefox) o mp4/aac (Chrome, Edge, Safari). */
+/**
+ * Formato en que este navegador graba: ogg/opus (Firefox, va directo), webm/opus (Chrome, Edge: se reempaqueta a ogg/opus
+ * sin recodificar, porque WhatsApp rechaza el webm y el mp4 fragmentado de Chrome) o mp4/aac (Safari).
+ */
 const tipoGrabacion = () => {
   if (typeof MediaRecorder === "undefined") return "";
-  return ["audio/ogg;codecs=opus", "audio/mp4;codecs=mp4a.40.2", "audio/mp4"].find((t) => MediaRecorder.isTypeSupported(t)) || "";
+  return ["audio/ogg;codecs=opus", "audio/webm;codecs=opus", "audio/mp4;codecs=mp4a.40.2", "audio/mp4"].find((t) => MediaRecorder.isTypeSupported(t)) || "";
 };
 const mmss = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
@@ -193,10 +197,16 @@ function BotonGrabar({ onListo, onError, disabled }) {
         const cancelar = r.current.cancelar;
         limpiar(); setGrabando(false);
         if (cancelar || !trozos.length) return;
-        const blob = new Blob(trozos, { type: base });
-        if (blob.size > MAX_BYTES_MEDIA) { onError("archivo_muy_grande"); return; }
-        try { onListo({ nombre: `nota-de-voz.${base === "audio/ogg" ? "ogg" : "m4a"}`, tipo: base, dataUrl: await leerArchivo(blob) }); }
-        catch (e) { onError("archivo_invalido"); }
+        try {
+          let blob = new Blob(trozos, { type: base });
+          let tipoFinal = base;
+          if (base === "audio/webm") {
+            blob = new Blob([webmOpusAOgg(new Uint8Array(await blob.arrayBuffer()))], { type: "audio/ogg" });
+            tipoFinal = "audio/ogg";
+          }
+          if (blob.size > MAX_BYTES_MEDIA) { onError("archivo_muy_grande"); return; }
+          onListo({ nombre: `nota-de-voz.${tipoFinal === "audio/ogg" ? "ogg" : "m4a"}`, tipo: tipoFinal, dataUrl: await leerArchivo(blob) });
+        } catch (e) { onError("No se pudo preparar la nota de voz. Graba de nuevo o adjunta un archivo de audio con 📎."); }
       };
       rec.start();
       setSeg(0); setGrabando(true);
