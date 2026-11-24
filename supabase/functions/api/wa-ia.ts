@@ -33,6 +33,18 @@ async function anotarUso(sb: any, modelo: string, usage: any, ahora: Date) {
   return uso;
 }
 
+export const CLAVE_ESTADO_IA = "whatsapp::ia::estado";
+/** Último resultado de la IA (para mostrarlo en el CRM: «funcionando» o el error, por ejemplo clave inválida o sin saldo). Nunca lanza. */
+async function anotarResultado(sb: any, ok: boolean, error = "") {
+  try {
+    await sb.from("kv_store").upsert({ key: CLAVE_ESTADO_IA, value: JSON.stringify({ ok, error: String(error).slice(0, 300), en: new Date().toISOString() }), shared: false, updated_at: new Date().toISOString() }, { onConflict: "key" });
+  } catch (e) { console.error("whatsapp ia estado:", String((e as any)?.message ?? e)); }
+}
+export async function ultimoResultadoIa(sb: any) {
+  const g = await sb.from("kv_store").select("value").eq("key", CLAVE_ESTADO_IA).maybeSingle();
+  try { return g.data && g.data.value ? JSON.parse(g.data.value) : null; } catch { return null; }
+}
+
 async function agregarEtiqueta(sb: any, conv: any, etiqueta: string) {
   const c = (await sb.from("wa_conversaciones").select("etiquetas").eq("id", conv.id).maybeSingle()).data;
   const actuales: string[] = Array.isArray(c && c.etiquetas) ? c.etiquetas : [];
@@ -125,9 +137,11 @@ export async function responderConIA(
     if (!respuesta) return "error";
     const ok = await enviar(respuesta.slice(0, 4000));
     if (!ok) return "error";
+    await anotarResultado(sb, true);
     return derivado ? "derivo" : "respondio";
   } catch (e) {
     console.error("whatsapp ia:", String((e as any)?.message ?? e));
+    await anotarResultado(sb, false, String((e as any)?.message ?? e));
     return "error";
   }
 }

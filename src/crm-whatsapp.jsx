@@ -13,7 +13,7 @@ import { compressImage } from "./photos.js";
 import { webmOpusAOgg } from "./webm-ogg.js";
 import { RESTRICCIONES_MICROFONO, armarCadenaVoz, nivelAnalizador } from "./voz-audio.js";
 import { MAX_BYTES_MEDIA, TIPOS_AUDIO, CATEGORIAS_PLANTILLA, validarPlantillaNueva, variablesDe, nombrePlantilla, aplicarRespuesta, validarRespuestas, MAX_RESPUESTAS } from "../supabase/functions/api/whatsapp-core.js";
-import { INPUT, BTN, BTN_PRIMARIO, Aviso, Cargando, Tarjeta, Campo, useCarga, mensajeError } from "./crm-ui.jsx";
+import { INPUT, BTN, BTN_PRIMARIO, Aviso, Cargando, Tarjeta, Campo, useCarga, mensajeError, hace } from "./crm-ui.jsx";
 
 const errorWa = (e) => (e && e.message === "whatsapp_error" && e.detalle ? `WhatsApp no aceptó el mensaje: ${e.detalle}` : mensajeError(e));
 
@@ -433,6 +433,17 @@ export function SeccionWhatsapp({ api, leadId, onCambio }) {
 }
 
 const HORA = "border border-stone-300 bg-white px-2 py-1 text-sm w-28"; // casilla de hora compacta (INPUT ocupa todo el ancho)
+/** Traduce el error de la API de Anthropic a algo que se pueda resolver. */
+const explicarErrorIa = (e) => {
+  const t = String(e || "");
+  if (/401|authentication|invalid x-api-key|api key/i.test(t)) return "la clave de Anthropic no es válida: créala de nuevo en la consola y cárgala otra vez como ANTHROPIC_API_KEY.";
+  if (/credit balance|billing|402|too low/i.test(t)) return "no hay saldo en la cuenta de Anthropic: carga crédito en la consola (Billing).";
+  if (/403|permission/i.test(t)) return "la clave no tiene permiso para usar este modelo.";
+  if (/429|rate.?limit/i.test(t)) return "se superó el límite de uso de Anthropic; se resuelve solo en unos minutos.";
+  if (/529|overloaded|500|502|503|timeout|timed out/i.test(t)) return "Anthropic está saturado o no respondió; vuelve a intentar en unos minutos.";
+  if (/falta ANTHROPIC_API_KEY/i.test(t)) return "falta cargar la clave de Anthropic.";
+  return t.slice(0, 200) || "error desconocido.";
+};
 const DIAS_BOT = [["lun", "Lunes"], ["mar", "Martes"], ["mie", "Miércoles"], ["jue", "Jueves"], ["vie", "Viernes"], ["sab", "Sábado"], ["dom", "Domingo"]];
 
 /** Asistente de WhatsApp fuera de horario: se enciende y se fija el horario de atención (Administrador y Jefe Local). */
@@ -471,6 +482,9 @@ function ConfigAsistente({ api }) {
               <input type="number" min="1" max="100" step="1" value={f.ia.maxPorConversacion} onChange={(e) => setF((x) => ({ ...x, ia: { ...x.ia, maxPorConversacion: e.target.value } }))} className={HORA} />
             </Campo>
           </div>
+          {datos.ia.ultimo && (datos.ia.ultimo.ok
+            ? <p className="text-xs text-emerald-700">✓ La IA respondió bien la última vez ({hace(datos.ia.ultimo.en)}).</p>
+            : <p className="text-xs text-rose-700">⚠ La última consulta a la IA falló ({hace(datos.ia.ultimo.en)}): {explicarErrorIa(datos.ia.ultimo.error)}</p>)}
           {datos.ia.uso && <p className="text-xs text-stone-600">Este mes: {datos.ia.uso.llamadas} {datos.ia.uso.llamadas === 1 ? "consulta" : "consultas"} a la IA · gasto estimado {datos.ia.uso.usd < 0.01 ? "menos de US$ 0,01" : `US$ ${datos.ia.uso.usd.toFixed(2)}`} · modelo {datos.ia.modelo}</p>}
         </div>
         <div className="flex flex-col gap-1">

@@ -243,15 +243,21 @@ test("Si Claude falla o se niega, el cliente no queda con una conversación a me
   const T = "56911000007";
   await completarMenu(T, "Elena IA");
   const antes = envios(T).length;
-  ia.error = "overloaded_error";
+  ia.error = "401 authentication_error: invalid x-api-key";
   const r = await webhook(texto(T, "Elena IA", "¿Tienen un auto económico para ciudad?"));
   assert.equal(r.status, 200, "el aviso de Meta se atiende igual");
+  // El Administrador ve en la tarjeta que la última consulta falló y por qué (por ejemplo, una clave inválida).
+  const falla = (await ve(U.jefe.token, "wa.bot_estado")).ia.ultimo;
+  assert.equal(falla.ok, false);
+  assert.match(falla.error, /invalid x-api-key/);
+  assert.equal((await ve(U.v1.token, "wa.bot_estado")).ia.ultimo, null, "un ejecutivo no ve el detalle");
   assert.equal(envios(T).length, antes, "no se manda nada si Claude falla");
   assert.ok(db.tablas.wa_mensajes.some((m) => m.direccion === "entrante" && /auto económico/.test(m.texto || "")), "el mensaje del cliente queda para el ejecutivo");
   // Cuando Claude vuelve, sigue funcionando.
   ia.guion.push(resp(dice("Claro, tengo varias opciones económicas.")));
   await webhook(texto(T, "Elena IA", "¿Siguen ahí? Mi mensaje anterior no tuvo respuesta"));
   assert.equal(envios(T).length, antes + 1);
+  assert.equal((await ve(U.jefe.token, "wa.bot_estado")).ia.ultimo.ok, true, "y la tarjeta vuelve a decir que funciona");
 
   // La IA se niega a responder (refusal): se deriva a una persona.
   const T2 = "56911000008";

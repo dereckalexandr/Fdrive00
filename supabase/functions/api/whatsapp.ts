@@ -17,7 +17,7 @@ import { elegirAsignado, ETAPAS_CERRADAS } from "./ventas-core.js";
 import { permisoDeTipo, grupoDeReparto } from "./compras-core.js";
 import { enviarAviso, enSegundoPlano, correoActivo } from "./correo.ts";
 import { procesarBot, cargarConfigBot, CLAVE_BOT } from "./wa-bot.ts";
-import { usoDelMes, type DepsIa } from "./wa-ia.ts";
+import { usoDelMes, ultimoResultadoIa, type DepsIa } from "./wa-ia.ts";
 import { MODELO_IA_DEFECTO } from "./wa-ia-core.js";
 import { validarConfigBot, estaAbierto, proximaApertura, textoHorario } from "./wa-bot-core.js";
 
@@ -418,7 +418,7 @@ export async function whatsappOp(h: HerramientasWa, op: string, body: any): Prom
   if (op === "wa.bot_estado") {
     const cfg = await cargarConfigBot(sb);
     const ahora = new Date();
-    const ia = { claveCargada: !!env("ANTHROPIC_API_KEY"), modelo: env("ANTHROPIC_MODEL_WA") || MODELO_IA_DEFECTO, uso: (h.esAdmin || h.esSupervisor) ? await usoDelMes(sb, ahora) : null };
+    const ia = { claveCargada: !!env("ANTHROPIC_API_KEY"), modelo: env("ANTHROPIC_MODEL_WA") || MODELO_IA_DEFECTO, uso: (h.esAdmin || h.esSupervisor) ? await usoDelMes(sb, ahora) : null, ultimo: (h.esAdmin || h.esSupervisor) ? await ultimoResultadoIa(sb) : null };
     return json({ config: cfg, ia, puedeConfigurar: h.esAdmin || h.esSupervisor, abierto: estaAbierto(cfg.horario, ahora), proxima: proximaApertura(cfg.horario, ahora), horarioTexto: textoHorario(cfg.horario) });
   }
   if (op === "wa.bot_guardar") {
