@@ -39,6 +39,7 @@ export function seccionesPrivacidad(d = {}) {
         "Lo que nos cuentas en tus solicitudes: el vehículo que te interesa, si quieres financiamiento, visitas agendadas y tus comentarios.",
         "Datos del vehículo que nos ofreces vender, consignar o dejar en parte de pago: patente, marca, modelo, año, kilometraje, fotos y documentos (por ejemplo, el certificado de anotaciones vigentes).",
         "Conversaciones por WhatsApp: tu número, el nombre de tu perfil, los mensajes, fotos y documentos que nos envías y los que te enviamos.",
+        "Formularios de nuestros anuncios en Facebook, Instagram o Google: los datos que ingresas en ellos (nombre, teléfono, correo y tus respuestas), que recibimos de la plataforma para contactarte.",
         "Para concretar una compraventa: los documentos que exige la ley y, si te pagamos un vehículo, la cuenta bancaria donde recibes el pago.",
         "Datos técnicos mínimos para la seguridad del sitio, como la dirección IP, que usamos para limitar envíos abusivos y detectar robots.",
       ],
