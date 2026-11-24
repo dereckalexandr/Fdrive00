@@ -7,7 +7,9 @@ export const VENTANA_MS = 24 * 3_600_000;
 export const MAX_BYTES_MEDIA = 5 * 1024 * 1024;
 export const MAX_TEXTO_WA = 4096;
 /** Archivos que un ejecutivo puede enviar: fotos (JPG/PNG) y PDF. */
-export const TIPOS_ENVIABLES = ["image/jpeg", "image/png", "application/pdf"];
+// Audio que WhatsApp acepta (los navegadores graban en ogg/opus o mp4/aac): se envía como nota de voz.
+export const TIPOS_AUDIO = ["audio/ogg", "audio/mp4", "audio/mpeg", "audio/aac", "audio/amr"];
+export const TIPOS_ENVIABLES = ["image/jpeg", "image/png", "application/pdf", ...TIPOS_AUDIO];
 export const FUENTE_WHATSAPP = "WhatsApp";
 
 const soloDigitos = (s) => String(s ?? "").replace(/\D/g, "");
@@ -199,14 +201,18 @@ export function armarPlantilla(p, valores) {
 /** Archivo que el ejecutivo quiere enviar: { nombre, tipo, dataUrl }. */
 export function validarArchivoWa(a) {
   if (!a || typeof a.dataUrl !== "string") return { ok: false, error: "archivo_invalido" };
-  const m = /^data:([^;,]+);base64,([A-Za-z0-9+/=]+)$/.exec(a.dataUrl);
+  // Se acepta «data:audio/ogg;codecs=opus;base64,…»: los parámetros del tipo se descartan.
+  const m = /^data:([^;,]+)((?:;[^;,]*)*?);base64,([A-Za-z0-9+/=]+)$/.exec(a.dataUrl);
   if (!m) return { ok: false, error: "archivo_invalido" };
   const mime = m[1].toLowerCase();
   if (!TIPOS_ENVIABLES.includes(mime)) return { ok: false, error: "archivo_tipo_invalido" };
-  const bytes = Math.floor((m[2].length * 3) / 4) - (m[2].endsWith("==") ? 2 : m[2].endsWith("=") ? 1 : 0);
+  const base64 = m[3];
+  const bytes = Math.floor((base64.length * 3) / 4) - (base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0);
   if (bytes > MAX_BYTES_MEDIA) return { ok: false, error: "archivo_muy_grande" };
-  const nombre = String(a.nombre || (mime === "application/pdf" ? "documento.pdf" : "foto.jpg")).replace(/[\\/:*?"<>|]+/g, "_").slice(0, 120);
-  return { ok: true, value: { mime, base64: m[2], bytes, nombre, tipo: mime === "application/pdf" ? "document" : "image" } };
+  const tipo = mime === "application/pdf" ? "document" : TIPOS_AUDIO.includes(mime) ? "audio" : "image";
+  const porDefecto = tipo === "document" ? "documento.pdf" : tipo === "audio" ? (mime === "audio/ogg" ? "nota-de-voz.ogg" : "nota-de-voz.m4a") : "foto.jpg";
+  const nombre = String(a.nombre || porDefecto).replace(/[\\/:*?"<>|]+/g, "_").slice(0, 120);
+  return { ok: true, value: { mime, base64, bytes, nombre, tipo } };
 }
 
 /* ---------- Plantillas creadas desde el CRM (se envían a Meta para su aprobación) ---------- */

@@ -91,6 +91,13 @@ test("Archivos para enviar: fotos JPG/PNG y PDF de hasta 5 MB", () => {
   assert.equal(pdf.value.bytes, 5);
   assert.equal(validarArchivoWa({ dataUrl: "data:image/png;base64,iVBORw==" }).value.tipo, "image");
   assert.equal(validarArchivoWa({ dataUrl: "data:image/gif;base64,R0lG" }).error, "archivo_tipo_invalido");
+  // Notas de voz: ogg/opus (Firefox), mp4/aac (Chrome, Safari), mp3; los parámetros del tipo se descartan.
+  const ogg = validarArchivoWa({ dataUrl: "data:audio/ogg;codecs=opus;base64,T2dnUwAA" });
+  assert.equal(ogg.ok, true);
+  assert.deepEqual([ogg.value.tipo, ogg.value.mime, ogg.value.nombre], ["audio", "audio/ogg", "nota-de-voz.ogg"]);
+  assert.equal(validarArchivoWa({ dataUrl: "data:audio/mp4;base64,AAAAHGZ0eXA=" }).value.nombre, "nota-de-voz.m4a");
+  assert.equal(validarArchivoWa({ dataUrl: "data:audio/mpeg;base64,//uQ" }).value.tipo, "audio");
+  assert.equal(validarArchivoWa({ dataUrl: "data:audio/webm;base64,GkXf" }).error, "archivo_tipo_invalido", "WhatsApp no acepta webm");
   assert.equal(validarArchivoWa({ dataUrl: "hola" }).error, "archivo_invalido");
   assert.equal(validarArchivoWa({ dataUrl: "data:application/pdf;base64," + "A".repeat(7 * 1024 * 1024) }).error, "archivo_muy_grande");
 });

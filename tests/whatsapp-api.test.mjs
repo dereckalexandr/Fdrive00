@@ -260,6 +260,31 @@ test("Archivos: la foto que manda el cliente se guarda en el CRM; el ejecutivo e
   assert.equal((await ve(U.dueno.token, "wa.enviar", { id: U.conv1, archivo: { nombre: "virus.exe", dataUrl: exe } })).error, "archivo_tipo_invalido");
 });
 
+test("Notas de voz: la que manda el cliente se guarda limpia y el ejecutivo envía la suya sin texto", async () => {
+  // Meta manda el tipo con parámetros y espacio: la copia del CRM debe poder leerla un navegador.
+  meta.archivos.VOZ1 = { mime: "audio/ogg; codecs=opus", bytes: Buffer.from("OggS-nota-de-voz") };
+  assert.equal((await webhook(entrante("56911112222", "Pedro Cliente", { type: "audio", audio: { id: "VOZ1", mime_type: "audio/ogg; codecs=opus", voice: true } }))).status, 200);
+  const m = db.tablas.wa_mensajes.filter((x) => x.tipo === "audio" && x.direccion === "entrante").pop();
+  assert.equal(m.media.guardado, true);
+  assert.equal(conv("56911112222").ultimo_texto, "🎤 Audio");
+  const med = await ve(U.dueno.token, "wa.media", { mensajeId: m.id });
+  assert.equal(med.dataUrl, "data:audio/ogg;base64," + Buffer.from("OggS-nota-de-voz").toString("base64"));
+
+  // El ejecutivo graba y envía: va como audio de WhatsApp, sin pie de texto aunque lo escriba.
+  const voz = "data:audio/mp4;base64," + Buffer.from("ftyp-nota").toString("base64");
+  const r = await ve(U.dueno.token, "wa.enviar", { id: U.conv1, texto: "esto no viaja", archivo: { nombre: "nota-de-voz.m4a", tipo: "audio/mp4", dataUrl: voz } });
+  assert.equal(r.status, 200, JSON.stringify(r));
+  assert.ok(meta.llamadas.some((l) => l.ruta.endsWith("/PNID1/media") && l.cuerpo && l.cuerpo.form && l.cuerpo.type === "audio/mp4"), "sube el audio a Meta");
+  const env = enviosA("56911112222").pop();
+  assert.equal(env.cuerpo.type, "audio");
+  assert.ok(env.cuerpo.audio.id);
+  assert.equal(env.cuerpo.audio.caption, undefined);
+  assert.equal(r.mensaje.tipo, "audio");
+  assert.equal(r.mensaje.texto, null);
+  assert.equal((await ve(U.dueno.token, "wa.media", { mensajeId: r.mensaje.id })).dataUrl, voz);
+  assert.equal(conv("56911112222").ultimo_texto, "🎤 Audio");
+});
+
 test("Configuración: solo el Administrador ve el estado de los secretos y elige el local de los leads nuevos", async () => {
   const e = await ve(U.e1.token, "wa.estado");
   assert.equal(e.configurado, true);

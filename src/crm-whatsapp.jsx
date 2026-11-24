@@ -10,7 +10,7 @@
  */
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { compressImage } from "./photos.js";
-import { MAX_BYTES_MEDIA, CATEGORIAS_PLANTILLA, validarPlantillaNueva, variablesDe, nombrePlantilla, aplicarRespuesta, validarRespuestas, MAX_RESPUESTAS } from "../supabase/functions/api/whatsapp-core.js";
+import { MAX_BYTES_MEDIA, TIPOS_AUDIO, CATEGORIAS_PLANTILLA, validarPlantillaNueva, variablesDe, nombrePlantilla, aplicarRespuesta, validarRespuestas, MAX_RESPUESTAS } from "../supabase/functions/api/whatsapp-core.js";
 import { INPUT, BTN, BTN_PRIMARIO, Aviso, Cargando, Tarjeta, Campo, useCarga, mensajeError } from "./crm-ui.jsx";
 
 const errorWa = (e) => (e && e.message === "whatsapp_error" && e.detalle ? `WhatsApp no aceptó el mensaje: ${e.detalle}` : mensajeError(e));
@@ -52,12 +52,16 @@ function ArchivoMensaje({ api, m }) {
   const [estado, setEstado] = useState("");
   const media = m.media || {};
   const esImagen = m.tipo === "image" || m.tipo === "sticker";
+  const esAudio = m.tipo === "audio";
   const cargar = async () => {
     setEstado("cargando");
     try {
       const r = await api("wa.media", { mensajeId: m.id });
-      if (esImagen) { setSrc(r.dataUrl); setEstado(""); return; }
-      const blob = await (await fetch(r.dataUrl)).blob();
+      // Los audios antiguos se guardaron como «data:audio/ogg; codecs=opus;base64,…»: se quitan los parámetros del tipo.
+      const dataUrl = String(r.dataUrl).replace(/^data:([^;,]+)[^,]*?;base64,/, "data:$1;base64,");
+      if (esImagen) { setSrc(dataUrl); setEstado(""); return; }
+      if (esAudio) { setSrc(URL.createObjectURL(await (await fetch(dataUrl)).blob())); setEstado(""); return; }
+      const blob = await (await fetch(dataUrl)).blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url; a.target = "_blank"; a.rel = "noreferrer";
@@ -68,6 +72,13 @@ function ArchivoMensaje({ api, m }) {
     } catch (e) { setEstado(e && e.message === "archivo_muy_grande" ? "grande" : "error"); }
   };
   if (media.muy_grande) return <p className="text-xs italic text-stone-500">Archivo muy grande para el CRM: ábrelo en el teléfono de la empresa.</p>;
+  // Nota de voz: se escucha aquí mismo. Safari antiguo no lee ogg/opus: queda el enlace para descargarla.
+  if (src && esAudio) return (
+    <div className="flex flex-col gap-0.5">
+      <audio controls autoPlay src={src} className="w-[240px] max-w-full" />
+      <a href={src} download={media.nombre || "nota-de-voz.ogg"} className="text-[11px] text-sky-700 hover:underline">Descargar audio</a>
+    </div>
+  );
   // Los navegadores no dejan abrir direcciones «data:» en una pestaña nueva (queda en blanco): se abre un enlace temporal «blob:».
   const abrirGrande = async () => {
     try {
@@ -137,6 +148,72 @@ const leerArchivo = (file) => new Promise((resolve, reject) => {
   fr.onerror = () => reject(new Error("archivo_invalido"));
   fr.readAsDataURL(file);
 });
+
+/* ---------- Notas de voz ---------- */
+const MAX_SEG_VOZ = 300; // 5 minutos
+/** Formato en que este navegador puede grabar y WhatsApp acepta: ogg/opus (Firefox) o mp4/aac (Chrome, Edge, Safari). */
+const tipoGrabacion = () => {
+  if (typeof MediaRecorder === "undefined") return "";
+  return ["audio/ogg;codecs=opus", "audio/mp4;codecs=mp4a.40.2", "audio/mp4"].find((t) => MediaRecorder.isTypeSupported(t)) || "";
+};
+const mmss = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+
+/** Botón 🎤: graba con el micrófono y deja la nota de voz lista para enviar (el navegador pide permiso la primera vez). */
+function BotonGrabar({ onListo, onError, disabled }) {
+  const [grabando, setGrabando] = useState(false);
+  const [seg, setSeg] = useState(0);
+  const r = useRef({ rec: null, stream: null, timer: null, cancelar: false });
+  const limpiar = () => {
+    clearInterval(r.current.timer);
+    if (r.current.stream) r.current.stream.getTracks().forEach((t) => t.stop());
+    r.current.stream = null; r.current.timer = null;
+  };
+  useEffect(() => () => {
+    r.current.cancelar = true;
+    try { if (r.current.rec && r.current.rec.state !== "inactive") r.current.rec.stop(); } catch (e) { /* ya detenida */ }
+    limpiar();
+  }, []);
+  const detener = (cancelar) => {
+    r.current.cancelar = !!cancelar;
+    try { if (r.current.rec && r.current.rec.state !== "inactive") r.current.rec.stop(); } catch (e) { limpiar(); setGrabando(false); }
+  };
+  const empezar = async () => {
+    const tipo = tipoGrabacion();
+    if (!tipo || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { onError("Este navegador no puede grabar notas de voz. Usa Chrome, Edge, Firefox o Safari actualizados, o adjunta un archivo de audio con 📎."); return; }
+    let stream;
+    try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+    catch (e) { onError("No se pudo usar el micrófono. Permite el acceso al micrófono en el candado de la barra de direcciones y vuelve a intentar."); return; }
+    try {
+      const rec = new MediaRecorder(stream, { mimeType: tipo });
+      const trozos = [];
+      const base = tipo.split(";")[0];
+      r.current = { rec, stream, timer: null, cancelar: false };
+      rec.ondataavailable = (e) => { if (e.data && e.data.size) trozos.push(e.data); };
+      rec.onstop = async () => {
+        const cancelar = r.current.cancelar;
+        limpiar(); setGrabando(false);
+        if (cancelar || !trozos.length) return;
+        const blob = new Blob(trozos, { type: base });
+        if (blob.size > MAX_BYTES_MEDIA) { onError("archivo_muy_grande"); return; }
+        try { onListo({ nombre: `nota-de-voz.${base === "audio/ogg" ? "ogg" : "m4a"}`, tipo: base, dataUrl: await leerArchivo(blob) }); }
+        catch (e) { onError("archivo_invalido"); }
+      };
+      rec.start();
+      setSeg(0); setGrabando(true);
+      r.current.timer = setInterval(() => setSeg((s) => { if (s + 1 >= MAX_SEG_VOZ) detener(false); return s + 1; }), 1000);
+    } catch (e) { stream.getTracks().forEach((t) => t.stop()); onError("No se pudo iniciar la grabación en este navegador."); }
+  };
+  if (grabando) {
+    return (
+      <div className="flex items-center gap-2 shrink-0 text-sm">
+        <span className="text-rose-600 font-mono animate-pulse">● {mmss(seg)}</span>
+        <button type="button" onClick={() => detener(false)} className={BTN} title="Terminar y dejar la nota lista para enviar">⏹ Listo</button>
+        <button type="button" onClick={() => detener(true)} className="text-xs text-rose-600 hover:underline">Cancelar</button>
+      </div>
+    );
+  }
+  return <button type="button" onClick={empezar} disabled={disabled} className={`${BTN} shrink-0`} title="Grabar una nota de voz">🎤</button>;
+}
 
 /** Lista de respuestas rápidas del local para insertar en el mensaje (se puede buscar por título o texto). */
 function SelectorRespuestas({ api, cliente, ejecutivo, onElegir, onCerrar }) {
@@ -213,6 +290,14 @@ export function ChatWhatsapp({ api, conversacionId, leadId, alto = "h-[28rem]", 
     if (!f) return;
     setMsg("");
     try {
+      // Audio ya grabado (mp3, ogg, m4a, aac, amr): se envía tal cual. Los de WhatsApp web/otros formatos (webm, wav) no los acepta WhatsApp.
+      const baseAudio = f.type.split(";")[0].toLowerCase();
+      if (TIPOS_AUDIO.includes(baseAudio)) {
+        if (f.size > MAX_BYTES_MEDIA) throw new Error("archivo_muy_grande");
+        const crudo = await leerArchivo(f);
+        setArchivo({ nombre: f.name, tipo: baseAudio, dataUrl: crudo.replace(/^data:[^,]*?;base64,/, `data:${baseAudio};base64,`) });
+        return;
+      }
       const esPdf = f.type === "application/pdf";
       if (!esPdf && !/^image\/(jpeg|png)$/.test(f.type) && !f.type.startsWith("image/")) throw new Error("archivo_tipo_invalido");
       if (esPdf && f.size > MAX_BYTES_MEDIA) throw new Error("archivo_muy_grande");
@@ -221,6 +306,8 @@ export function ChatWhatsapp({ api, conversacionId, leadId, alto = "h-[28rem]", 
     } catch (e) { setMsg(mensajeError(e)); }
   };
 
+  const esVoz = !!archivo && TIPOS_AUDIO.includes(archivo.tipo);
+  const cargaEnvio = archivo ? (esVoz ? { archivo } : { archivo, texto }) : { texto };
   const mensajes = datos.mensajes;
   const abierta = datos.ventanaAbierta;
   let diaAnterior = "";
@@ -266,7 +353,9 @@ export function ChatWhatsapp({ api, conversacionId, leadId, alto = "h-[28rem]", 
           <div className="flex flex-col gap-2">
             {archivo && (
               <div className="flex items-center gap-2 text-sm bg-stone-50 border border-stone-200 px-2 py-1">
-                <span>{archivo.tipo === "application/pdf" ? "📄" : "📷"} {archivo.nombre}</span>
+                {esVoz
+                  ? <><span>🎤</span><audio controls src={archivo.dataUrl} className="h-8 flex-1 min-w-0" /></>
+                  : <span>{archivo.tipo === "application/pdf" ? "📄" : "📷"} {archivo.nombre}</span>}
                 <button type="button" onClick={() => setArchivo(null)} className="ml-auto text-rose-600 hover:underline text-xs">Quitar</button>
               </div>
             )}
@@ -275,13 +364,14 @@ export function ChatWhatsapp({ api, conversacionId, leadId, alto = "h-[28rem]", 
                 onElegir={(t) => { setTexto((x) => (x.trim() ? `${x.trimEnd()}\n${t}` : t)); setRespuestas(false); setTimeout(() => areaTexto.current && areaTexto.current.focus(), 0); }} />
             )}
             <div className="flex gap-2 items-end">
-              <label className={`${BTN} cursor-pointer shrink-0`} title="Adjuntar foto o PDF">📎<input type="file" accept="image/*,application/pdf" onChange={elegirArchivo} className="hidden" /></label>
+              <label className={`${BTN} cursor-pointer shrink-0`} title="Adjuntar foto, PDF o audio">📎<input type="file" accept="image/*,application/pdf,audio/*" onChange={elegirArchivo} className="hidden" /></label>
+              <BotonGrabar disabled={ocupado} onListo={(a) => { setMsg(""); setArchivo(a); }} onError={(e) => setMsg(/^[a-z_]+$/.test(e) ? mensajeError(new Error(e)) : e)} />
               <button type="button" onClick={() => setRespuestas((x) => !x)} className={`${BTN} shrink-0`} title="Respuestas rápidas">⚡</button>
-              <textarea ref={areaTexto} value={texto} rows={2} maxLength={4096} placeholder={archivo ? "Texto que acompaña el archivo (opcional)" : "Escribe un mensaje…"}
+              <textarea ref={areaTexto} value={texto} rows={2} maxLength={4096} disabled={esVoz} placeholder={esVoz ? "La nota de voz se envía sola, sin texto" : archivo ? "Texto que acompaña el archivo (opcional)" : "Escribe un mensaje…"}
                 onChange={(e) => setTexto(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && (texto.trim() || archivo) && !ocupado) { e.preventDefault(); enviar(archivo ? { archivo, texto } : { texto }); } }}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && (texto.trim() || archivo) && !ocupado) { e.preventDefault(); enviar(cargaEnvio); } }}
                 className={`${INPUT} flex-1 resize-none`} />
-              <button type="button" disabled={ocupado || (!texto.trim() && !archivo)} onClick={() => enviar(archivo ? { archivo, texto } : { texto })} className={`${BTN_PRIMARIO} shrink-0`}>{ocupado ? "…" : "Enviar"}</button>
+              <button type="button" disabled={ocupado || (!texto.trim() && !archivo)} onClick={() => enviar(cargaEnvio)} className={`${BTN_PRIMARIO} shrink-0`}>{ocupado ? "…" : "Enviar"}</button>
             </div>
             <div className="flex justify-between text-[11px] text-stone-500">
               <span>Enter envía · Shift + Enter, nueva línea · ⚡ respuestas rápidas</span>

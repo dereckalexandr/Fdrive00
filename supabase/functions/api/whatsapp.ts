@@ -78,7 +78,8 @@ async function guardarMediaEntrante(sb: any, msg: any) {
     if (!r.ok) { console.error("whatsapp media: descarga", r.status); return; }
     const bytes = new Uint8Array(await r.arrayBuffer());
     if (bytes.length > MAX_BYTES_MEDIA) { await sb.from("wa_mensajes").update({ media: { ...media, tam: bytes.length, muy_grande: true } }).eq("id", msg.id); return; }
-    const mime = media.mime || info.data.mime_type || "application/octet-stream";
+    // Meta manda «audio/ogg; codecs=opus»: la dirección data: queda sin parámetros (con espacios los navegadores no la leen).
+    const mime = String(media.mime || info.data.mime_type || "application/octet-stream").split(";")[0].trim().toLowerCase();
     const up = await sb.from("kv_store").upsert({ key: claveMedia(msg.conversacion_id, msg.id), value: `data:${mime};base64,${aBase64(bytes)}`, shared: false, updated_at: new Date().toISOString() }, { onConflict: "key" });
     if (up.error) { console.error("whatsapp media: guardar", up.error.message); return; }
     await sb.from("wa_mensajes").update({ media: { ...media, mime, tam: bytes.length, guardado: true } }).eq("id", msg.id);
@@ -547,9 +548,11 @@ export async function whatsappOp(h: HerramientasWa, op: string, body: any): Prom
         const up = await graph(`/${encodeURIComponent(env("WA_PHONE_NUMBER_ID"))}/media`, { method: "POST", body: form });
         if (!up.ok || !up.data || !up.data.id) return json({ error: "whatsapp_error", detalle: up.error || "No se pudo subir el archivo" }, 502);
         envio.type = v.value.tipo;
-        envio[v.value.tipo] = v.value.tipo === "document" ? { id: up.data.id, filename: v.value.nombre, ...(caption ? { caption } : {}) } : { id: up.data.id, ...(caption ? { caption } : {}) };
-        Object.assign(fila, { tipo: v.value.tipo, texto: caption || null, media: { id: String(up.data.id), mime: v.value.mime, nombre: v.value.nombre, tam: v.value.bytes, guardado: true } });
-        archivoGuardar = String(body.archivo.dataUrl);
+        // Las notas de voz no admiten texto que las acompañe: se envían solas.
+        envio[v.value.tipo] = v.value.tipo === "document" ? { id: up.data.id, filename: v.value.nombre, ...(caption ? { caption } : {}) }
+          : v.value.tipo === "audio" ? { id: up.data.id } : { id: up.data.id, ...(caption ? { caption } : {}) };
+        Object.assign(fila, { tipo: v.value.tipo, texto: v.value.tipo === "audio" ? null : caption || null, media: { id: String(up.data.id), mime: v.value.mime, nombre: v.value.nombre, tam: v.value.bytes, guardado: true } });
+        archivoGuardar = `data:${v.value.mime};base64,${v.value.base64}`;
       } else {
         const t = validarTextoWa(body.texto);
         if (!t.ok) return err(t.error!);
