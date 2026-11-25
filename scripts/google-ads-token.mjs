@@ -22,7 +22,7 @@ if (!id || !secreto) { console.error("Faltan GOOGLE_CLIENT_ID y GOOGLE_CLIENT_SE
 const estado = randomBytes(16).toString("hex");
 const url = "https://accounts.google.com/o/oauth2/v2/auth?" + new URLSearchParams({
   client_id: id, redirect_uri: REDIRECT, response_type: "code", scope: "https://www.googleapis.com/auth/adwords",
-  access_type: "offline", prompt: "consent", state: estado, login_hint: "contacto.drivefuturo@gmail.com",
+  access_type: "offline", prompt: "consent", state: estado, login_hint: process.env.GOOGLE_LOGIN_HINT || "contacto.drivefuturo@gmail.com",
 }).toString();
 
 const srv = http.createServer(async (req, res) => {
@@ -49,7 +49,7 @@ srv.listen(PUERTO, () => {
   try { spawnSync("clip", { input: url, shell: true }); } catch (e) { /* sin portapapeles */ }
   try { spawnSync("rundll32", ["url.dll,FileProtocolHandler", url], { stdio: "ignore" }); } catch (e) { /* sin navegador */ }
   console.log("Se abrió el navegador con la pantalla de permisos de Google (el enlace también quedó copiado en el portapapeles).");
-  console.log("Entra con contacto.drivefuturo@gmail.com y acepta el permiso de Google Ads.");
+  console.log(`Entra con ${process.env.GOOGLE_LOGIN_HINT || "contacto.drivefuturo@gmail.com"} y acepta el permiso de Google Ads.`);
   console.log("Si el navegador no abrió, pega el portapapeles (Ctrl+V) en la barra de direcciones.");
   console.log("(Si aparece «Google no ha verificado esta app», pulsa Avanzado → Ir a ... (no seguro): es tu propia app.)");
 });
