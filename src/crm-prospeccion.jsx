@@ -41,8 +41,9 @@ function Buscar({ api, guardados, onGuardado }) {
   const [ocupado, setOcupado] = useState(false);
   const [copiado, setCopiado] = useState(false);
   const [autoPegado, setAutoPegado] = useState(false);
+  const [paso2Abierto, setPaso2Abierto] = useState(false);
   const bmRef = useRef(null);
-  useEffect(() => { if (bmRef.current) bmRef.current.setAttribute("href", buildBookmarkletHref()); }, []);
+  useEffect(() => { if (bmRef.current) bmRef.current.setAttribute("href", buildBookmarkletHref()); }, [paso2Abierto]);
 
   /* Al volver a esta pestaña desde Chileautos, si el marcador copió avisos, se pegan solos (el navegador pide permiso una vez). */
   const pegadoRef = useRef("");
@@ -104,7 +105,8 @@ function Buscar({ api, guardados, onGuardado }) {
         <p className="text-xs text-stone-500 mt-2">El precio y el tipo de vendedor (particular o automotora) se filtran después, en la lista de abajo. Si la página de Chileautos no abre con tus filtros, ajústalos ahí mismo: lo importante es que muestre la lista de resultados.</p>
       </Tarjeta>
 
-      <Tarjeta titulo="2 · Copia los avisos con el marcador" ayuda="Chileautos no permite leer sus avisos desde un servidor, pero tu navegador sí. El marcador copia el aviso (auto, año, km, precio, tipo de vendedor, enlace y el teléfono / WhatsApp si la página lo muestra) y no envía nada a ningún servidor.">
+      <Tarjeta titulo="2 · Copia los avisos con el marcador" ayuda="Chileautos no permite leer sus avisos desde un servidor, pero tu navegador sí. El marcador copia el aviso (auto, año, km, precio, tipo de vendedor, enlace y el teléfono / WhatsApp si la página lo muestra) y no envía nada a ningún servidor." derecha={<button type="button" onClick={() => setPaso2Abierto((v) => !v)} aria-expanded={paso2Abierto} className="text-xs text-stone-600 hover:underline whitespace-nowrap">{paso2Abierto ? "Contraer ▲" : "Expandir ▼"}</button>}>
+        {paso2Abierto && <>
         <ol className="text-xs text-stone-600 list-decimal pl-5 flex flex-col gap-1 mb-3">
           <li>Una sola vez: muestra la barra de favoritos (Ctrl+Shift+B) y <strong>arrastra este botón</strong> a ella.</li>
           <li>En la página de resultados de Chileautos, pulsa ese favorito: muestra «N avisos copiados». Si hay varias páginas de resultados, repite en cada una.</li>
@@ -115,6 +117,7 @@ function Buscar({ api, guardados, onGuardado }) {
           <button type="button" onClick={copiarMarcador} className="text-xs text-stone-600 hover:underline py-2">{copiado ? "Código copiado ✓" : "No puedo arrastrarlo: copiar el código del marcador"}</button>
         </div>
         <textarea value={pegado} onChange={(e) => { setPegado(e.target.value); setSel(new Set()); setMsg(null); setAutoPegado(false); }} rows={3} placeholder="Pega aquí lo que copió el marcador (Ctrl+V)" className={`${INPUT} font-mono text-xs`} />
+        </>}
         {autoPegado && leido && leido.ok && avisos.length > 0 && <p className="mt-2 text-xs text-emerald-700">Pegados automáticamente desde Chileautos: {avisos.length} avisos.</p>}
         {leido && !leido.ok && <div className="mt-2"><Aviso>{leido.error}</Aviso></div>}
         {leido && leido.ok && leido.data.sinResultados && <div className="mt-2"><Aviso tipo="info">Chileautos no tiene avisos exactos para ese filtro (mostró «parecidos»): esa copia no sirve. Prueba con filtros más amplios.</Aviso></div>}
