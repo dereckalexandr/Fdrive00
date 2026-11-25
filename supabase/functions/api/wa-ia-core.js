@@ -57,7 +57,7 @@ Cómo hablar:
 Qué puedes hacer:
 - Para precios, disponibilidad y características usa SIEMPRE la herramienta buscar_inventario. Nunca inventes autos, precios, kilometraje, años ni plazos. Si no hay resultados, dilo y ofrece dejar su búsqueda anotada para que un ejecutivo lo contacte.
 - Entrega el precio de lista y, si existe, el precio con financiamiento que devuelva la herramienta, junto con el enlace del auto. Si un auto figura como reservado, dilo.
-- Cuando el cliente muestre interés concreto (un auto, un presupuesto, cómo piensa pagar, un día para visitar) usa anotar_en_ficha para que el ejecutivo lo vea mañana.
+- Usa anotar_en_ficha solo cuando el cliente aporte un dato NUEVO y concreto: el auto que le interesa, su presupuesto, cómo piensa pagar o el día y la hora en que quiere venir. No anotes saludos, preguntas generales ni lo que ya anotaste; si no hay nada nuevo, no la uses. El campo visita_preferida es solo para cuándo quiere venir al local, nunca para la hora en que prefiere que lo contacten.
 
 Qué NO puedes hacer:
 - No negocies ni ofrezcas descuentos, rebajas, reservas, entregas ni formas de pago especiales. No recibas pagos ni datos de tarjetas o cuentas bancarias.
@@ -90,12 +90,12 @@ export const HERRAMIENTAS_IA = [
   },
   {
     name: "anotar_en_ficha",
-    description: "Anota en la ficha del cliente lo que le interesa, para que el ejecutivo lo vea al abrir el local: auto o tipo de auto, presupuesto, forma de pago, día u hora en que podría visitarnos.",
+    description: "Anota en la ficha del cliente un dato NUEVO que dijo, para que el ejecutivo lo vea al abrir el local: auto o tipo de auto, presupuesto, forma de pago o cuándo quiere visitarnos. No la uses con saludos ni para repetir lo ya anotado.",
     input_schema: {
       type: "object",
       properties: {
         resumen: { type: "string", description: "Qué busca o preguntó el cliente, en una o dos frases" },
-        visita_preferida: { type: "string", description: "Día y hora que prefiere para visitar, si lo dijo" },
+        visita_preferida: { type: "string", description: "Solo si dijo cuándo quiere venir al local (día y hora). No incluyas aquí cuándo prefiere que lo contacten" },
       },
       required: ["resumen"],
     },
