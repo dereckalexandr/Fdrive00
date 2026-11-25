@@ -34,16 +34,27 @@ function esSitioInspecciones() {
   return import.meta.env.VITE_SITIO === "inspecciones" || /^inspecciones/i.test(window.location.hostname) || ruta === "/inspecciones" || ruta.startsWith("/inspecciones/");
 }
 
+const SitioPista = lazy(() => import("./sitio-pista.jsx"));
+
+// Pista (el CRM como producto): pistacrm.com y www.pistacrm.com muestran la página de presentación; app.pistacrm.com abre el CRM
+// en cualquier ruta. «/pista» muestra la presentación en cualquier dirección, para revisarla en local.
+const host = window.location.hostname.toLowerCase();
+const esAppPista = () => host === "app.pistacrm.com";
+function esSitioPista() {
+  const ruta = window.location.pathname.replace(/\/+$/, "");
+  return host === "pistacrm.com" || host === "www.pistacrm.com" || ruta === "/pista";
+}
+
 function esPlataforma() {
   const ruta = window.location.pathname.replace(/\/+$/, "");
-  return ruta === "/plataforma" || ruta.startsWith("/plataforma/");
+  return esAppPista() || ruta === "/plataforma" || ruta.startsWith("/plataforma/");
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <ErrorBoundary>
       <Suspense fallback={<p style={{ padding: 24, fontFamily: "system-ui", color: "#57534e" }}>Cargando…</p>}>
-        {esSitioInspecciones() ? <SitioInspecciones /> : esPlataforma() ? <App /> : <SitioPublico />}
+        {esSitioPista() ? <SitioPista /> : esSitioInspecciones() ? <SitioInspecciones /> : esPlataforma() ? <App /> : <SitioPublico />}
       </Suspense>
     </ErrorBoundary>
   </React.StrictMode>

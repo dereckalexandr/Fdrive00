@@ -38,6 +38,14 @@ test("El sitio público y el CRM conviven: «/plataforma» abre el CRM", () => {
   assert.match(readFileSync(join(SRC, "sitio-publico.jsx"), "utf8"), /href="\/plataforma"/);
 });
 
+test("Pista: pistacrm.com muestra la presentación y app.pistacrm.com abre el CRM", () => {
+  const s = readFileSync(join(SRC, "main.jsx"), "utf8");
+  assert.match(s, /import\("\.\/sitio-pista\.jsx"\)/);
+  assert.match(s, /"pistacrm\.com"/);
+  assert.match(s, /"app\.pistacrm\.com"/);
+  assert.match(readFileSync(join(SRC, "sitio-pista.jsx"), "utf8"), /https:\/\/app\.pistacrm\.com/);
+});
+
 test("El sitio público no pide datos internos: no menciona costo ni patente al mostrar vehículos", () => {
   const s = readFileSync(join(SRC, "sitio-publico.jsx"), "utf8");
   assert.ok(!/\.costo\b|\.patente\b|precio_lista|\.notas\b/.test(s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "").replace(/placeholder="[^"]*"/g, "").replace(/datos\.patente|f\.patente|patente:/g, "")), "la pantalla del visitante no debe leer campos internos del vehículo");
