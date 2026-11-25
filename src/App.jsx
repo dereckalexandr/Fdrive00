@@ -506,9 +506,17 @@ function PhotoLightbox({ photoId, onClose, onRemove }) {
 function PhotoStrip({ itemId, label, fotos, photos }) {
   const list = fotos || [];
   const inputRef = useRef(null);
+  const galeriaRef = useRef(null);
   const [openId, setOpenId] = useState(null);
   const busy = !!(photos.busy && photos.busy[itemId]);
   const full = list.length >= MAX_PHOTOS_PER_ITEM;
+  // Fotos elegidas de la galería (varias a la vez): se agregan una por una hasta completar el máximo del ítem.
+  const agregarDeGaleria = async (e) => {
+    const archivos = Array.from(e.target.files || []);
+    e.target.value = "";
+    const cupo = Math.max(0, MAX_PHOTOS_PER_ITEM - list.length);
+    for (const f of archivos.slice(0, cupo)) await photos.add(itemId, f);
+  };
   if (photos.viewOnly) {
     if (list.length === 0) return null;
     return (
@@ -539,6 +547,17 @@ function PhotoStrip({ itemId, label, fotos, photos }) {
         className="hidden"
         onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ""; if (f) photos.add(itemId, f); }}
       />
+      <button
+        type="button"
+        disabled={busy || full}
+        onClick={() => galeriaRef.current && galeriaRef.current.click()}
+        aria-label={`Adjuntar fotos desde la galería: ${label}`}
+        title={full ? `Máximo ${MAX_PHOTOS_PER_ITEM} fotos` : "Adjuntar fotos desde la galería del celular"}
+        className="w-14 h-14 shrink-0 border-2 border-dashed border-stone-300 text-stone-500 text-2xl leading-none hover:bg-stone-50 disabled:opacity-40"
+      >
+        📎
+      </button>
+      <input ref={galeriaRef} type="file" accept="image/*" multiple className="hidden" onChange={agregarDeGaleria} />
       {list.map((id) => <PhotoThumb key={id} inspectorId={photos.inspectorId} photoId={id} onOpen={setOpenId} />)}
       {list.length > 0 && <span className="text-xs text-stone-400">{list.length}/{MAX_PHOTOS_PER_ITEM}</span>}
       {photos.errors[itemId] && <p className="w-full text-xs text-rose-600">{photos.errors[itemId]}</p>}
