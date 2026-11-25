@@ -133,7 +133,7 @@ test("Conversión en lead: el auto del aviso con los nombres de un lead de compr
   assert.equal(vehiculoOfrecidoDeProspecto({ ...p, transmision: "CVT", combustible: "Eléctrico" }, {}).transmision, "Automática");
   assert.equal(vehiculoOfrecidoDeProspecto({ ...p, transmision: null, combustible: "Gas" }, {}).transmision, undefined);
   assert.equal(vehiculoOfrecidoDeProspecto({ ...p, combustible: "Gas" }, {}).combustible, undefined);
-  assert.equal(notasLeadDeProspecto(p), "Prospecto de Chileautos (particular): https://www.chileautos.cl/vehiculos/detalles/toyota-yaris-2019/CL-AD-1234567/ · precio publicado $8.500.000");
+  assert.equal(notasLeadDeProspecto(p), "Prospecto de Chileautos (particular): https://www.chileautos.cl/vehiculos/detalles/toyota-yaris-2019/CL-AD-1234567/ · precio publicado $8.500.000 · compra sugerida $7.000.000");
   assert.match(notasLeadDeProspecto({ ...p, vendedor_tipo: "automotora", vendedor_nombre: "Autos del Sur" }), /\(automotora Autos del Sur\)/);
 });
 

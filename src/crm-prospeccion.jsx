@@ -15,7 +15,7 @@ import { buildBookmarkletHref, buildBookmarkletFichaHref } from "./chileautos-bo
 import { parseAvisosPegados, TRANSMISIONES, COMBUSTIBLES } from "./compra-calc.js";
 import {
   filtrarAvisos, ORDENES_PROSPECTO, ESTADOS_PROSPECTO, estadoProspectoNombre, marcaModeloDeTitulo, vehiculoOfrecidoDeProspecto,
-  notasLeadDeProspecto, FUENTE_LEAD_CHILEAUTOS, enlaceWhatsappProspecto, parseFichaPegada, pendientesDeTelefono,
+  notasLeadDeProspecto, FUENTE_LEAD_CHILEAUTOS, enlaceWhatsappProspecto, parseFichaPegada, pendientesDeTelefono, precioSugeridoCompra, REBAJA_COMPRA_SUGERIDA,
 } from "../supabase/functions/api/prospectos-core.js";
 
 const CHICO = "border border-stone-300 bg-white px-2 py-1 text-sm";
@@ -190,7 +190,7 @@ function Convertir({ api, p, onCerrar, onListo }) {
   return (
     <Modal titulo="Convertir en lead de compra" onCerrar={onCerrar}>
       <div className="flex flex-col gap-3">
-        <p className="text-sm text-stone-600">Hazlo cuando el dueño respondió por Chileautos y te dio sus datos. <b>{p.titulo}</b> · {p.anio || "—"} · {clp(p.precio)}</p>
+        <p className="text-sm text-stone-600">Hazlo cuando el dueño respondió por Chileautos y te dio sus datos. <b>{p.titulo}</b> · {p.anio || "—"} · publicado {clp(p.precio)} · compra sugerida <b>{clp(precioSugeridoCompra(p.precio))}</b></p>
         <div className="grid sm:grid-cols-2 gap-3">
           <Campo etiqueta="Nombre del dueño" ayuda={p.vendedor_telefono ? "Traído del aviso: confírmalo con el dueño." : undefined}><input value={f.nombre} onChange={(e) => set("nombre", e.target.value)} className={INPUT} /></Campo>
           <Campo etiqueta="Teléfono"><input value={f.telefono} onChange={(e) => set("telefono", e.target.value)} placeholder="9 1234 5678" className={INPUT} /></Campo>
@@ -320,7 +320,12 @@ function MisProspectos({ api, version, onCambio, abrirLead }) {
                   {p.version && <span className="text-xs text-stone-500"> · {p.version}</span>}
                   <p className="text-xs text-stone-500">{[p.anio, p.km ? `${p.km.toLocaleString("es-CL")} km` : "", p.transmision, p.combustible].filter(Boolean).join(" · ")} · guardado {hace(p.creado_en)}</p>
                 </div>
-                <span className="font-mono font-semibold">{clp(p.precio)}</span>
+                <div className="text-right leading-tight">
+                  <span className="block font-mono font-semibold">{clp(p.precio)}</span>
+                  <span className="block text-[11px] text-stone-500">publicado</span>
+                  <span className="block font-mono text-sm font-semibold text-emerald-700" title={`Precio publicado menos ${clp(REBAJA_COMPRA_SUGERIDA)}`}>{clp(precioSugeridoCompra(p.precio))}</span>
+                  <span className="block text-[11px] text-emerald-700">compra sugerida</span>
+                </div>
                 <Etiqueta vendedor={p.vendedor_tipo} nombre={p.vendedor_nombre} />
               </div>
               <Telefono key={p.id + (p.vendedor_telefono || "")} p={p} cambiarContacto={cambiarContacto} />

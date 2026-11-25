@@ -200,11 +200,16 @@ export function enlaceWhatsappProspecto(p) {
   const t = `Hola, vi tu ${p.titulo || "auto"} publicado en Chileautos. ¿Sigue disponible?`;
   return `https://wa.me/${d}?text=${encodeURIComponent(t)}`;
 }
+/** Rebaja fija que se propone sobre el precio publicado para ofertar al dueño. */
+export const REBAJA_COMPRA_SUGERIDA = 1_500_000;
+/** Precio sugerido de compra: el publicado menos la rebaja (nunca bajo cero). */
+export const precioSugeridoCompra = (precioPublicado) => Math.max(0, Math.round(Number(precioPublicado) || 0) - REBAJA_COMPRA_SUGERIDA);
+
 /** Nota del lead: de dónde viene y qué precio tenía el aviso. */
 export function notasLeadDeProspecto(p) {
   const v = p.vendedor_tipo === "particular" ? "particular" : p.vendedor_tipo === "automotora" ? `automotora${p.vendedor_nombre ? ` ${p.vendedor_nombre}` : ""}` : "";
   const precio = Math.round(Number(p.precio)).toLocaleString("es-CL");
-  return `Prospecto de Chileautos${v ? ` (${v})` : ""}: https://www.chileautos.cl${p.href} · precio publicado $${precio}`.slice(0, 1000);
+  return `Prospecto de Chileautos${v ? ` (${v})` : ""}: https://www.chileautos.cl${p.href} · precio publicado $${precio} · compra sugerida $${precioSugeridoCompra(p.precio).toLocaleString("es-CL")}`.slice(0, 1000);
 }
 
 /** Lo que copia el marcador de ficha: { fuente: "chileautos-ficha", id, telefono }. */
