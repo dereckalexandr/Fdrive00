@@ -40,8 +40,28 @@ function Buscar({ api, guardados, onGuardado }) {
   const [msg, setMsg] = useState(null);
   const [ocupado, setOcupado] = useState(false);
   const [copiado, setCopiado] = useState(false);
+  const [autoPegado, setAutoPegado] = useState(false);
   const bmRef = useRef(null);
   useEffect(() => { if (bmRef.current) bmRef.current.setAttribute("href", buildBookmarkletHref()); }, []);
+
+  /* Al volver a esta pestaña desde Chileautos, si el marcador copió avisos, se pegan solos (el navegador pide permiso una vez). */
+  const pegadoRef = useRef("");
+  pegadoRef.current = pegado;
+  useEffect(() => {
+    let ocupadoLectura = false;
+    const revisar = async () => {
+      if (document.visibilityState !== "visible" || ocupadoLectura) return;
+      ocupadoLectura = true;
+      try {
+        const t = await navigator.clipboard.readText();
+        if (t && t.includes('"fuente":"chileautos"') && t !== pegadoRef.current) { const r = parseAvisosPegados(t); if (r.ok) { setPegado(t); setSel(new Set()); setMsg(null); setAutoPegado(true); } }
+      } catch (e) { /* sin permiso o sin foco: queda el cuadro para pegar */ }
+      ocupadoLectura = false;
+    };
+    window.addEventListener("focus", revisar);
+    document.addEventListener("visibilitychange", revisar);
+    return () => { window.removeEventListener("focus", revisar); document.removeEventListener("visibilitychange", revisar); };
+  }, []);
 
   const busqueda = useMemo(() => urlBusquedaProspeccion(f), [f]);
   const leido = useMemo(() => (pegado.trim() ? parseAvisosPegados(pegado) : null), [pegado]);
@@ -88,13 +108,14 @@ function Buscar({ api, guardados, onGuardado }) {
         <ol className="text-xs text-stone-600 list-decimal pl-5 flex flex-col gap-1 mb-3">
           <li>Una sola vez: muestra la barra de favoritos (Ctrl+Shift+B) y <strong>arrastra este botón</strong> a ella.</li>
           <li>En la página de resultados de Chileautos, pulsa ese favorito: muestra «N avisos copiados». Si hay varias páginas de resultados, repite en cada una.</li>
-          <li>Vuelve aquí y pega abajo (Ctrl+V).</li>
+          <li>Vuelve a esta pestaña: los avisos se pegan solos (el navegador te pedirá permiso para leer el portapapeles la primera vez: acéptalo). Si no, pega abajo (Ctrl+V).</li>
         </ol>
         <div className="flex flex-wrap items-center gap-3 mb-3">
           <a ref={bmRef} onClick={(e) => e.preventDefault()} draggable="true" className="inline-block border-2 border-dashed border-amber-500 bg-amber-50 text-amber-900 px-3 py-2 text-sm font-medium cursor-grab">⭐ Copiar avisos Chileautos</a>
           <button type="button" onClick={copiarMarcador} className="text-xs text-stone-600 hover:underline py-2">{copiado ? "Código copiado ✓" : "No puedo arrastrarlo: copiar el código del marcador"}</button>
         </div>
-        <textarea value={pegado} onChange={(e) => { setPegado(e.target.value); setSel(new Set()); setMsg(null); }} rows={3} placeholder="Pega aquí lo que copió el marcador (Ctrl+V)" className={`${INPUT} font-mono text-xs`} />
+        <textarea value={pegado} onChange={(e) => { setPegado(e.target.value); setSel(new Set()); setMsg(null); setAutoPegado(false); }} rows={3} placeholder="Pega aquí lo que copió el marcador (Ctrl+V)" className={`${INPUT} font-mono text-xs`} />
+        {autoPegado && leido && leido.ok && avisos.length > 0 && <p className="mt-2 text-xs text-emerald-700">Pegados automáticamente desde Chileautos: {avisos.length} avisos.</p>}
         {leido && !leido.ok && <div className="mt-2"><Aviso>{leido.error}</Aviso></div>}
         {leido && leido.ok && leido.data.sinResultados && <div className="mt-2"><Aviso tipo="info">Chileautos no tiene avisos exactos para ese filtro (mostró «parecidos»): esa copia no sirve. Prueba con filtros más amplios.</Aviso></div>}
         {leido && leido.ok && !avisos.length && !leido.data.sinResultados && <div className="mt-2"><Aviso>La página no tenía avisos. Usa el marcador en la lista de resultados.</Aviso></div>}
@@ -236,7 +257,6 @@ function TelefonoDeFicha({ api, lista, onListo }) {
 
   /* Al volver a esta pestaña desde la ficha, se lee el portapapeles (el navegador pide permiso una vez). */
   useEffect(() => {
-    if (!esperando) return undefined;
     const revisar = async () => {
       if (document.visibilityState !== "visible" || ocupado.current) return;
       ocupado.current = true;
