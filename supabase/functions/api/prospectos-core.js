@@ -217,3 +217,9 @@ export function parseFichaPegada(texto) {
   if (!telefono) return { ok: false, error: "El marcador no encontró el teléfono: pulsa «Ver n° de teléfono» en la ficha antes de usarlo." };
   return { ok: true, id: String(d.id), telefono };
 }
+
+/** Prospectos en seguimiento a los que aún les falta el teléfono (más recientes primero), sin los saltados. */
+export function pendientesDeTelefono(lista, saltados) {
+  const sal = saltados instanceof Set ? saltados : new Set(saltados || []);
+  return (lista || []).filter((p) => !p.vendedor_telefono && p.estado !== "descartado" && p.estado !== "convertido" && !sal.has(p.id));
+}

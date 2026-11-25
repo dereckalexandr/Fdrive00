@@ -156,3 +156,11 @@ test("Ficha pegada: exige aviso y teléfono válidos", async () => {
   assert.equal(parseFichaPegada(JSON.stringify({ fuente: "chileautos-ficha", id: "", telefono: "965730759" })).ok, false);
   assert.match(parseFichaPegada(JSON.stringify({ fuente: "chileautos-ficha", id: "CL-AD-20389479", telefono: "" })).error, /Ver n° de teléfono/);
 });
+
+test("Cola de fichas: solo los que siguen en juego y aún sin teléfono, sin los saltados", async () => {
+  const { pendientesDeTelefono } = await import("../supabase/functions/api/prospectos-core.js");
+  const l = [{ id: "a", estado: "nuevo" }, { id: "b", estado: "nuevo", vendedor_telefono: "+56911111111" }, { id: "c", estado: "descartado" }, { id: "d", estado: "convertido" }, { id: "e", estado: "contactado" }];
+  assert.deepEqual(pendientesDeTelefono(l).map((p) => p.id), ["a", "e"]);
+  assert.deepEqual(pendientesDeTelefono(l, new Set(["a"])).map((p) => p.id), ["e"]);
+  assert.deepEqual(pendientesDeTelefono(null), []);
+});

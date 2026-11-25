@@ -15,7 +15,7 @@ import { buildBookmarkletHref, buildBookmarkletFichaHref } from "./chileautos-bo
 import { parseAvisosPegados, TRANSMISIONES, COMBUSTIBLES } from "./compra-calc.js";
 import {
   filtrarAvisos, ORDENES_PROSPECTO, ESTADOS_PROSPECTO, estadoProspectoNombre, marcaModeloDeTitulo, vehiculoOfrecidoDeProspecto,
-  notasLeadDeProspecto, FUENTE_LEAD_CHILEAUTOS, enlaceWhatsappProspecto, parseFichaPegada,
+  notasLeadDeProspecto, FUENTE_LEAD_CHILEAUTOS, enlaceWhatsappProspecto, parseFichaPegada, pendientesDeTelefono,
 } from "../supabase/functions/api/prospectos-core.js";
 
 const CHICO = "border border-stone-300 bg-white px-2 py-1 text-sm";
@@ -215,26 +215,58 @@ function Telefono({ p, cambiarContacto }) {
 function TelefonoDeFicha({ api, lista, onListo }) {
   const [texto, setTexto] = useState("");
   const [msg, setMsg] = useState(null);
+  const [esperando, setEsperando] = useState(null);
+  const [saltados, setSaltados] = useState(() => new Set());
   const bmRef = useRef(null);
+  const ocupado = useRef(false);
   useEffect(() => { if (bmRef.current) bmRef.current.setAttribute("href", buildBookmarkletFichaHref()); }, []);
-  const aplicar = async (valor) => {
-    setTexto(valor); setMsg(null);
-    if (!valor.trim()) return;
+  const pendientes = useMemo(() => pendientesDeTelefono(lista, saltados), [lista, saltados]);
+  const siguiente = pendientes[0];
+
+  const aplicar = async (valor, silencioso) => {
     const r = parseFichaPegada(valor);
-    if (!r.ok) { setMsg({ ok: false, texto: r.error }); return; }
+    if (!r.ok) { if (!silencioso) setMsg({ ok: false, texto: r.error }); return false; }
     const p = lista.find((x) => x.aviso_id === r.id);
-    if (!p) { setMsg({ ok: false, texto: `El aviso ${r.id} no está en tus prospectos: guárdalo primero desde «Buscar en Chileautos».` }); return; }
-    try { await api("prospectos.contacto", { id: p.id, telefono: r.telefono }); setMsg({ ok: true, texto: `Teléfono ${r.telefono} guardado en «${p.titulo}».` }); setTexto(""); onListo(); }
-    catch (e) { setMsg({ ok: false, texto: mensajeError(e) }); }
+    if (!p) { if (!silencioso) setMsg({ ok: false, texto: `El aviso ${r.id} no está en tus prospectos: guárdalo primero desde «Buscar en Chileautos».` }); return false; }
+    if (p.vendedor_telefono === r.telefono) return false;
+    try { await api("prospectos.contacto", { id: p.id, telefono: r.telefono }); setMsg({ ok: true, texto: `Teléfono ${r.telefono} guardado en «${p.titulo}».` }); setTexto(""); setEsperando(null); onListo(); return true; }
+    catch (e) { setMsg({ ok: false, texto: mensajeError(e) }); return false; }
   };
+  const pegar = (valor) => { setTexto(valor); setMsg(null); if (valor.trim()) aplicar(valor, false); };
+
+  /* Al volver a esta pestaña desde la ficha, se lee el portapapeles (el navegador pide permiso una vez). */
+  useEffect(() => {
+    if (!esperando) return undefined;
+    const revisar = async () => {
+      if (document.visibilityState !== "visible" || ocupado.current) return;
+      ocupado.current = true;
+      try { const t = await navigator.clipboard.readText(); if (t && t.includes("chileautos-ficha")) await aplicar(t, true); }
+      catch (e) { /* sin permiso: queda el cuadro para pegar */ }
+      ocupado.current = false;
+    };
+    window.addEventListener("focus", revisar);
+    document.addEventListener("visibilitychange", revisar);
+    return () => { window.removeEventListener("focus", revisar); document.removeEventListener("visibilitychange", revisar); };
+  });
+
+  const abrirSiguiente = () => { if (!siguiente) return; setMsg(null); setEsperando(siguiente.id); window.open(ENLACE(siguiente.href), "_blank", "noopener"); };
+  const saltar = () => { if (siguiente) setSaltados((s) => new Set(s).add(siguiente.id)); setEsperando(null); };
+  const enEspera = esperando && lista.find((p) => p.id === esperando);
+
   return (
-    <Tarjeta titulo="Traer el teléfono desde la ficha del aviso" ayuda="En la lista de Chileautos no aparece el teléfono: está en la ficha de cada aviso, tras pulsar «Ver n° de teléfono». Este segundo marcador lo copia (solo lee lo que la página ya muestra; no pulsa nada por ti).">
+    <Tarjeta titulo="Traer el teléfono desde la ficha del aviso" ayuda="En la lista de Chileautos no aparece el teléfono: está en la ficha de cada aviso, tras pulsar «Ver n° de teléfono». Este marcador lo copia (solo lee lo que la página ya muestra; no pulsa nada por ti) y el CRM lo guarda al volver.">
       <ol className="text-xs text-stone-600 list-decimal pl-5 flex flex-col gap-1 mb-3">
         <li>Una sola vez: arrastra este botón a la barra de favoritos: <a ref={bmRef} onClick={(e) => e.preventDefault()} draggable="true" className="inline-block border-2 border-dashed border-amber-500 bg-amber-50 text-amber-900 px-2 py-0.5 text-xs font-medium cursor-grab">⭐ Copiar teléfono Chileautos</a></li>
-        <li>Abre «Contactar en Chileautos» de un prospecto, pulsa <b>Ver n° de teléfono</b> y luego el favorito.</li>
-        <li>Vuelve aquí y pega (Ctrl+V): el teléfono queda en ese prospecto.</li>
+        <li>Pulsa «Abrir la siguiente ficha»: se abre el aviso en otra pestaña. Ahí pulsa <b>Ver n° de teléfono</b> y luego el favorito.</li>
+        <li>Vuelve a esta pestaña: el teléfono se guarda solo (si el navegador pide permiso para leer el portapapeles, acéptalo). Si no, pégalo abajo.</li>
       </ol>
-      <input value={texto} onChange={(e) => aplicar(e.target.value)} placeholder="Pega aquí lo que copió el marcador de ficha" className={`${INPUT} font-mono text-xs`} />
+      <div className="flex flex-wrap items-center gap-3 mb-3">
+        <button type="button" disabled={!siguiente} onClick={abrirSiguiente} className={BTN_PRIMARIO}>{siguiente ? "Abrir la siguiente ficha" : "No quedan prospectos sin teléfono"}</button>
+        {siguiente && <span className="text-xs text-stone-600">Sigue: <b>{siguiente.titulo}</b> {siguiente.anio || ""} · {clp(siguiente.precio)} · {pendientes.length} pendiente{pendientes.length === 1 ? "" : "s"}</span>}
+        {siguiente && <button type="button" onClick={saltar} className="text-xs text-stone-500 hover:underline" title="Si el aviso no muestra teléfono o ya no está">Saltar este</button>}
+      </div>
+      {enEspera && <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 px-2 py-1 mb-2">Esperando el teléfono de «{enEspera.titulo}»: en la ficha pulsa «Ver n° de teléfono» y el favorito, luego vuelve aquí.</p>}
+      <input value={texto} onChange={(e) => pegar(e.target.value)} placeholder="O pega aquí lo que copió el marcador de ficha" className={`${INPUT} font-mono text-xs`} />
       {msg && <p className={`text-xs mt-2 ${msg.ok ? "text-emerald-700" : "text-rose-600"}`}>{msg.texto}</p>}
     </Tarjeta>
   );
