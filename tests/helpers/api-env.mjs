@@ -23,6 +23,7 @@ let contadorPublicaciones = 0;
 let relojWa = Date.now();
 const marcaWa = () => new Date(++relojWa).toISOString();
 const DEFAULTS = {
+  prospectos: () => ({ id: randomUUID(), estado: "nuevo", destacado: false, notas: null, lead_id: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
   wa_conversaciones: () => ({ id: randomUUID(), etiquetas: [], bot_estado: null, bot_actualizado: null, no_leidos: 0, cliente_id: null, lead_id: null, local_id: null, ultimo_mensaje_en: null, ultimo_entrante_en: null, creado_en: marcaWa(), actualizado_en: marcaWa() }),
   wa_mensajes: () => ({ id: randomUUID(), estado: "recibido", media: null, wamid: null, creado_en: marcaWa() }),
   usuarios: () => ({ id: randomUUID(), comision: {}, activo: true, debe_cambiar_clave: true, roles: [], permisos_extra: { otorgar: [], quitar: [] },
@@ -56,7 +57,7 @@ const DEFAULTS = {
   fin_nominas: () => ({ id: randomUUID(), creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
   fin_movimientos: () => ({ id: randomUUID(), archivos: [], recurrente: false, serie_id: null, nomina_id: null, nomina_concepto: null, mes_resultado: null, numero: ++contadorFin, estado: "vigente", cuenta_id: null, cuenta_destino_id: null, vehiculo_id: null, contraparte: null, documento_numero: null, notas: null, anulado_por: null, anulado_en: null, motivo_anulacion: null, creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() }),
 };
-const UNICOS = { wa_conversaciones: ["telefono"], vehiculos: ["patente"], usuarios: ["rut"], locales: ["nombre"], roles_permisos: ["rol"], config_negocio: ["clave"], kv_store: ["key"], patentes_consultadas: ["patente"] };
+const UNICOS = { prospectos: ["aviso_id"], wa_conversaciones: ["telefono"], vehiculos: ["patente"], usuarios: ["rut"], locales: ["nombre"], roles_permisos: ["rol"], config_negocio: ["clave"], kv_store: ["key"], patentes_consultadas: ["patente"] };
 
 /** Convierte un patrón LIKE/ILIKE de SQL (% = cualquier texto, _ = una letra, \ escapa) a una expresión regular. */
 function patronARegex(patron, insensible) {
@@ -74,7 +75,7 @@ function patronARegex(patron, insensible) {
 }
 
 export function crearBaseFalsa() {
-  const tablas = { usuarios: [], locales: [], roles_permisos: [], bitacora: [], config_negocio: [], kv_store: [], vehiculos: [], clientes: [], leads: [], lead_eventos: [], tareas: [], cotizaciones: [], reservas: [], cierres: [], avisos: [], tasaciones: [], inspecciones: [], validaciones: [], validacion_docs: [], anuncios: [], anuncio_portales: [], campanias: [], publicaciones_rrss: [], material_vehiculo: [], compras: [], consignaciones: [], cierre_pagos: [], compra_pagos: [], cuentas_empresa: [], fin_movimientos: [], fin_saldos: [], fin_trabajadores: [], fin_nominas: [], wa_conversaciones: [], wa_mensajes: [], patentes_consultadas: [], alertas_leads: [] };
+  const tablas = { usuarios: [], locales: [], roles_permisos: [], bitacora: [], config_negocio: [], kv_store: [], vehiculos: [], clientes: [], leads: [], lead_eventos: [], tareas: [], cotizaciones: [], reservas: [], cierres: [], avisos: [], tasaciones: [], inspecciones: [], validaciones: [], validacion_docs: [], anuncios: [], anuncio_portales: [], campanias: [], publicaciones_rrss: [], material_vehiculo: [], compras: [], consignaciones: [], cierre_pagos: [], compra_pagos: [], cuentas_empresa: [], fin_movimientos: [], fin_saldos: [], fin_trabajadores: [], fin_nominas: [], prospectos: [], wa_conversaciones: [], wa_mensajes: [], patentes_consultadas: [], alertas_leads: [] };
   const consultas = [];
 
   function builder(nombre) {

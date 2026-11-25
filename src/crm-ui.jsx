@@ -49,6 +49,8 @@ const MENSAJES = {
   bienvenida_plantilla_invalida: "Esa plantilla no está aprobada por Meta todavía. Espera a que figure como aprobada y vuelve a elegirla.",
   bienvenida_vender_variables: "La plantilla para quienes venden o consignan debe tener exactamente 5 variables ({{1}} a {{5}}): nombre, vender o consignar, el auto, empresa y cuándo lo contactan.",
   bienvenida_plantilla_variables: "La plantilla de bienvenida debe tener exactamente 4 variables ({{1}} a {{4}}): nombre, qué recibimos, empresa y cuándo lo contactan.",
+  avisos_invalidos: "No hay avisos válidos para guardar. Vuelve a copiarlos con el marcador desde la lista de resultados de Chileautos.",
+  prospecto_convertido: "Ese prospecto ya se convirtió en lead.",
   etiquetas_invalidas: "Cada conversación admite hasta 5 etiquetas de 2 a 20 caracteres.",
   ads_no_configurado: "Esa plataforma aún no está conectada: el Administrador debe cargar las claves de la cuenta publicitaria en el servidor.",
   externo_no_existe: "Esa campaña ya no existe en la plataforma o no pertenece a la cuenta conectada.",

@@ -21,6 +21,7 @@ import {
 } from "./ventas-core.js";
 import { whatsappOp } from "./whatsapp.ts";
 import { finanzasOp } from "./finanzas.ts";
+import { prospectosOp } from "./prospectos.ts";
 import { PLATAFORMAS, validarVinculo, validarImportacion, excedePresupuesto, errorLegible, validarCampaniaGoogle, sugerenciasGoogle, puedeActivar, diasRestantes } from "./ads-core.js";
 import { estadoConexion, listarExternas, configurado as adsConfigurado, sincronizarCampanias, crearCampaniaGoogle, estadoCampaniaGoogle } from "./ads.ts";
 import { estadoLeadsAds, reintentarLead } from "./leads-ads.ts";
@@ -590,6 +591,11 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       financieras: FINANCIERAS, locales, etapas: ETAPAS,
       dias_reserva: c.dias_reserva, vigencia_cotizacion_dias: c.vigencia_cotizacion_dias, condiciones_cotizacion: c.condiciones_cotizacion,
     });
+  }
+
+  /* ---------- Prospección en Chileautos: avisos elegidos para contactar a sus dueños ---------- */
+  if (op.startsWith("prospectos.")) {
+    return await prospectosOp({ sb, json, err, fallo, audit, actor: ctx.actor, userId, userName, esAdmin: ctx.esAdmin, puede: can("compras.operar") || can("consignaciones.operar") || esSupervisor, local: localParaCrear }, op, body);
   }
 
   /* ---------- WhatsApp Business: bandeja y conversaciones ---------- */
