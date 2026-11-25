@@ -283,9 +283,14 @@ function TasacionDetalle({ api, id, renderEstimador, onCerrar, onCambio }) {
               <button type="button" onClick={() => setNuevas(nuevas.filter((x) => x.id !== n.id))} className="absolute -top-2 -right-2 bg-rose-600 text-white w-5 h-5 text-xs rounded-full" aria-label="Quitar foto">✕</button></div>
           ))}
           {soloTasador && total < MAX_FOTOS_TASACION && (
-            <label className="w-24 h-24 border-2 border-dashed border-stone-300 flex flex-col items-center justify-center text-stone-500 text-xs cursor-pointer hover:border-amber-500 text-center">
-              <span className="text-xl">＋</span>Agregar foto<input type="file" accept="image/*" multiple className="hidden" onChange={agregarFotos} />
-            </label>
+            <>
+              <label className="w-24 h-24 border-2 border-dashed border-stone-300 flex flex-col items-center justify-center text-stone-500 text-xs cursor-pointer hover:border-amber-500 text-center">
+                <span className="text-xl">📷</span>Tomar foto<input type="file" accept="image/*" capture="environment" className="hidden" onChange={agregarFotos} />
+              </label>
+              <label className="w-24 h-24 border-2 border-dashed border-stone-300 flex flex-col items-center justify-center text-stone-500 text-xs cursor-pointer hover:border-amber-500 text-center">
+                <span className="text-xl">🖼️</span>Subir desde el celular<input type="file" accept="image/*" multiple className="hidden" onChange={agregarFotos} />
+              </label>
+            </>
           )}
           {!soloTasador && total === 0 && <p className="text-sm text-stone-500">Sin fotos.</p>}
         </div>
