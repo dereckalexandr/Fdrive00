@@ -2,7 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  BIENVENIDA_DEFECTO, PLANTILLA_SUGERIDA, VARIABLES_BIENVENIDA, validarConfigBienvenida, configBienvenida, descripcionSolicitud, cuandoContactar, valoresBienvenida,
+  BIENVENIDA_DEFECTO, PLANTILLA_SUGERIDA, PLANTILLA_VENDER, VARIABLES_BIENVENIDA, VARIABLES_VENDER, esTipoVender, valoresBienvenidaVender, validarConfigBienvenida, configBienvenida, descripcionSolicitud, cuandoContactar, valoresBienvenida,
   claveBienvenidaTelefono, claveBienvenidaDia, yaRecibioBienvenida, DIAS_SIN_REPETIR, esPeticionDeBaja, claveBajaTelefono, ETIQUETA_BAJA, TEXTO_CONFIRMA_BAJA,
 } from "../supabase/functions/api/wa-bienvenida-core.js";
 import { validarPlantillaNueva, variablesDe, armarPlantilla } from "../supabase/functions/api/whatsapp-core.js";
@@ -23,9 +23,11 @@ test("La plantilla sugerida es válida para Meta: servicio, 4 variables, no empi
 });
 
 test("Configuración: apagada por defecto; para encenderla hay que elegir una plantilla; se valida", () => {
-  assert.deepEqual(BIENVENIDA_DEFECTO, { activa: false, plantilla: { nombre: "", idioma: "es" }, maxPorDia: 40 });
+  assert.deepEqual(BIENVENIDA_DEFECTO, { activa: false, plantilla: { nombre: "", idioma: "es" }, plantillaVender: { nombre: "", idioma: "es" }, maxPorDia: 40 });
   assert.equal(validarConfigBienvenida({ activa: true }).error, "bienvenida_sin_plantilla");
-  assert.deepEqual(validarConfigBienvenida({ activa: true, plantilla: { nombre: "bienvenida_formulario", idioma: "es" }, maxPorDia: "25" }).value, { activa: true, plantilla: { nombre: "bienvenida_formulario", idioma: "es" }, maxPorDia: 25 });
+  assert.deepEqual(validarConfigBienvenida({ activa: true, plantilla: { nombre: "bienvenida_formulario", idioma: "es" }, maxPorDia: "25" }).value, { activa: true, plantilla: { nombre: "bienvenida_formulario", idioma: "es" }, plantillaVender: { nombre: "", idioma: "es" }, maxPorDia: 25 });
+  assert.equal(validarConfigBienvenida({ plantillaVender: { nombre: "bienvenida_vender", idioma: "es" } }).value.plantillaVender.nombre, "bienvenida_vender", "la de vender o consignar es opcional y no obliga a encender");
+  assert.equal(validarConfigBienvenida({ plantillaVender: { nombre: "Con Espacios" } }).error, "bienvenida_config_invalida");
   assert.equal(validarConfigBienvenida({ activa: false }).ok, true, "apagada no necesita plantilla");
   assert.equal(validarConfigBienvenida({ plantilla: { nombre: "Nombre Con Espacios" } }).error, "bienvenida_config_invalida");
   assert.equal(validarConfigBienvenida({ plantilla: { nombre: "ok_nombre", idioma: "español" } }).error, "bienvenida_config_invalida");
@@ -35,6 +37,27 @@ test("Configuración: apagada por defecto; para encenderla hay que elegir una pl
   assert.deepEqual(configBienvenida(undefined), BIENVENIDA_DEFECTO);
   assert.deepEqual(configBienvenida("basura{"), BIENVENIDA_DEFECTO);
   assert.equal(configBienvenida(JSON.stringify({ activa: true, plantilla: { nombre: "mi_plantilla", idioma: "es_CL" } })).plantilla.idioma, "es_CL");
+});
+
+test("Plantilla para quienes quieren vender o consignar: válida para Meta, 5 variables y valores con el auto que ofrecen", () => {
+  const v = validarPlantillaNueva(PLANTILLA_VENDER);
+  assert.equal(v.ok, true, JSON.stringify(v));
+  assert.equal(v.value.category, "UTILITY");
+  assert.equal(v.value.name, "bienvenida_vender");
+  assert.equal(variablesDe(PLANTILLA_VENDER.cuerpo).length, VARIABLES_VENDER);
+  assert.equal(PLANTILLA_VENDER.ejemplos.length, VARIABLES_VENDER);
+  assert.equal(esTipoVender("vender"), true);
+  assert.equal(esTipoVender("consignar"), true);
+  assert.equal(esTipoVender("renovar"), false, "renovar usa la general");
+  assert.equal(esTipoVender("consulta"), false);
+  const val = valoresBienvenidaVender({ nombre: "Pedro Soto", tipo: "consignar", auto: "Toyota Yaris 2018", empresa: "BuyCar", horario: HORARIO_DEFECTO, ahora: CERRADO });
+  assert.deepEqual(val, ["Pedro", "consignar", "Toyota Yaris 2018", "BuyCar", "mañana desde las 09:00"]);
+  assert.deepEqual(valoresBienvenidaVender({ ahora: ABIERTO }), ["cliente", "vender", "auto", "nuestra automotora", "a la brevedad"]);
+  assert.equal(valoresBienvenidaVender({ auto: "x".repeat(200) })[2].length, 60);
+  const p = { nombre: "bienvenida_vender", idioma: "es", cuerpo: PLANTILLA_VENDER.cuerpo, pie: PLANTILLA_VENDER.pie, encabezado: "", variables: ["1", "2", "3", "4", "5"], nombradas: false };
+  const a = armarPlantilla(p, val);
+  assert.equal(a.ok, true);
+  assert.equal(a.texto, "Hola Pedro 👋 Recibimos tu solicitud para consignar tu Toyota Yaris 2018. Un ejecutivo de BuyCar te contactará mañana desde las 09:00 para coordinar la tasación. Mientras tanto, puedes enviarnos por aquí fotos del auto y del permiso de circulación."+String.fromCharCode(10)+"Mensaje automático");
 });
 
 test("Qué recibimos: según el tipo de solicitud del sitio y el origen del lead", () => {

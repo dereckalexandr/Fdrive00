@@ -9,7 +9,7 @@ export const CLAVE_BIENVENIDA = "whatsapp::bienvenida";
 export const CLAVE_BIENVENIDA_ESTADO = "whatsapp::bienvenida::estado";
 /** Un mismo teléfono recibe la bienvenida una vez cada tantos días (un formulario repetido no repite el mensaje). */
 export const DIAS_SIN_REPETIR = 7;
-export const BIENVENIDA_DEFECTO = { activa: false, plantilla: { nombre: "", idioma: "es" }, maxPorDia: 40 };
+export const BIENVENIDA_DEFECTO = { activa: false, plantilla: { nombre: "", idioma: "es" }, plantillaVender: { nombre: "", idioma: "es" }, maxPorDia: 40 };
 
 /** Plantilla que el CRM propone crear en Meta (categoría «Servicio»: confirma una solicitud que el cliente acaba de hacer). */
 export const PLANTILLA_SUGERIDA = {
@@ -21,7 +21,22 @@ export const PLANTILLA_SUGERIDA = {
 };
 export const VARIABLES_BIENVENIDA = 4;
 
-/** Configuración guardada: { activa, plantilla: { nombre, idioma }, maxPorDia }. */
+/**
+ * Plantilla para quienes quieren VENDER o CONSIGNAR su auto (opcional): menciona el auto que ofrecen, avisa de la tasación y pide fotos.
+ * Si no se elige una, esos leads reciben la plantilla general.
+ */
+export const PLANTILLA_VENDER = {
+  nombre: "bienvenida_vender",
+  categoria: "UTILITY",
+  cuerpo: "Hola {{1}} 👋 Recibimos tu solicitud para {{2}} tu {{3}}. Un ejecutivo de {{4}} te contactará {{5}} para coordinar la tasación. Mientras tanto, puedes enviarnos por aquí fotos del auto y del permiso de circulación.",
+  pie: "Mensaje automático",
+  ejemplos: ["Pedro", "consignar", "Toyota Yaris 2018", "BuyCar", "mañana desde las 10:00"],
+};
+export const VARIABLES_VENDER = 5;
+/** ¿La solicitud es de alguien que quiere vender o consignar su auto? */
+export const esTipoVender = (tipo) => tipo === "vender" || tipo === "consignar";
+
+/** Configuración guardada: { activa, plantilla: { nombre, idioma }, plantillaVender: { nombre, idioma }, maxPorDia }. */
 export function validarConfigBienvenida(c) {
   const x = c && typeof c === "object" ? c : {};
   const p = x.plantilla && typeof x.plantilla === "object" ? x.plantilla : {};
@@ -32,7 +47,13 @@ export function validarConfigBienvenida(c) {
   const maxPorDia = x.maxPorDia === undefined ? BIENVENIDA_DEFECTO.maxPorDia : Number(x.maxPorDia);
   if (!Number.isInteger(maxPorDia) || maxPorDia < 1 || maxPorDia > 1000) return { ok: false, error: "bienvenida_config_invalida" };
   if (x.activa && !nombre) return { ok: false, error: "bienvenida_sin_plantilla" };
-  return { ok: true, value: { activa: !!x.activa, plantilla: { nombre, idioma }, maxPorDia } };
+  // Plantilla opcional para quienes quieren vender o consignar.
+  const pv = x.plantillaVender && typeof x.plantillaVender === "object" ? x.plantillaVender : {};
+  const nombreV = String(pv.nombre ?? "").trim();
+  const idiomaV = String(pv.idioma ?? "es").trim() || "es";
+  if (nombreV && !/^[a-z0-9_]{3,512}$/.test(nombreV)) return { ok: false, error: "bienvenida_config_invalida" };
+  if (!/^[a-z]{2}(_[A-Z]{2})?$/.test(idiomaV)) return { ok: false, error: "bienvenida_config_invalida" };
+  return { ok: true, value: { activa: !!x.activa, plantilla: { nombre, idioma }, plantillaVender: { nombre: nombreV, idioma: idiomaV }, maxPorDia } };
 }
 export function configBienvenida(valor) {
   let o = valor;
@@ -72,6 +93,17 @@ export function valoresBienvenida({ nombre, tipo, origen, vehiculo, empresa, hor
     descripcionSolicitud({ tipo, origen, vehiculo }),
     String(empresa ?? "").replace(/\s+/g, " ").trim().slice(0, 60) || "nuestra automotora",
     cuandoContactar({ tipo, horario, ahora }),
+  ];
+}
+
+/** Los cinco valores de la plantilla para vender o consignar: nombre, vender o consignar, el auto, empresa y cuándo. */
+export function valoresBienvenidaVender({ nombre, tipo, auto, empresa, horario, ahora = new Date() } = {}) {
+  return [
+    primerNombre(nombre) || "cliente",
+    tipo === "consignar" ? "consignar" : "vender",
+    String(auto ?? "").replace(/\s+/g, " ").trim().slice(0, 60) || "auto",
+    String(empresa ?? "").replace(/\s+/g, " ").trim().slice(0, 60) || "nuestra automotora",
+    cuandoContactar({ horario, ahora }),
   ];
 }
 

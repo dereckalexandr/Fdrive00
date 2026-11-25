@@ -47,6 +47,7 @@ const MENSAJES = {
   bienvenida_config_invalida: "La configuración de la bienvenida no es válida: el tope diario debe ser un número entre 1 y 1000.",
   bienvenida_sin_plantilla: "Elige la plantilla de bienvenida antes de encenderla.",
   bienvenida_plantilla_invalida: "Esa plantilla no está aprobada por Meta todavía. Espera a que figure como aprobada y vuelve a elegirla.",
+  bienvenida_vender_variables: "La plantilla para quienes venden o consignan debe tener exactamente 5 variables ({{1}} a {{5}}): nombre, vender o consignar, el auto, empresa y cuándo lo contactan.",
   bienvenida_plantilla_variables: "La plantilla de bienvenida debe tener exactamente 4 variables ({{1}} a {{4}}): nombre, qué recibimos, empresa y cuándo lo contactan.",
   etiquetas_invalidas: "Cada conversación admite hasta 5 etiquetas de 2 a 20 caracteres.",
   ads_no_configurado: "Esa plataforma aún no está conectada: el Administrador debe cargar las claves de la cuenta publicitaria en el servidor.",

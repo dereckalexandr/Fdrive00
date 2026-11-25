@@ -6,7 +6,7 @@
 // tope diario, y no se envía si la persona ya está conversando. Nunca lanza: si falla, el lead ya quedó guardado y asignado.
 import {
   configBienvenida, valoresBienvenida, claveBienvenidaTelefono, claveBienvenidaDia, yaRecibioBienvenida, CLAVE_BIENVENIDA, CLAVE_BIENVENIDA_ESTADO,
-  VARIABLES_BIENVENIDA, claveBajaTelefono, ETIQUETA_BAJA, TEXTO_CONFIRMA_BAJA,
+  VARIABLES_BIENVENIDA, VARIABLES_VENDER, esTipoVender, valoresBienvenidaVender, claveBajaTelefono, ETIQUETA_BAJA, TEXTO_CONFIRMA_BAJA,
 } from "./wa-bienvenida-core.js";
 import { telefonoWa, armarPlantilla, ventanaAbierta } from "./whatsapp-core.js";
 import { configBot } from "./wa-bot-core.js";
@@ -21,6 +21,8 @@ export type DepsBienvenida = {
 };
 export type DatosBienvenida = {
   nombre?: string; telefono?: string; origen: "web" | "meta" | "google"; tipo?: string; vehiculo?: string; empresa?: string;
+  /** Auto que la persona quiere vender o consignar (marca, modelo y año). */
+  autoOfrecido?: string;
   leadId?: string; clienteId?: string; localId?: string;
 };
 
@@ -73,16 +75,25 @@ export async function bienvenidaLead(d: DepsBienvenida, x: DatosBienvenida, opci
     const liberar = async () => { if (reserva) await sb.from("kv_store").delete().eq("key", claveBienvenidaTelefono(tel)); };
 
     const lista = await plantillas();
-    const p = lista.ok ? lista.lista.find((t: any) => t.nombre === cfg.plantilla.nombre && t.idioma === cfg.plantilla.idioma) : null;
-    if (!p || p.variables.length !== VARIABLES_BIENVENIDA) {
+    const buscar = (c: { nombre: string; idioma: string }, variables: number) => {
+      const t = lista.ok && c.nombre ? lista.lista.find((y: any) => y.nombre === c.nombre && y.idioma === c.idioma) : null;
+      return t && t.variables.length === variables ? t : null;
+    };
+    // Quien quiere vender o consignar recibe su plantilla propia (si está elegida y aprobada); si no, la general.
+    const pVender = esTipoVender(x.tipo) ? buscar(cfg.plantillaVender, VARIABLES_VENDER) : null;
+    const p = pVender || buscar(cfg.plantilla, VARIABLES_BIENVENIDA);
+    if (!p) {
       await liberar();
-      await registrar(sb, false, p ? `La plantilla «${p.nombre}» debe tener ${VARIABLES_BIENVENIDA} variables.` : `La plantilla «${cfg.plantilla.nombre}» no está aprobada en Meta.`);
+      const t = lista.ok ? lista.lista.find((y: any) => y.nombre === cfg.plantilla.nombre && y.idioma === cfg.plantilla.idioma) : null;
+      await registrar(sb, false, t ? `La plantilla «${t.nombre}» debe tener ${VARIABLES_BIENVENIDA} variables.` : `La plantilla «${cfg.plantilla.nombre}» no está aprobada en Meta.`);
       return "plantilla";
     }
     const bot = configBot((await sb.from("kv_store").select("value").eq("key", "whatsapp::bot").maybeSingle()).data?.value ?? null);
     // Nombre de la empresa: el que se escribió para el asistente de WhatsApp y, si no hay, el del sitio (el mismo en todos los orígenes).
     const sitio = bot.empresa || x.empresa || String(((await sb.from("config_negocio").select("valor").eq("clave", "sitio_nombre").maybeSingle()).data || {}).valor || "");
-    const a = armarPlantilla(p, valoresBienvenida({ nombre: x.nombre, tipo: x.tipo, origen: x.origen, vehiculo: x.vehiculo, empresa: sitio, horario: bot.horario, ahora }));
+    const a = armarPlantilla(p, pVender
+      ? valoresBienvenidaVender({ nombre: x.nombre, tipo: x.tipo, auto: x.autoOfrecido, empresa: sitio, horario: bot.horario, ahora })
+      : valoresBienvenida({ nombre: x.nombre, tipo: x.tipo, origen: x.origen, vehiculo: x.vehiculo, empresa: sitio, horario: bot.horario, ahora }));
     if (!a.ok) { await liberar(); await registrar(sb, false, "No se pudieron armar los valores de la plantilla."); return "error"; }
 
     const envio = { messaging_product: "whatsapp", recipient_type: "individual", to: tel, type: "template", template: { name: p.nombre, language: { code: p.idioma }, ...(a.componentes.length ? { components: a.componentes } : {}) } };

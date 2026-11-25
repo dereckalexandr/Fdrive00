@@ -21,7 +21,7 @@ import { usoDelMes, ultimoResultadoIa, type DepsIa } from "./wa-ia.ts";
 import { MODELO_IA_DEFECTO } from "./wa-ia-core.js";
 import { validarConfigBot, estaAbierto, proximaApertura, textoHorario } from "./wa-bot-core.js";
 import { bienvenidaLead, registrarBaja, cargarConfigBienvenida, ultimoResultadoBienvenida, enviadasHoy } from "./wa-bienvenida.ts";
-import { validarConfigBienvenida, PLANTILLA_SUGERIDA, VARIABLES_BIENVENIDA, CLAVE_BIENVENIDA, esPeticionDeBaja } from "./wa-bienvenida-core.js";
+import { validarConfigBienvenida, PLANTILLA_SUGERIDA, PLANTILLA_VENDER, VARIABLES_BIENVENIDA, VARIABLES_VENDER, CLAVE_BIENVENIDA, esPeticionDeBaja } from "./wa-bienvenida-core.js";
 
 const env = (k: string) => (globalThis as any).Deno.env.get(k) ?? "";
 export const waConfigurado = () => !!(env("WA_TOKEN") && env("WA_PHONE_NUMBER_ID"));
@@ -443,7 +443,9 @@ export async function whatsappOp(h: HerramientasWa, op: string, body: any): Prom
       // Envía la bienvenida de ejemplo a un teléfono (el del Administrador, por ejemplo) para ver cómo le llega al cliente.
       const tel = telefonoWa(body.telefono);
       if (!tel) return err("telefono_invalido");
-      const r = await bienvenidaLead({ sb, audit: h.audit }, { nombre: String(body.nombre ?? "").trim() || "Cliente", telefono: tel, origen: "web", tipo: "consulta", vehiculo: "Toyota Yaris 2020" }, { prueba: true });
+      // tipo «vender» o «consignar» prueba la plantilla para quienes ofrecen su auto; cualquier otro, la general.
+      const tipoPrueba = ["vender", "consignar"].includes(String(body.tipo)) ? String(body.tipo) : "consulta";
+      const r = await bienvenidaLead({ sb, audit: h.audit }, { nombre: String(body.nombre ?? "").trim() || "Cliente", telefono: tel, origen: "web", tipo: tipoPrueba, vehiculo: "Toyota Yaris 2020", autoOfrecido: "Toyota Yaris 2018" }, { prueba: true });
       await h.audit(h.actor, "whatsapp.bienvenida_prueba", "whatsapp", "bienvenida", { resultado: r });
       return json({ resultado: r });
     }
@@ -456,20 +458,33 @@ export async function whatsappOp(h: HerramientasWa, op: string, body: any): Prom
         if (!p) return err("bienvenida_plantilla_invalida");
         if (p.variables.length !== VARIABLES_BIENVENIDA) return err("bienvenida_plantilla_variables");
       }
+      if (v.value.plantillaVender.nombre) { // la de vender o consignar es opcional, pero si se elige también debe estar aprobada y traer sus cinco variables
+        const l = await plantillas(true);
+        const p = l.ok ? l.lista.find((t: any) => t.nombre === v.value.plantillaVender.nombre && t.idioma === v.value.plantillaVender.idioma) : null;
+        if (!p) return err("bienvenida_plantilla_invalida");
+        if (p.variables.length !== VARIABLES_VENDER) return err("bienvenida_vender_variables");
+      }
       const up = await sb.from("kv_store").upsert({ key: CLAVE_BIENVENIDA, value: JSON.stringify(v.value), shared: false, updated_at: new Date().toISOString() }, { onConflict: "key" });
       if (up.error) return fallo(up.error);
       await h.audit(h.actor, "whatsapp.bienvenida_config", "whatsapp", "bienvenida", { activa: v.value.activa, plantilla: v.value.plantilla.nombre, tope_dia: v.value.maxPorDia });
     }
     const config = await cargarConfigBienvenida(sb);
     const l = waConfigurado() && env("WA_WABA_ID") ? await plantillas() : { ok: false, lista: [] as any[] };
-    let sugerida: { estado: string; motivo: string } = { estado: "NO_CREADA", motivo: "" };
-    if (waConfigurado() && env("WA_WABA_ID")) {
-      const r = await graph(`/${encodeURIComponent(env("WA_WABA_ID"))}/message_templates?name=${PLANTILLA_SUGERIDA.nombre}&fields=name,status,rejected_reason`);
-      const t = r.ok && r.data && r.data.data ? r.data.data.find((x: any) => x.name === PLANTILLA_SUGERIDA.nombre) : null;
-      if (t) sugerida = { estado: String(t.status || ""), motivo: t.rejected_reason && t.rejected_reason !== "NONE" ? String(t.rejected_reason) : "" };
-    }
+    // Estado en Meta de cada plantilla sugerida (aprobada, en revisión, rechazada…).
+    const estadoSugerida = async (nombre: string) => {
+      let e: { estado: string; motivo: string } = { estado: "NO_CREADA", motivo: "" };
+      if (waConfigurado() && env("WA_WABA_ID")) {
+        const r = await graph(`/${encodeURIComponent(env("WA_WABA_ID"))}/message_templates?name=${nombre}&fields=name,status,rejected_reason`);
+        const t = r.ok && r.data && r.data.data ? r.data.data.find((x: any) => x.name === nombre) : null;
+        if (t) e = { estado: String(t.status || ""), motivo: t.rejected_reason && t.rejected_reason !== "NONE" ? String(t.rejected_reason) : "" };
+      }
+      return e;
+    };
+    const sugerida = await estadoSugerida(PLANTILLA_SUGERIDA.nombre);
+    const sugeridaVender = await estadoSugerida(PLANTILLA_VENDER.nombre);
     return json({
-      config, sugerida: { ...PLANTILLA_SUGERIDA, ...sugerida }, ultimo: await ultimoResultadoBienvenida(sb), enviadasHoy: await enviadasHoy(sb), whatsappConfigurado: waConfigurado(),
+      config, sugerida: { ...PLANTILLA_SUGERIDA, ...sugerida }, sugeridaVender: { ...PLANTILLA_VENDER, ...sugeridaVender },
+      plantillasVender: l.lista.filter((p: any) => p.variables.length === VARIABLES_VENDER).map((p: any) => ({ nombre: p.nombre, idioma: p.idioma, cuerpo: p.cuerpo })), ultimo: await ultimoResultadoBienvenida(sb), enviadasHoy: await enviadasHoy(sb), whatsappConfigurado: waConfigurado(),
       plantillas: l.lista.filter((p: any) => p.variables.length === VARIABLES_BIENVENIDA).map((p: any) => ({ nombre: p.nombre, idioma: p.idioma, cuerpo: p.cuerpo })),
     });
   }

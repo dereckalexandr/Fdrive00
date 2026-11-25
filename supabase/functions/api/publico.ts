@@ -402,7 +402,7 @@ export async function publicOp(ctx: CtxPublico, body: any): Promise<Response> {
     const lead = ins.data;
     const sistema = { tipo: "sistema", nombre: "Sitio web" };
     // Bienvenida por WhatsApp (plantilla aprobada; apagada por defecto): confirma la solicitud y cuándo lo contactan. Nunca interrumpe el formulario.
-    await enSegundoPlano(bienvenidaLead({ sb, audit: ctx.audit }, { nombre: s.contacto.nombre, telefono: s.contacto.telefono, origen: "web", tipo: s.tipo === "vender" && s.vende && s.vende.modalidad === "consignar" ? "consignar" : s.tipo, vehiculo: vehTexto, empresa: cfg.sitio_nombre, leadId: lead.id, clienteId: cliente.id, localId: local }));
+    await enSegundoPlano(bienvenidaLead({ sb, audit: ctx.audit }, { nombre: s.contacto.nombre, telefono: s.contacto.telefono, origen: "web", tipo: s.tipo === "vender" && s.vende && s.vende.modalidad === "consignar" ? "consignar" : s.tipo, vehiculo: vehTexto, autoOfrecido: s.vende ? [s.vende.marca, s.vende.modelo, s.vende.anio].filter(Boolean).join(" ") : "", empresa: cfg.sitio_nombre, leadId: lead.id, clienteId: cliente.id, localId: local }));
     await sb.from("lead_eventos").insert({ lead_id: lead.id, usuario_id: "sistema", usuario_nombre: "Sitio web", tipo: "creado", detalle: `Lead creado desde el sitio web${asignado ? ` y asignado a ${asignado.nombre}` : " (sin ejecutivos habilitados: queda sin asignar)"}. ${resumen}`.slice(0, 600) });
 
     // Visita: queda en la agenda del ejecutivo.

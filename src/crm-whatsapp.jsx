@@ -522,12 +522,17 @@ function ConfigBienvenida({ api }) {
   const [msg, setMsg] = useState("");
   const [ocupado, setOcupado] = useState(false);
   const [tel, setTel] = useState("");
+  const [tipoPrueba, setTipoPrueba] = useState("consulta");
   useEffect(() => { if (datos && !f) setF(JSON.parse(JSON.stringify(datos.config))); }, [datos, f]);
   if (cargando && !datos) return null;
   if (!datos || !f) return null; // quien no puede configurarla recibe «forbidden» y no ve la tarjeta
   const sug = datos.sugerida;
   const [claseSug, textoSug] = ESTADO_PLANTILLA_SUGERIDA[sug.estado] || ["bg-stone-100 text-stone-700", sug.estado];
   const ejemplo = sug.ejemplos.reduce((t, e, i) => t.replace(`{{${i + 1}}}`, e), sug.cuerpo);
+  const sv = datos.sugeridaVender;
+  const [claseSv, textoSv] = ESTADO_PLANTILLA_SUGERIDA[sv.estado] || ["bg-stone-100 text-stone-700", sv.estado];
+  const ejemploV = sv.ejemplos.reduce((t, e, i) => t.replace(`{{${i + 1}}}`, e), sv.cuerpo);
+  const valorV = f.plantillaVender && f.plantillaVender.nombre ? `${f.plantillaVender.nombre}|${f.plantillaVender.idioma}` : "";
   const correr = async (fn, ok) => { setMsg(""); setOcupado(true); try { await fn(); await recargar(); if (ok) setMsg(ok); } catch (e) { setMsg(e && e.message === "whatsapp_error" && e.detalle ? `Meta respondió: ${e.detalle}` : mensajeError(e)); } setOcupado(false); };
   const valor = f.plantilla.nombre ? `${f.plantilla.nombre}|${f.plantilla.idioma}` : "";
   return (
@@ -551,6 +556,21 @@ function ConfigBienvenida({ api }) {
             {datos.plantillas.map((p) => <option key={`${p.nombre}|${p.idioma}`} value={`${p.nombre}|${p.idioma}`}>{p.nombre} ({p.idioma})</option>)}
           </select>
         </Campo>
+        <div className="border border-stone-200 rounded p-3 flex flex-col gap-2">
+          <p className="flex flex-wrap items-center gap-2"><b>Para quienes quieren vender o consignar su auto (opcional):</b> <span className="font-mono text-xs">{sv.nombre}</span> <span className={`text-xs px-2 py-0.5 ${claseSv}`}>{textoSv}</span></p>
+          <p className="text-xs text-stone-600">Menciona el auto que ofrecen, avisa de la tasación y les pide fotos. Si no eliges una, esos leads reciben la plantilla general.</p>
+          <p className="text-xs text-stone-600 bg-stone-50 border border-stone-200 p-2 whitespace-pre-wrap">{ejemploV}{String.fromCharCode(10)}<span className="text-stone-400">{sv.pie}</span></p>
+          {sv.motivo && <p className="text-xs text-rose-700">Motivo del rechazo: {sv.motivo}</p>}
+          {sv.estado === "NO_CREADA" && (
+            <div><button type="button" disabled={ocupado || !datos.whatsappConfigurado} onClick={() => correr(() => api("wa.plantilla_crear", { plantilla: { nombre: sv.nombre, categoria: sv.categoria, cuerpo: sv.cuerpo, pie: sv.pie, ejemplos: sv.ejemplos } }), "Plantilla enviada a Meta para su revisión.")} className={BTN}>Crear esta plantilla en Meta</button></div>
+          )}
+          <Campo etiqueta="Plantilla a usar para ellos" ayuda="Solo aparecen las aprobadas por Meta con exactamente 5 variables: nombre, vender o consignar, el auto, empresa y cuándo lo contactan.">
+            <select value={valorV} onChange={(e) => { const [nombre, idioma] = e.target.value.split("|"); setF((x) => ({ ...x, plantillaVender: { nombre: nombre || "", idioma: idioma || "es" } })); }} className={`${INPUT} md:w-80`}>
+              <option value="">— Usar la plantilla general —</option>
+              {datos.plantillasVender.map((p) => <option key={`${p.nombre}|${p.idioma}`} value={`${p.nombre}|${p.idioma}`}>{p.nombre} ({p.idioma})</option>)}
+            </select>
+          </Campo>
+        </div>
         <Campo etiqueta="Máximo de bienvenidas por día" ayuda="Freno de seguridad: los formularios públicos se podrían usar para molestar a un tercero.">
           <input type="number" min="1" max="1000" step="1" value={f.maxPorDia} onChange={(e) => setF((x) => ({ ...x, maxPorDia: e.target.value }))} className={HORA} />
         </Campo>
@@ -564,7 +584,10 @@ function ConfigBienvenida({ api }) {
         <div className="flex flex-wrap items-center gap-2 border-t border-stone-200 pt-3">
           <span className="text-xs text-stone-600">Probar con mi teléfono (llega la bienvenida de ejemplo):</span>
           <input value={tel} onChange={(e) => setTel(e.target.value)} placeholder="9 1234 5678" className={`${INPUT} w-40`} />
-          <button type="button" disabled={ocupado || !tel.trim()} onClick={() => correr(async () => { const r = await api("wa.bienvenida_probar", { telefono: tel }); if (r.resultado !== "enviada") throw Object.assign(new Error("whatsapp_error"), { detalle: r.resultado === "plantilla" ? "La plantilla elegida no está aprobada." : r.resultado === "error" ? "WhatsApp no aceptó el mensaje (mira el aviso de arriba)." : r.resultado }); }, "Enviada: revisa tu WhatsApp.")} className={BTN}>Enviar prueba</button>
+          <select value={tipoPrueba} onChange={(e) => setTipoPrueba(e.target.value)} className="border border-stone-300 bg-white px-2 py-1 text-sm" title="Qué bienvenida probar">
+            <option value="consulta">Plantilla general</option><option value="vender">Quiere vender</option><option value="consignar">Quiere consignar</option>
+          </select>
+          <button type="button" disabled={ocupado || !tel.trim()} onClick={() => correr(async () => { const r = await api("wa.bienvenida_probar", { telefono: tel, tipo: tipoPrueba }); if (r.resultado !== "enviada") throw Object.assign(new Error("whatsapp_error"), { detalle: r.resultado === "plantilla" ? "La plantilla elegida no está aprobada." : r.resultado === "error" ? "WhatsApp no aceptó el mensaje (mira el aviso de arriba)." : r.resultado }); }, "Enviada: revisa tu WhatsApp.")} className={BTN}>Enviar prueba</button>
         </div>
       </div>
     </Tarjeta>

@@ -233,6 +233,63 @@ test("Probar: el Administrador se envía la bienvenida de ejemplo a un teléfono
   assert.ok(db.tablas.bitacora.some((b) => b.accion === "whatsapp.bienvenida_prueba"));
 });
 
+test("Quien quiere vender o consignar su auto recibe su plantilla (con el auto que ofrece); sin ella o si no está aprobada, la general", async () => {
+  const vender = (extra = {}) => { nuevaIp(); return pub("solicitud", { tipo: "vender", nombre: "Pedro Soto", telefono: "911118001", email: "pedro@correo.cl", mensaje: "", acepta: true, abiertoEn: Date.now() - 10_000, web: "", patente: "ab-cd 12", marca: "Toyota", modelo: "Yaris", anio: 2018, km: 78000, transmision: "Automática", combustible: "Bencina", duenos: 2, prenda: "no", mantenciones: "si", precioEsperado: 8500000, modalidad: "consignar", localId: L1, ...extra }); };
+  const plantillaV = (extra = {}) => ({ name: "bienvenida_vender", language: "es", status: "APPROVED", category: "UTILITY", components: [{ type: "BODY", text: "Hola {{1}} 👋 Recibimos tu solicitud para {{2}} tu {{3}}. Un ejecutivo de {{4}} te contactará {{5}} para coordinar la tasación. Mientras tanto, puedes enviarnos por aquí fotos del auto y del permiso de circulación." }, { type: "FOOTER", text: "Mensaje automático" }], ...extra });
+  const elegir = (extra = {}) => configurar(U.jefe.token, { plantillaVender: { nombre: "bienvenida_vender", idioma: "es" }, ...extra });
+  // Aún sin elegir la de vender: recibe la general.
+  assert.equal((await vender()).status, 200);
+  assert.equal(aTel("56911118001").length, 1);
+  assert.equal(aTel("56911118001")[0].cuerpo.template.name, "bienvenida_formulario");
+  assert.equal(aTel("56911118001")[0].cuerpo.template.components[0].parameters[1].text, "tu solicitud para consignar tu auto");
+  // Se elige una que no está aprobada o que trae otro número de variables: no se guarda.
+  meta.plantillas.push(plantillaV({ status: "PENDING" }));
+  assert.equal((await elegir()).error, "bienvenida_plantilla_invalida");
+  meta.plantillas[1] = plantillaV({ components: [{ type: "BODY", text: "Hola {{1}}, recibimos tu solicitud de {{2}}." }] });
+  assert.equal((await elegir()).error, "bienvenida_vender_variables");
+  // Aprobada con sus 5 variables: se guarda y aparece en la tarjeta.
+  meta.plantillas[1] = plantillaV();
+  const ok = await elegir();
+  assert.equal(ok.status, 200, JSON.stringify(ok));
+  assert.equal(ok.config.plantillaVender.nombre, "bienvenida_vender");
+  assert.deepEqual(ok.plantillasVender.map((p) => p.nombre), ["bienvenida_vender"]);
+  assert.equal(ok.sugeridaVender.estado, "APPROVED");
+  assert.equal(ok.sugeridaVender.nombre, "bienvenida_vender");
+  assert.deepEqual(ok.plantillas.map((p) => p.nombre), ["bienvenida_formulario"], "cada lista muestra solo las plantillas con su número de variables");
+  // Quien consigna: su plantilla, con el auto que ofrece.
+  assert.equal((await vender({ telefono: "911118002", nombre: "Ana Rojas", patente: "ef-gh 34", modalidad: "consignar" })).status, 200);
+  const c = aTel("56911118002")[0].cuerpo.template;
+  assert.equal(c.name, "bienvenida_vender");
+  assert.deepEqual(c.components[0].parameters.map((p) => p.text).slice(0, 4), ["Ana", "consignar", "Toyota Yaris 2018", "BuyCar"]);
+  assert.match(c.components[0].parameters[4].text, /desde las 03:00|a la brevedad/);
+  assert.match(db.tablas.wa_mensajes.find((x) => x.conversacion_id === conv("56911118002").id).texto, /^Hola Ana 👋 Recibimos tu solicitud para consignar tu Toyota Yaris 2018\./);
+  // Quien vende (no consigna): «vender».
+  assert.equal((await vender({ telefono: "911118003", nombre: "Luis Vera", patente: "ij-kl 56", modalidad: "vender" })).status, 200);
+  assert.equal(aTel("56911118003")[0].cuerpo.template.components[0].parameters[1].text, "vender");
+  // Quien solo consulta por un auto sigue recibiendo la general.
+  await solicitud({ telefono: "911118004", nombre: "Eva Lima" });
+  assert.equal(aTel("56911118004")[0].cuerpo.template.name, "bienvenida_formulario");
+  // La de vender queda pausada en Meta: esos leads reciben la general, no se quedan sin nada.
+  meta.plantillas[1].status = "PAUSED";
+  assert.equal((await elegir()).error, "bienvenida_plantilla_invalida", "de paso se refresca la lista que el servidor guarda 5 minutos");
+  assert.equal((await vender({ telefono: "911118005", nombre: "Mia Soto", patente: "mn-op 78" })).status, 200);
+  assert.equal(aTel("56911118005")[0].cuerpo.template.name, "bienvenida_formulario");
+  // Probar desde la tarjeta: la de vender y la general.
+  meta.plantillas[1].status = "APPROVED";
+  assert.equal((await elegir()).status, 200);
+  const pv = await ve(U.jefe.token, "wa.bienvenida_probar", { telefono: "9 1111 8888", tipo: "consignar", nombre: "Julia Jefa" });
+  assert.equal(pv.resultado, "enviada");
+  const tp = aTel("56911118888")[0].cuerpo.template;
+  assert.equal(tp.name, "bienvenida_vender");
+  assert.deepEqual(tp.components[0].parameters.slice(0, 3).map((p) => p.text), ["Julia", "consignar", "Toyota Yaris 2018"]);
+  await ve(U.jefe.token, "wa.bienvenida_probar", { telefono: "9 1111 8888", tipo: "consulta" });
+  assert.equal(aTel("56911118888")[1].cuerpo.template.name, "bienvenida_formulario");
+  // Se vuelve a la configuración de siempre (sin plantilla para vender).
+  await configurar(U.jefe.token, {});
+  assert.equal(kv("whatsapp::bienvenida").plantillaVender.nombre, "");
+  meta.plantillas.splice(1, 1);
+});
+
 test("Baja: quien responde «No quiero recibir más mensajes» recibe la confirmación, queda etiquetado y no recibe más bienvenidas", async () => {
   await configurar(U.jefe.token, {});
   await solicitud({ telefono: "911117001", nombre: "Sexto" });
