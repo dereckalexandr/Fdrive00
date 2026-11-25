@@ -2,6 +2,29 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ---------- Paletas (canales RGB para Tailwind; ver tailwind.config.js) ----------
+   Por defecto: grises fríos y ámbar (sitio de la automotora).
+   .tema-pista: identidad de Pista para el CRM — Noche #0E1B2C, Asfalto #2A3646, Grafito #5B6573, Marfil #FAF7F2
+   y Naranja Pista #FF6B1A; títulos en Space Grotesk. */
+:root {
+  --stone-50: 248 250 252; --stone-100: 241 245 249; --stone-200: 226 232 240; --stone-300: 203 213 225;
+  --stone-400: 148 163 184; --stone-500: 100 116 139; --stone-600: 71 85 105; --stone-700: 51 65 85;
+  --stone-800: 30 41 59; --stone-900: 15 23 42; --stone-950: 2 6 23;
+  --amber-50: 255 251 235; --amber-100: 254 243 199; --amber-200: 253 230 138; --amber-300: 252 211 77;
+  --amber-400: 251 191 36; --amber-500: 245 158 11; --amber-600: 217 119 6; --amber-700: 180 83 9;
+  --amber-800: 146 64 14; --amber-900: 120 53 15; --amber-950: 69 26 3;
+  --fuente-titulos: Inter;
+}
+.tema-pista {
+  --stone-50: 250 247 242; --stone-100: 243 239 232; --stone-200: 230 225 217; --stone-300: 201 207 216;
+  --stone-400: 138 147 160; --stone-500: 91 101 115; --stone-600: 70 80 94; --stone-700: 42 54 70;
+  --stone-800: 26 38 56; --stone-900: 14 27 44; --stone-950: 7 15 26;
+  --amber-50: 255 244 236; --amber-100: 255 228 209; --amber-200: 255 200 163; --amber-300: 255 166 107;
+  --amber-400: 255 136 64; --amber-500: 255 107 26; --amber-600: 232 90 12; --amber-700: 194 72 10;
+  --amber-800: 154 58 14; --amber-900: 124 50 16; --amber-950: 67 22 6;
+  --fuente-titulos: "Space Grotesk";
+}
+
 html, body, #root {
   height: 100%;
 }
@@ -9,8 +32,8 @@ html, body, #root {
 body {
   margin: 0;
   font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  color: #0f172a;
-  background: #f1f5f9;
+  color: rgb(var(--stone-900));
+  background: rgb(var(--stone-100));
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   font-feature-settings: "cv11", "ss01";
@@ -50,31 +73,31 @@ body {
   /* Tarjetas: cualquier bloque blanco con borde (paneles, tablas, formularios). */
   .bg-white.border:not(button):not(input):not(select):not(textarea):not(a):not(label):not(span) {
     border-radius: 0.875rem;
-    border-color: #e2e8f0;
-    box-shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 3px rgb(15 23 42 / 0.05);
+    border-color: rgb(var(--stone-200));
+    box-shadow: 0 1px 2px rgb(var(--stone-900) / 0.04), 0 1px 3px rgb(var(--stone-900) / 0.05);
   }
   /* Botones blancos con borde: más sobrios que las tarjetas. */
   button.bg-white.border, a.bg-white.border { border-radius: 0.5rem; box-shadow: none; }
-  button.bg-white.border:hover:not(:disabled) { border-color: #94a3b8; }
+  button.bg-white.border:hover:not(:disabled) { border-color: rgb(var(--stone-400)); }
 
   /* Cabeceras oscuras: degradado sutil y sombra hacia el contenido. */
   .bg-stone-900.text-stone-100:not(button):not(.sticky) {
-    background-image: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-    box-shadow: 0 2px 8px rgb(15 23 42 / 0.18);
+    background-image: linear-gradient(135deg, rgb(var(--stone-900)) 0%, rgb(var(--stone-800)) 100%);
+    box-shadow: 0 2px 8px rgb(var(--stone-900) / 0.18);
   }
   .bg-stone-900.text-stone-100 button.border { border-radius: 0.5rem; }
 
   /* Tablas: encabezado discreto y filas con resalte al pasar el mouse. */
   table tbody tr { transition: background-color 0.12s ease; }
-  table tbody tr:hover { background-color: rgb(248 250 252 / 0.9); }
+  table tbody tr:hover { background-color: rgb(var(--stone-50) / 0.9); }
   table thead th { font-weight: 600; }
 
   /* Foco visible y consistente. */
   input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible, a:focus-visible {
-    outline: 2px solid #f59e0b;
+    outline: 2px solid rgb(var(--amber-500));
     outline-offset: 1px;
   }
-  input:focus, select:focus, textarea:focus { border-color: #f59e0b; }
+  input:focus, select:focus, textarea:focus { border-color: rgb(var(--amber-500)); }
 
   /* Pestañas: barra de desplazamiento fina (en celular se desliza con el dedo). */
   .pestanas-scroll { scrollbar-width: none; -ms-overflow-style: none; }
@@ -82,9 +105,9 @@ body {
 }
 
 /* Barras de desplazamiento finas en todo el sitio. */
-* { scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
+* { scrollbar-width: thin; scrollbar-color: rgb(var(--stone-300)) transparent; }
 *::-webkit-scrollbar { width: 8px; height: 8px; }
-*::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 9999px; }
+*::-webkit-scrollbar-thumb { background: rgb(var(--stone-300)); border-radius: 9999px; }
 *::-webkit-scrollbar-track { background: transparent; }
 
 /* Menos movimiento si la persona lo pidió en su dispositivo. */

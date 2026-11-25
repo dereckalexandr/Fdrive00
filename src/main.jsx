@@ -52,6 +52,7 @@ function esPlataforma() {
 
 // El CRM y la presentación de Pista llevan el favicon de Pista; el sitio de la automotora queda como está.
 if (esSitioPista() || (!esSitioInspecciones() && esPlataforma())) {
+  document.documentElement.classList.add("tema-pista");
   import("./marca-pista.jsx").then((m) => { m.ponerIconosPista(); if (esPlataforma() && !esSitioPista()) document.title = "Pista · Plataforma"; });
 }
 

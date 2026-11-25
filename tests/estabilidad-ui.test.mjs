@@ -46,6 +46,13 @@ test("Pista: pistacrm.com muestra la presentación y app.pistacrm.com abre el CR
   assert.match(readFileSync(join(SRC, "sitio-pista.jsx"), "utf8"), /https:\/\/app\.pistacrm\.com/);
 });
 
+test("Tema Pista: el CRM usa Noche y Naranja; el sitio de la automotora conserva sus colores", () => {
+  const css = readFileSync(join(SRC, "index.css"), "utf8");
+  assert.match(css, /\.tema-pista\s*\{[^}]*--stone-900: 14 27 44;[^}]*--amber-500: 255 107 26;/);
+  assert.match(css, /:root\s*\{[^}]*--amber-500: 245 158 11;/);
+  assert.match(readFileSync(join(SRC, "main.jsx"), "utf8"), /classList\.add\("tema-pista"\)/);
+});
+
 test("El sitio público no pide datos internos: no menciona costo ni patente al mostrar vehículos", () => {
   const s = readFileSync(join(SRC, "sitio-publico.jsx"), "utf8");
   assert.ok(!/\.costo\b|\.patente\b|precio_lista|\.notas\b/.test(s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "").replace(/placeholder="[^"]*"/g, "").replace(/datos\.patente|f\.patente|patente:/g, "")), "la pantalla del visitante no debe leer campos internos del vehículo");
