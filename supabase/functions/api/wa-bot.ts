@@ -112,7 +112,7 @@ export async function procesarBot(deps: DepsBot, conv: any, m: any, ahora: Date 
     // Si un ejecutivo ya está conversando, no se mete.
     const salientes = (await sb.from("wa_mensajes").select("usuario_id, creado_en").eq("conversacion_id", conv.id).eq("direccion", "saliente")).data ?? [];
     const limite = ahora.getTime() - HORAS_HUMANO_ACTIVO * 3_600_000;
-    if (salientes.some((x: any) => x.usuario_id && x.usuario_id !== "bot" && x.usuario_id !== "bot-ia" && Date.parse(x.creado_en) > limite)) return;
+    if (salientes.some((x: any) => x.usuario_id && !["bot", "bot-ia", "bienvenida"].includes(x.usuario_id) && Date.parse(x.creado_en) > limite)) return;
 
     const estado = conv.bot_estado && conv.bot_estado.paso ? conv.bot_estado : null;
     const ult = Date.parse(conv.bot_actualizado || "");

@@ -14,6 +14,7 @@ import { elegirEjecutivo, clientePorTelefono, localWhatsapp, type DepsWebhook } 
 import { permisosEfectivos } from "./crm-core.js";
 import { ETAPAS_CERRADAS } from "./ventas-core.js";
 import { enviarAviso, enSegundoPlano, correoActivo } from "./correo.ts";
+import { bienvenidaLead } from "./wa-bienvenida.ts";
 
 const env = (k: string) => (globalThis as any).Deno.env.get(k) ?? "";
 const SISTEMA = (plataforma: string) => ({ tipo: "sistema", nombre: plataforma === "meta" ? "Meta Ads" : "Google Ads" });
@@ -98,6 +99,8 @@ async function guardarLead(d: DepsWebhook, x: any): Promise<{ lead: any; nuevo: 
         await enSegundoPlano(enviarAviso({ para, asunto: titulo, titulo, lineas: [`${cliente.nombre}${x.telefono ? ` · ${x.telefono}` : ""}${x.email ? ` · ${x.email}` : ""}`, camp ? `Campaña: ${camp.nombre}` : x.campaniaNombre ? `Campaña: ${x.campaniaNombre}` : "", ...(x.extras || []).slice(0, 4).map((e: any) => `${e.pregunta}: ${e.respuesta}`), "Contáctalo cuanto antes desde el CRM: los leads de anuncios se enfrían rápido."].filter(Boolean) }));
       }
     }
+    // Bienvenida por WhatsApp (plantilla aprobada; apagada por defecto) a los leads nuevos de formularios de anuncios.
+    if (nuevo) await enSegundoPlano(bienvenidaLead({ sb, audit: d.audit }, { nombre: cliente.nombre, telefono: x.telefono, origen: x.plataforma === "meta" ? "meta" : "google", leadId: lead.id, clienteId: cliente.id, localId: local }));
     return { lead, nuevo };
   } catch (e) {
     await sb.from("kv_store").delete().eq("key", clave); // sin la marca, el reintento puede procesarlo

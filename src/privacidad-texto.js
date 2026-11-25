@@ -48,6 +48,7 @@ export function seccionesPrivacidad(d = {}) {
       titulo: "3. Para qué los usamos",
       lista: [
         "Responder tus consultas y solicitudes, y contactarte sobre ellas por teléfono, WhatsApp o correo.",
+        "Enviarte por WhatsApp un mensaje automático de confirmación cuando nos dejas tus datos en un formulario (de este sitio o de nuestros anuncios en Facebook, Instagram y Google), para avisarte que recibimos tu solicitud y cuándo te contactaremos. Recibes un solo mensaje y puedes responder «No quiero recibir más mensajes» para que dejemos de escribirte.",
         "Atenderte por WhatsApp fuera de nuestro horario con un asistente virtual, que usa inteligencia artificial para responder preguntas sobre los autos disponibles y dejar tu consulta anotada para un ejecutivo. El asistente te avisa que es automático, no negocia precios ni decide nada por nosotros, y siempre puedes pedir que te atienda una persona.",
         "Cotizar vehículos, evaluar financiamiento (solo si lo pides) y tasar el vehículo que nos ofreces.",
         "Preparar y cumplir la compraventa, la consignación o la reserva que acordemos, incluidos los contratos y la transferencia del vehículo.",

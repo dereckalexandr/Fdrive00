@@ -9,6 +9,7 @@ import { permisoDeTipo, grupoDeReparto } from "./compras-core.js";
 import { validarVehiculoTasacion, folioTasacion as folioTas } from "./tasaciones-core.js";
 import { sugerirAviso } from "./anuncios-core.js";
 import { enviarAviso, enSegundoPlano, correoActivo, enviarInvitacionVisita } from "./correo.ts";
+import { bienvenidaLead } from "./wa-bienvenida.ts";
 import { googleConfigurado, crearVisitaGoogle } from "./google-calendar.ts";
 import { consultarPatente } from "./patentes.ts";
 import { LIMITE_WEB_IP_HORA, normalizarPatente, patenteValida } from "./patentes-core.js";
@@ -400,6 +401,8 @@ export async function publicOp(ctx: CtxPublico, body: any): Promise<Response> {
     if (ins.error) return fallo(ins.error);
     const lead = ins.data;
     const sistema = { tipo: "sistema", nombre: "Sitio web" };
+    // Bienvenida por WhatsApp (plantilla aprobada; apagada por defecto): confirma la solicitud y cuándo lo contactan. Nunca interrumpe el formulario.
+    await enSegundoPlano(bienvenidaLead({ sb, audit: ctx.audit }, { nombre: s.contacto.nombre, telefono: s.contacto.telefono, origen: "web", tipo: s.tipo === "vender" && s.vende && s.vende.modalidad === "consignar" ? "consignar" : s.tipo, vehiculo: vehTexto, empresa: cfg.sitio_nombre, leadId: lead.id, clienteId: cliente.id, localId: local }));
     await sb.from("lead_eventos").insert({ lead_id: lead.id, usuario_id: "sistema", usuario_nombre: "Sitio web", tipo: "creado", detalle: `Lead creado desde el sitio web${asignado ? ` y asignado a ${asignado.nombre}` : " (sin ejecutivos habilitados: queda sin asignar)"}. ${resumen}`.slice(0, 600) });
 
     // Visita: queda en la agenda del ejecutivo.

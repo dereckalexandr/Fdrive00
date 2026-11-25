@@ -507,6 +507,70 @@ function ConfigAsistente({ api }) {
   );
 }
 
+const ESTADO_PLANTILLA_SUGERIDA = {
+  NO_CREADA: ["bg-stone-100 text-stone-700", "Aún no creada"],
+  PENDING: ["bg-amber-100 text-amber-800", "En revisión por Meta (de minutos a unas horas)"],
+  APPROVED: ["bg-emerald-100 text-emerald-800", "Aprobada por Meta"],
+  REJECTED: ["bg-rose-100 text-rose-800", "Rechazada por Meta"],
+  PAUSED: ["bg-rose-100 text-rose-800", "Pausada por Meta"],
+};
+
+/** Mensaje de bienvenida por WhatsApp a los leads de formularios (sitio web, Meta y Google): plantilla, tope diario y prueba. */
+function ConfigBienvenida({ api }) {
+  const { cargando, datos, recargar } = useCarga(() => api("wa.bienvenida_estado", {}), [api]);
+  const [f, setF] = useState(null);
+  const [msg, setMsg] = useState("");
+  const [ocupado, setOcupado] = useState(false);
+  const [tel, setTel] = useState("");
+  useEffect(() => { if (datos && !f) setF(JSON.parse(JSON.stringify(datos.config))); }, [datos, f]);
+  if (cargando && !datos) return null;
+  if (!datos || !f) return null; // quien no puede configurarla recibe «forbidden» y no ve la tarjeta
+  const sug = datos.sugerida;
+  const [claseSug, textoSug] = ESTADO_PLANTILLA_SUGERIDA[sug.estado] || ["bg-stone-100 text-stone-700", sug.estado];
+  const ejemplo = sug.ejemplos.reduce((t, e, i) => t.replace(`{{${i + 1}}}`, e), sug.cuerpo);
+  const correr = async (fn, ok) => { setMsg(""); setOcupado(true); try { await fn(); await recargar(); if (ok) setMsg(ok); } catch (e) { setMsg(e && e.message === "whatsapp_error" && e.detalle ? `Meta respondió: ${e.detalle}` : mensajeError(e)); } setOcupado(false); };
+  const valor = f.plantilla.nombre ? `${f.plantilla.nombre}|${f.plantilla.idioma}` : "";
+  return (
+    <Tarjeta titulo="Mensaje de bienvenida a leads de formularios" ayuda="Cuando entra un lead por el formulario del sitio web o por un anuncio de Meta o Google, se le envía por WhatsApp una plantilla aprobada por Meta que confirma su solicitud y cuándo lo contactará un ejecutivo. Si responde, la conversación sigue en su lead (y fuera de horario lo atiende el asistente). Un mismo teléfono lo recibe una vez cada 7 días, y no se envía a quien ya está conversando con nosotros.">
+      <div className="flex flex-col gap-3 text-sm">
+        <div className="border border-stone-200 rounded p-3 flex flex-col gap-2">
+          <p className="flex flex-wrap items-center gap-2"><b>Plantilla sugerida:</b> <span className="font-mono text-xs">{sug.nombre}</span> <span className={`text-xs px-2 py-0.5 ${claseSug}`}>{textoSug}</span></p>
+          <p className="text-xs text-stone-600 bg-stone-50 border border-stone-200 p-2 whitespace-pre-wrap">{ejemplo}{"\n"}<span className="text-stone-400">{sug.pie}</span></p>
+          {sug.motivo && <p className="text-xs text-rose-700">Motivo del rechazo: {sug.motivo}</p>}
+          {sug.estado === "NO_CREADA" && (
+            <div><button type="button" disabled={ocupado || !datos.whatsappConfigurado} onClick={() => correr(() => api("wa.plantilla_crear", { plantilla: { nombre: sug.nombre, categoria: sug.categoria, cuerpo: sug.cuerpo, pie: sug.pie, ejemplos: sug.ejemplos } }), "Plantilla enviada a Meta para su revisión.")} className={BTN}>Crear esta plantilla en Meta</button></div>
+          )}
+          {!datos.whatsappConfigurado && <p className="text-xs text-amber-700">WhatsApp aún no está conectado: el Administrador debe cargar las credenciales de Meta.</p>}
+        </div>
+        <label className="flex items-center gap-2"><input type="checkbox" checked={!!f.activa} onChange={(e) => setF((x) => ({ ...x, activa: e.target.checked }))} /> <b>Enviar la bienvenida a los leads nuevos</b>
+          {datos.enviadasHoy > 0 && <span className="text-xs text-stone-500">· hoy se enviaron {datos.enviadasHoy}</span>}
+        </label>
+        <Campo etiqueta="Plantilla a usar" ayuda="Solo aparecen las aprobadas por Meta que tienen exactamente 4 variables: nombre, qué recibimos, empresa y cuándo lo contactan.">
+          <select value={valor} onChange={(e) => { const [nombre, idioma] = e.target.value.split("|"); setF((x) => ({ ...x, plantilla: { nombre: nombre || "", idioma: idioma || "es" } })); }} className={`${INPUT} md:w-80`}>
+            <option value="">— Elige una plantilla aprobada —</option>
+            {datos.plantillas.map((p) => <option key={`${p.nombre}|${p.idioma}`} value={`${p.nombre}|${p.idioma}`}>{p.nombre} ({p.idioma})</option>)}
+          </select>
+        </Campo>
+        <Campo etiqueta="Máximo de bienvenidas por día" ayuda="Freno de seguridad: los formularios públicos se podrían usar para molestar a un tercero.">
+          <input type="number" min="1" max="1000" step="1" value={f.maxPorDia} onChange={(e) => setF((x) => ({ ...x, maxPorDia: e.target.value }))} className={HORA} />
+        </Campo>
+        {datos.ultimo && (datos.ultimo.ok
+          ? <p className="text-xs text-emerald-700">✓ La última bienvenida se envió bien ({hace(datos.ultimo.en)}).</p>
+          : <p className="text-xs text-rose-700">⚠ La última bienvenida no se envió ({hace(datos.ultimo.en)}): {datos.ultimo.error}</p>)}
+        <div className="flex flex-wrap items-center gap-3">
+          <button type="button" disabled={ocupado} onClick={() => correr(() => api("wa.bienvenida_guardar", { config: f }), "Guardado.")} className={BTN_PRIMARIO}>{ocupado ? "Guardando…" : "Guardar"}</button>
+          {msg && <span className="text-xs text-stone-600">{msg}</span>}
+        </div>
+        <div className="flex flex-wrap items-center gap-2 border-t border-stone-200 pt-3">
+          <span className="text-xs text-stone-600">Probar con mi teléfono (llega la bienvenida de ejemplo):</span>
+          <input value={tel} onChange={(e) => setTel(e.target.value)} placeholder="9 1234 5678" className={`${INPUT} w-40`} />
+          <button type="button" disabled={ocupado || !tel.trim()} onClick={() => correr(async () => { const r = await api("wa.bienvenida_probar", { telefono: tel }); if (r.resultado !== "enviada") throw Object.assign(new Error("whatsapp_error"), { detalle: r.resultado === "plantilla" ? "La plantilla elegida no está aprobada." : r.resultado === "error" ? "WhatsApp no aceptó el mensaje (mira el aviso de arriba)." : r.resultado }); }, "Enviada: revisa tu WhatsApp.")} className={BTN}>Enviar prueba</button>
+        </div>
+      </div>
+    </Tarjeta>
+  );
+}
+
 /** Estado de la conexión y el local de los leads nuevos (solo el Administrador). */
 function ConfigWhatsapp({ api, locales }) {
   const { cargando, datos, recargar } = useCarga(() => api("wa.estado", {}), [api]);
@@ -763,6 +827,7 @@ export function BandejaWhatsapp({ api, abrirLead, locales, onCambio = () => {} }
     <div className="flex flex-col gap-4">
       <ConfigWhatsapp api={api} locales={locales} />
       <ConfigAsistente api={api} />
+      <ConfigBienvenida api={api} />
       {(datos.puedePlantillas || datos.puedeRespuestas) && (
         <div className="flex border border-stone-300 self-start">
           <button type="button" onClick={() => setVista("conversaciones")} className={`px-3 py-1.5 text-sm ${vista === "conversaciones" ? "bg-stone-900 text-white" : "bg-white text-stone-700"}`}>Conversaciones</button>

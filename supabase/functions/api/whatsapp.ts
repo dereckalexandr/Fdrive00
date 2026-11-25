@@ -20,6 +20,8 @@ import { procesarBot, cargarConfigBot, CLAVE_BOT } from "./wa-bot.ts";
 import { usoDelMes, ultimoResultadoIa, type DepsIa } from "./wa-ia.ts";
 import { MODELO_IA_DEFECTO } from "./wa-ia-core.js";
 import { validarConfigBot, estaAbierto, proximaApertura, textoHorario } from "./wa-bot-core.js";
+import { bienvenidaLead, registrarBaja, cargarConfigBienvenida, ultimoResultadoBienvenida, enviadasHoy } from "./wa-bienvenida.ts";
+import { validarConfigBienvenida, PLANTILLA_SUGERIDA, VARIABLES_BIENVENIDA, CLAVE_BIENVENIDA, esPeticionDeBaja } from "./wa-bienvenida-core.js";
 
 const env = (k: string) => (globalThis as any).Deno.env.get(k) ?? "";
 export const waConfigurado = () => !!(env("WA_TOKEN") && env("WA_PHONE_NUMBER_ID"));
@@ -28,7 +30,7 @@ const enc = new TextEncoder();
 const SISTEMA = { tipo: "sistema", nombre: "WhatsApp" };
 
 /** Llamada a la Graph API de Meta. Nunca lanza: devuelve ok, estado y los datos (o el mensaje de error de Meta). */
-async function graph(path: string, init: RequestInit = {}): Promise<{ ok: boolean; status: number; data: any; error?: string }> {
+export async function graph(path: string, init: RequestInit = {}): Promise<{ ok: boolean; status: number; data: any; error?: string }> {
   try {
     const r = await fetch(path.startsWith("http") ? path : `${graphBase()}${path}`, {
       ...init, headers: { authorization: `Bearer ${env("WA_TOKEN")}`, ...(init.headers || {}) }, signal: AbortSignal.timeout(15000),
@@ -235,6 +237,8 @@ export async function webhookWhatsapp(req: Request, d: DepsWebhook): Promise<Res
       }).eq("id", conv.id);
       if (conv.lead_id) await sb.from("leads").update({ ultima_actividad: ahora }).eq("id", conv.lead_id);
       if (m.media) await enSegundoPlano(guardarMediaEntrante(sb, msg.data));
+      // Pidió dejar de recibir mensajes: se le confirma, se etiqueta y ni el asistente ni las bienvenidas le escriben más.
+      if (m.tipo === "text" && esPeticionDeBaja(m.texto)) { await registrarBaja({ sb, audit: d.audit }, conv, m.telefono); continue; }
       // Asistente fuera de horario (apagado por defecto): atiende al cliente con botones y deja el lead listo para la mañana.
       await procesarBot({ sb, graph, phoneNumberId: miNumero, elegirEjecutivo: (local, tipo) => elegirEjecutivo(d, local, tipo), audit: d.audit, ia: d.ia }, conv, m);
     }
@@ -263,7 +267,7 @@ export type HerramientasWa = {
 };
 
 let cachePlantillas: { at: number; lista: any[] } | null = null;
-async function plantillas(forzar = false): Promise<{ ok: boolean; lista: any[]; error?: string }> {
+export async function plantillas(forzar = false): Promise<{ ok: boolean; lista: any[]; error?: string }> {
   if (!forzar && cachePlantillas && Date.now() - cachePlantillas.at < 5 * 60_000) return { ok: true, lista: cachePlantillas.lista };
   if (!env("WA_WABA_ID")) return { ok: false, lista: [], error: "Falta WA_WABA_ID" };
   const r = await graph(`/${encodeURIComponent(env("WA_WABA_ID"))}/message_templates?fields=name,language,status,category,components&limit=200`);
@@ -430,6 +434,44 @@ export async function whatsappOp(h: HerramientasWa, op: string, body: any): Prom
     await h.audit(h.actor, "whatsapp.bot_config", "whatsapp", "bot", { activo: v.value.activo, empresa: v.value.empresa });
     const ahora = new Date();
     return json({ config: v.value, puedeConfigurar: true, abierto: estaAbierto(v.value.horario, ahora), proxima: proximaApertura(v.value.horario, ahora), horarioTexto: textoHorario(v.value.horario) });
+  }
+
+  /** Mensaje de bienvenida a los leads de formularios (plantilla aprobada por Meta): lo ve y lo configura el Administrador o el Jefe Local. */
+  if (op === "wa.bienvenida_estado" || op === "wa.bienvenida_guardar" || op === "wa.bienvenida_probar") {
+    if (!(h.esAdmin || h.esSupervisor)) return err("forbidden", 403);
+    if (op === "wa.bienvenida_probar") {
+      // Envía la bienvenida de ejemplo a un teléfono (el del Administrador, por ejemplo) para ver cómo le llega al cliente.
+      const tel = telefonoWa(body.telefono);
+      if (!tel) return err("telefono_invalido");
+      const r = await bienvenidaLead({ sb, audit: h.audit }, { nombre: String(body.nombre ?? "").trim() || "Cliente", telefono: tel, origen: "web", tipo: "consulta", vehiculo: "Toyota Yaris 2020" }, { prueba: true });
+      await h.audit(h.actor, "whatsapp.bienvenida_prueba", "whatsapp", "bienvenida", { resultado: r });
+      return json({ resultado: r });
+    }
+    if (op === "wa.bienvenida_guardar") {
+      const v = validarConfigBienvenida(body.config);
+      if (!v.ok) return err(v.error!);
+      if (v.value.activa) { // la plantilla tiene que estar aprobada por Meta y traer las cuatro variables que el CRM completa
+        const l = await plantillas(true);
+        const p = l.ok ? l.lista.find((t: any) => t.nombre === v.value.plantilla.nombre && t.idioma === v.value.plantilla.idioma) : null;
+        if (!p) return err("bienvenida_plantilla_invalida");
+        if (p.variables.length !== VARIABLES_BIENVENIDA) return err("bienvenida_plantilla_variables");
+      }
+      const up = await sb.from("kv_store").upsert({ key: CLAVE_BIENVENIDA, value: JSON.stringify(v.value), shared: false, updated_at: new Date().toISOString() }, { onConflict: "key" });
+      if (up.error) return fallo(up.error);
+      await h.audit(h.actor, "whatsapp.bienvenida_config", "whatsapp", "bienvenida", { activa: v.value.activa, plantilla: v.value.plantilla.nombre, tope_dia: v.value.maxPorDia });
+    }
+    const config = await cargarConfigBienvenida(sb);
+    const l = waConfigurado() && env("WA_WABA_ID") ? await plantillas() : { ok: false, lista: [] as any[] };
+    let sugerida: { estado: string; motivo: string } = { estado: "NO_CREADA", motivo: "" };
+    if (waConfigurado() && env("WA_WABA_ID")) {
+      const r = await graph(`/${encodeURIComponent(env("WA_WABA_ID"))}/message_templates?name=${PLANTILLA_SUGERIDA.nombre}&fields=name,status,rejected_reason`);
+      const t = r.ok && r.data && r.data.data ? r.data.data.find((x: any) => x.name === PLANTILLA_SUGERIDA.nombre) : null;
+      if (t) sugerida = { estado: String(t.status || ""), motivo: t.rejected_reason && t.rejected_reason !== "NONE" ? String(t.rejected_reason) : "" };
+    }
+    return json({
+      config, sugerida: { ...PLANTILLA_SUGERIDA, ...sugerida }, ultimo: await ultimoResultadoBienvenida(sb), enviadasHoy: await enviadasHoy(sb), whatsappConfigurado: waConfigurado(),
+      plantillas: l.lista.filter((p: any) => p.variables.length === VARIABLES_BIENVENIDA).map((p: any) => ({ nombre: p.nombre, idioma: p.idioma, cuerpo: p.cuerpo })),
+    });
   }
 
   /** Etiquetas de una conversación (las pone quien la puede ver: el ejecutivo del lead o el Jefe Local). */
