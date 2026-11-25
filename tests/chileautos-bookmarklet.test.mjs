@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { extractChileautosListings, buildBookmarkletHref } from "../src/chileautos-bookmarklet.js";
+import { extractChileautosListings, extractChileautosFicha, buildBookmarkletHref, buildBookmarkletFichaHref } from "../src/chileautos-bookmarklet.js";
 
 // DOM mínimo: solo lo que usa el extractor (anclas, ancestros con innerText, body).
 function tarjeta({ texto, href }) {
@@ -141,4 +141,22 @@ test("lee el teléfono / WhatsApp del aviso: de un enlace wa.me o tel:, o del te
   assert.equal(extractChileautosListings(doc([conTel]), loc).listings[0].telefono, "56912345678");
   const enTexto = tarjeta({ texto: T1.replace("Santiago", "Santiago\n+56 9 8123 4567"), href: H1 });
   assert.equal(extractChileautosListings(doc([enTexto]), loc).listings[0].telefono, "56981234567");
+});
+
+test("precio sin «CLP» (como lo muestra hoy Chileautos) también se lee", () => {
+  const t = "2023 Toyota Yaris\n1.5 E 4X2 SDN MT 4P\n$4.900.000\n255.000 km\nAraucanía\nParticular";
+  const r = extractChileautosListings(doc([tarjeta({ texto: t, href: "/vehiculos/detalles/2023-toyota-yaris-1-5-e-4x2-sdn-mt-4p/CL-AD-20389479/" })]), loc);
+  assert.equal(r.listings[0].precio, 4900000);
+  assert.equal(r.listings[0].vendedorTipo, "particular");
+});
+
+test("marcador de ficha: lee el aviso y el teléfono que la página ya muestra; sin teléfono, lo dice", () => {
+  const f = (cuerpo, enlaces = []) => extractChileautosFicha({ body: { innerText: cuerpo }, querySelectorAll: () => enlaces.map((h) => ({ getAttribute: () => h })) }, { href: "https://www.chileautos.cl/vehiculos/detalles/2023-toyota-yaris/CL-AD-20389479/" });
+  const r = f("Particular • Temuco\nVer n° de teléfono\n9 6573 0759");
+  assert.deepEqual([r.fuente, r.id, r.telefono], ["chileautos-ficha", "CL-AD-20389479", "965730759"]);
+  assert.equal(f("Ver n° de teléfono").telefono, "", "sin pulsar el botón no hay número");
+  assert.equal(f("x", ["tel:+56912345678"]).telefono, "56912345678");
+  assert.equal(extractChileautosFicha({ body: { innerText: "" }, querySelectorAll: () => [] }, { href: "https://www.chileautos.cl/vehiculos/" }).id, "");
+  assert.match(buildBookmarkletFichaHref(), /^javascript:/);
+  assert.ok(!/\/\/ /.test(decodeURIComponent(buildBookmarkletFichaHref()).replace(/https?:\/\//g, "")), "sin comentarios // dentro del código");
 });

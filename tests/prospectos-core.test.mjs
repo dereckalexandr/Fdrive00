@@ -148,3 +148,11 @@ test("Búsqueda en Chileautos: se arma con los criterios que el estimador ya ver
   assert.equal(urlBusquedaProspeccion(null), null);
   assert.ok(!/modelo/i.test(urlBusquedaProspeccion({ modelo: "Yaris" }) ? "x" : "ok"), "el modelo sin marca no se usa");
 });
+
+test("Ficha pegada: exige aviso y teléfono válidos", async () => {
+  const { parseFichaPegada } = await import("../supabase/functions/api/prospectos-core.js");
+  assert.deepEqual(parseFichaPegada(JSON.stringify({ fuente: "chileautos-ficha", id: "CL-AD-20389479", telefono: "965730759" })), { ok: true, id: "CL-AD-20389479", telefono: "+56965730759" });
+  assert.equal(parseFichaPegada("hola").ok, false);
+  assert.equal(parseFichaPegada(JSON.stringify({ fuente: "chileautos-ficha", id: "", telefono: "965730759" })).ok, false);
+  assert.match(parseFichaPegada(JSON.stringify({ fuente: "chileautos-ficha", id: "CL-AD-20389479", telefono: "" })).error, /Ver n° de teléfono/);
+});

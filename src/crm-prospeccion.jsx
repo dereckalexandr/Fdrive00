@@ -11,11 +11,11 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { INPUT, BTN, BTN_PRIMARIO, Aviso, Cargando, Tarjeta, Campo, Modal, useCarga, mensajeError, clp, hace } from "./crm-ui.jsx";
 import { urlBusquedaProspeccion } from "./prospeccion-url.js";
-import { buildBookmarkletHref } from "./chileautos-bookmarklet.js";
+import { buildBookmarkletHref, buildBookmarkletFichaHref } from "./chileautos-bookmarklet.js";
 import { parseAvisosPegados, TRANSMISIONES, COMBUSTIBLES } from "./compra-calc.js";
 import {
   filtrarAvisos, ORDENES_PROSPECTO, ESTADOS_PROSPECTO, estadoProspectoNombre, marcaModeloDeTitulo, vehiculoOfrecidoDeProspecto,
-  notasLeadDeProspecto, FUENTE_LEAD_CHILEAUTOS, enlaceWhatsappProspecto,
+  notasLeadDeProspecto, FUENTE_LEAD_CHILEAUTOS, enlaceWhatsappProspecto, parseFichaPegada,
 } from "../supabase/functions/api/prospectos-core.js";
 
 const CHICO = "border border-stone-300 bg-white px-2 py-1 text-sm";
@@ -211,6 +211,35 @@ function Telefono({ p, cambiarContacto }) {
   );
 }
 
+/* Teléfono desde la ficha del aviso: el marcador de ficha lee lo que la página ya muestra y se pega aquí. */
+function TelefonoDeFicha({ api, lista, onListo }) {
+  const [texto, setTexto] = useState("");
+  const [msg, setMsg] = useState(null);
+  const bmRef = useRef(null);
+  useEffect(() => { if (bmRef.current) bmRef.current.setAttribute("href", buildBookmarkletFichaHref()); }, []);
+  const aplicar = async (valor) => {
+    setTexto(valor); setMsg(null);
+    if (!valor.trim()) return;
+    const r = parseFichaPegada(valor);
+    if (!r.ok) { setMsg({ ok: false, texto: r.error }); return; }
+    const p = lista.find((x) => x.aviso_id === r.id);
+    if (!p) { setMsg({ ok: false, texto: `El aviso ${r.id} no está en tus prospectos: guárdalo primero desde «Buscar en Chileautos».` }); return; }
+    try { await api("prospectos.contacto", { id: p.id, telefono: r.telefono }); setMsg({ ok: true, texto: `Teléfono ${r.telefono} guardado en «${p.titulo}».` }); setTexto(""); onListo(); }
+    catch (e) { setMsg({ ok: false, texto: mensajeError(e) }); }
+  };
+  return (
+    <Tarjeta titulo="Traer el teléfono desde la ficha del aviso" ayuda="En la lista de Chileautos no aparece el teléfono: está en la ficha de cada aviso, tras pulsar «Ver n° de teléfono». Este segundo marcador lo copia (solo lee lo que la página ya muestra; no pulsa nada por ti).">
+      <ol className="text-xs text-stone-600 list-decimal pl-5 flex flex-col gap-1 mb-3">
+        <li>Una sola vez: arrastra este botón a la barra de favoritos: <a ref={bmRef} onClick={(e) => e.preventDefault()} draggable="true" className="inline-block border-2 border-dashed border-amber-500 bg-amber-50 text-amber-900 px-2 py-0.5 text-xs font-medium cursor-grab">⭐ Copiar teléfono Chileautos</a></li>
+        <li>Abre «Contactar en Chileautos» de un prospecto, pulsa <b>Ver n° de teléfono</b> y luego el favorito.</li>
+        <li>Vuelve aquí y pega (Ctrl+V): el teléfono queda en ese prospecto.</li>
+      </ol>
+      <input value={texto} onChange={(e) => aplicar(e.target.value)} placeholder="Pega aquí lo que copió el marcador de ficha" className={`${INPUT} font-mono text-xs`} />
+      {msg && <p className={`text-xs mt-2 ${msg.ok ? "text-emerald-700" : "text-rose-600"}`}>{msg.texto}</p>}
+    </Tarjeta>
+  );
+}
+
 function MisProspectos({ api, version, onCambio, abrirLead }) {
   const [estado, setEstado] = useState("");
   const { cargando, error, datos, recargar } = useCarga(() => api("prospectos.lista", { estado }), [api, estado, version]);
@@ -228,6 +257,7 @@ function MisProspectos({ api, version, onCambio, abrirLead }) {
         {ESTADOS_PROSPECTO.map((e) => <button key={e.id} type="button" onClick={() => setEstado(e.id)} className={`px-3 py-1 border ${estado === e.id ? "bg-stone-900 text-white border-stone-900" : "bg-white border-stone-300"}`}>{e.nombre} {datos.conteo[e.id] ? `(${datos.conteo[e.id]})` : ""}</button>)}
       </div>
       {msg && <Aviso>{msg}</Aviso>}
+      <TelefonoDeFicha api={api} lista={datos.prospectos} onListo={recargar} />
       {lista.length === 0 ? <p className="text-sm text-stone-500">Aún no hay prospectos{estado ? " en este estado" : ""}. Guárdalos desde «Buscar en Chileautos».</p> : (
         <div className="flex flex-col gap-2">
           {lista.map((p) => (

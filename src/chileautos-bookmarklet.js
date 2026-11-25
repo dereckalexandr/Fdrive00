@@ -43,7 +43,7 @@ export function extractChileautosListings(doc, loc) {
     }
     const text = ((card && card.innerText) || "").replace(/\s*\n+\s*/g, " | ");
     const partes = text.split(" | ");
-    const precio = text.match(/\$\s?([\d.]+)\s*CLP/);
+    const precio = text.match(/\$\s?([\d.]+)(?:\s*CLP)?/);
     const km = text.match(/([\d.]+)\s*km\b/i);
     const slug = href.split("?")[0].split("/")[3] || "";
     let ti = -1;
@@ -120,4 +120,40 @@ function mensajeChileautos(r) {
 /** Código `javascript:` del marcador (copia los avisos al portapapeles y avisa en la página). */
 export function buildBookmarkletHref() {
   return armarMarcador(extractChileautosListings, mensajeChileautos);
+}
+
+/**
+ * MARCADOR DE FICHA: se usa en la página de UN aviso, después de pulsar «Ver n° de teléfono».
+ * Lee el identificador del aviso (de la dirección) y el teléfono que la página ya muestra. No pulsa nada por ti.
+ * Autocontenida y sin comentarios `//` en su interior.
+ */
+export function extractChileautosFicha(doc, loc) {
+  const href = (loc && loc.href) || "";
+  const m = href.match(/\/([A-Z]{2}-AD-\d+)\//);
+  const cuerpo = (doc.body && doc.body.innerText) || "";
+  const tels = [];
+  const enlaces = doc.querySelectorAll ? doc.querySelectorAll("a[href^='tel:'], a[href*='wa.me/'], a[href*='phone=']") : [];
+  for (let k = 0; k < enlaces.length; k++) {
+    const dg = ((enlaces[k].getAttribute("href") || "").match(/(?:wa\.me\/|phone=|tel:)\+?(\d{8,15})/) || [])[1];
+    if (dg) tels.push(dg);
+  }
+  const re = /(?:\+?56[\s-]?)?\b9[\s-]?\d{4}[\s-]?\d{4}\b/g;
+  let t;
+  while ((t = re.exec(cuerpo)) !== null) tels.push(t[0].replace(/[^\d]/g, ""));
+  return {
+    fuente: "chileautos-ficha",
+    id: m ? m[1] : "",
+    telefono: tels.length ? tels[0] : "",
+    capturadoEl: new Date().toISOString(),
+  };
+}
+
+function mensajeFicha(r) {
+  if (!r.id) return { texto: "Drive Futuro: abre la ficha de un aviso y vuelve a pulsar el marcador.", mal: true };
+  if (!r.telefono) return { texto: "Drive Futuro: no veo el teléfono. Pulsa «Ver n° de teléfono» en la ficha y vuelve a pulsar el marcador.", mal: true };
+  return { texto: "Drive Futuro: teléfono copiado (" + r.telefono + "). Vuelve a la app y pégalo.", mal: false };
+}
+
+export function buildBookmarkletFichaHref() {
+  return armarMarcador(extractChileautosFicha, mensajeFicha);
 }

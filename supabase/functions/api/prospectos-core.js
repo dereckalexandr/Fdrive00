@@ -206,3 +206,14 @@ export function notasLeadDeProspecto(p) {
   const precio = Math.round(Number(p.precio)).toLocaleString("es-CL");
   return `Prospecto de Chileautos${v ? ` (${v})` : ""}: https://www.chileautos.cl${p.href} · precio publicado $${precio}`.slice(0, 1000);
 }
+
+/** Lo que copia el marcador de ficha: { fuente: "chileautos-ficha", id, telefono }. */
+export function parseFichaPegada(texto) {
+  let d = null;
+  try { d = JSON.parse(String(texto || "").trim()); } catch (e) { d = null; }
+  if (!d || d.fuente !== "chileautos-ficha") return { ok: false, error: "Ese texto no viene del marcador de ficha. Úsalo en la página del aviso y pega de nuevo." };
+  if (!/^[A-Z]{2}-AD-\d{4,15}$/.test(String(d.id || ""))) return { ok: false, error: "No pude leer qué aviso es. Abre la ficha del aviso y vuelve a pulsar el marcador." };
+  const telefono = telefonoProspecto(d.telefono);
+  if (!telefono) return { ok: false, error: "El marcador no encontró el teléfono: pulsa «Ver n° de teléfono» en la ficha antes de usarlo." };
+  return { ok: true, id: String(d.id), telefono };
+}
