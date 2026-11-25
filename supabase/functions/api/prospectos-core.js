@@ -4,9 +4,10 @@
 // donde se filtran y se ordenan. Los que interesan se guardan como «prospectos»; cuando el dueño responde por Chileautos, el prospecto se
 // convierte en un lead de compra. Nada de esto toca los servidores de Chileautos (que bloquean las consultas automáticas).
 //
-// Privacidad: solo se guarda lo que ya es del AVISO (auto, año, km, precio, tipo de vendedor y el enlace). Nunca el nombre ni el teléfono
-// de un particular: el primer contacto se hace por «Contactar vendedor» de Chileautos y los datos de la persona entran al CRM cuando ella
-// responde y los entrega.
+// Datos del vendedor: además del aviso (auto, año, km, precio, tipo de vendedor y enlace) se guarda el teléfono / WhatsApp y el nombre
+// que el aviso publica en Chileautos (son públicos), o el que la persona anote a mano. Se usan solo para contactar por la compra del auto.
+
+import { telefonoWa } from "./whatsapp-core.js";
 
 export const FUENTE_PROSPECTO = "chileautos";
 export const FUENTE_LEAD_CHILEAUTOS = "Chileautos";
@@ -26,6 +27,25 @@ const entero = (v, min, max) => {
   const n = Number(String(v ?? "").replace(/[^\d-]/g, ""));
   return Number.isInteger(n) && n >= min && n <= max ? n : null;
 };
+
+/** Teléfono en formato internacional («+56912345678») o null si no sirve. */
+export function telefonoProspecto(v) {
+  const t = telefonoWa(String(v ?? "").slice(0, 40));
+  return t ? `+${t}` : null;
+}
+
+/** Datos de contacto que la persona anota o corrige a mano en un prospecto. */
+export function validarContactoProspecto(input) {
+  const i = input || {};
+  const out = {};
+  if (i.telefono !== undefined) {
+    const raw = String(i.telefono ?? "").trim();
+    if (raw) { const t = telefonoProspecto(raw); if (!t) return { ok: false, error: "telefono_invalido" }; out.vendedor_telefono = t; } else out.vendedor_telefono = null;
+  }
+  if (i.nombre !== undefined) out.vendedor_nombre = texto(i.nombre, 60) || null;
+  if (!Object.keys(out).length) return { ok: false, error: "sin_cambios" };
+  return { ok: true, value: out };
+}
 
 /**
  * Un aviso de los que copia el marcador, limpio y con solo los campos permitidos. Devuelve null si no sirve
@@ -52,8 +72,8 @@ export function validarAviso(a) {
     transmision: texto(a.transmision, 20) || null,
     combustible: texto(a.combustible, 20) || null,
     vendedor_tipo: vendedorTipo || null,
-    // El nombre solo se guarda si es de una automotora (un negocio); el de un particular nunca.
-    vendedor_nombre: vendedorTipo === "automotora" ? texto(a.vendedorNombre, 60) || null : null,
+    vendedor_nombre: texto(a.vendedorNombre, 60) || null,
+    vendedor_telefono: telefonoProspecto(a.telefono),
     destacado: a.destacado === true,
     href: href.endsWith("/") ? href : `${href}/`,
   };
@@ -172,6 +192,13 @@ export function vehiculoOfrecidoDeProspecto(p, { patente, marca, modelo } = {}) 
     anio: p.anio || undefined, km: p.km ?? 0, transmision: TRANSMISION_LEAD(p.transmision) || undefined, combustible: COMBUSTIBLE_LEAD(p.combustible) || undefined,
     precioEsperado: p.precio || undefined,
   };
+}
+/** Enlace para escribir por WhatsApp a un prospecto con teléfono (con un texto de partida sobre el auto). */
+export function enlaceWhatsappProspecto(p) {
+  const d = String(p.vendedor_telefono || "").replace(/\D/g, "");
+  if (!d) return "";
+  const t = `Hola, vi tu ${p.titulo || "auto"} publicado en Chileautos. ¿Sigue disponible?`;
+  return `https://wa.me/${d}?text=${encodeURIComponent(t)}`;
 }
 /** Nota del lead: de dónde viene y qué precio tenía el aviso. */
 export function notasLeadDeProspecto(p) {

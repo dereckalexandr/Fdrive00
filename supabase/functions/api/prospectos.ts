@@ -1,6 +1,6 @@
 // Prospección en Chileautos (lado servidor): guarda los avisos que la persona eligió, lleva su estado y los enlaza con el lead cuando el dueño
 // responde. El servidor NO consulta Chileautos: los avisos llegan copiados desde el navegador de la persona (ver prospectos-core.js).
-import { validarAvisos, validarEstadoProspecto, ESTADOS_PROSPECTO, FUENTE_PROSPECTO } from "./prospectos-core.js";
+import { validarAvisos, validarEstadoProspecto, validarContactoProspecto, ESTADOS_PROSPECTO, FUENTE_PROSPECTO } from "./prospectos-core.js";
 
 export type HerramientasProspectos = {
   sb: any; json: (d: unknown, s?: number) => Response; err: (e: string, s?: number) => Response; fallo: (e: any) => Response;
@@ -37,6 +37,12 @@ export async function prospectosOp(h: HerramientasProspectos, op: string, body: 
     if (ex.error) return fallo(ex.error);
     const ya = new Set((ex.data ?? []).map((p: any) => p.aviso_id));
     const nuevos = v.value.filter((a: any) => !ya.has(a.aviso_id));
+    // Los que ya estaban: si ahora el aviso trae teléfono y el prospecto no lo tenía, se completa.
+    const existentes = await sb.from("prospectos").select("id, aviso_id, vendedor_telefono").eq("local_id", local).eq("fuente", FUENTE_PROSPECTO);
+    for (const a of v.value) {
+      const e = (existentes.data ?? []).find((p: any) => p.aviso_id === a.aviso_id);
+      if (e && !e.vendedor_telefono && a.vendedor_telefono) await sb.from("prospectos").update({ vendedor_telefono: a.vendedor_telefono, actualizado_en: new Date().toISOString() }).eq("id", e.id);
+    }
     if (nuevos.length) {
       const ins = await sb.from("prospectos").insert(nuevos.map((a: any) => ({ ...a, fuente: FUENTE_PROSPECTO, local_id: local, estado: "nuevo", creado_por: h.esAdmin ? null : h.userId })));
       if (ins.error) return fallo(ins.error);
@@ -54,6 +60,18 @@ export async function prospectosOp(h: HerramientasProspectos, op: string, body: 
     if (p.estado === "convertido") return err("prospecto_convertido");
     const up = await sb.from("prospectos").update({ ...v.value, actualizado_en: new Date().toISOString() }).eq("id", p.id).select().single();
     if (up.error) return fallo(up.error);
+    return json({ prospecto: up.data });
+  }
+
+  /** Anota o corrige el teléfono y el nombre del vendedor de un prospecto. */
+  if (op === "prospectos.contacto") {
+    const v = validarContactoProspecto(body);
+    if (!v.ok) return err(v.error!);
+    const p = (await sb.from("prospectos").select("*").eq("id", String(body.id ?? "")).maybeSingle()).data;
+    if (!p || p.local_id !== local) return err("no_existe", 404);
+    const up = await sb.from("prospectos").update({ ...v.value, actualizado_en: new Date().toISOString() }).eq("id", p.id).select().single();
+    if (up.error) return fallo(up.error);
+    await h.audit(h.actor, "prospectos.contacto", "prospecto", p.id, { telefono: v.value.vendedor_telefono !== undefined });
     return json({ prospecto: up.data });
   }
 

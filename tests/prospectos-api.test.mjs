@@ -49,7 +49,7 @@ test("Permisos: prospectan quienes compran o consignan, los supervisores y el Ad
   assert.equal((await ve(U.c1.token, "prospectos.otra_cosa")).error, "op_desconocida");
 });
 
-test("Guardar: entran solo los avisos válidos, sin datos personales, y los repetidos no se duplican", async () => {
+test("Guardar: entran solo los avisos válidos, con el teléfono público del aviso, y los repetidos no se duplican", async () => {
   const antes = guardados().length;
   const sucio = { ...aviso(1), telefono: "+56 9 1111 2222", nombre: "Juan Pérez", email: "juan@correo.cl", vendedorNombre: "Juan Pérez" };
   const r = await ve(U.c1.token, "prospectos.guardar", { avisos: [sucio, aviso(2), aviso(3, { vendedorTipo: "automotora", vendedorNombre: "Autos del Sur", destacado: true }), { id: "falso", href: "http://malo.cl" }] });
@@ -57,15 +57,21 @@ test("Guardar: entran solo los avisos válidos, sin datos personales, y los repe
   assert.deepEqual([r.nuevos, r.repetidos, r.descartados], [3, 0, 1]);
   assert.equal(guardados().length, antes + 3);
   const p1 = guardados().find((p) => p.aviso_id === "CL-AD-2000001");
-  assert.deepEqual([p1.fuente, p1.local_id, p1.estado, p1.creado_por, p1.vendedor_tipo, p1.vendedor_nombre], ["chileautos", L1, "nuevo", U.c1.id, "particular", null]);
+  assert.deepEqual([p1.fuente, p1.local_id, p1.estado, p1.creado_por, p1.vendedor_tipo, p1.vendedor_nombre], ["chileautos", L1, "nuevo", U.c1.id, "particular", "Juan Pérez"]);
   assert.equal(p1.href, "/vehiculos/detalles/toyota-yaris-2019/CL-AD-2000001/", "sin los parámetros de seguimiento");
   const texto = JSON.stringify(guardados());
-  for (const dato of ["1111", "Juan", "juan@correo.cl"]) assert.ok(!texto.includes(dato), `no se guarda «${dato}»`);
+  assert.equal(p1.vendedor_telefono, "+56911112222", "el teléfono público del aviso se guarda normalizado");
+  assert.ok(!texto.includes("juan@correo.cl"), "el correo no se guarda");
   assert.equal(guardados().find((p) => p.aviso_id === "CL-AD-2000003").vendedor_nombre, "Autos del Sur", "el nombre de una automotora sí");
   // Repetirlos no duplica: solo entra lo nuevo.
   const r2 = await ve(U.jefe.token, "prospectos.guardar", { avisos: [aviso(1), aviso(4)] });
   assert.deepEqual([r2.nuevos, r2.repetidos], [1, 1]);
   assert.equal(guardados().length, antes + 4);
+  // Si el aviso repetido ahora trae teléfono y el prospecto no lo tenía, se completa.
+  const sinTel = guardados().find((p) => p.aviso_id === "CL-AD-2000004");
+  assert.equal(sinTel.vendedor_telefono, null);
+  await ve(U.c1.token, "prospectos.guardar", { avisos: [aviso(4, { telefono: "9 5555 6666" })] });
+  assert.equal(guardados().find((p) => p.aviso_id === "CL-AD-2000004").vendedor_telefono, "+56955556666");
   assert.equal((await ve(U.c1.token, "prospectos.guardar", { avisos: [] })).error, "avisos_invalidos");
   assert.equal((await ve(U.c1.token, "prospectos.guardar", { avisos: [{ x: 1 }] })).error, "avisos_invalidos");
   assert.ok(db.tablas.bitacora.some((b) => b.accion === "prospectos.guardar"));
@@ -85,6 +91,22 @@ test("Lista: los más recientes primero, con el conteo por estado; cada local ve
   const ajeno = (await ve(U.c1.token, "prospectos.lista")).prospectos[0];
   assert.equal((await ve(U.c2.token, "prospectos.estado", { id: ajeno.id, estado: "descartado" })).status, 404);
   assert.equal((await ve(U.c2.token, "prospectos.convertido", { id: ajeno.id, leadId: "x" })).status, 404);
+});
+
+test("Contacto: se anota o corrige el teléfono y el nombre a mano; cada local solo toca lo suyo", async () => {
+  const p = (await ve(U.c1.token, "prospectos.lista")).prospectos.find((x) => x.aviso_id === "CL-AD-2000002");
+  assert.equal(p.vendedor_telefono, null);
+  const r = await ve(U.c1.token, "prospectos.contacto", { id: p.id, telefono: "9 8765 4321", nombre: "Pedro Soto" });
+  assert.equal(r.status, 200, JSON.stringify(r));
+  assert.deepEqual([r.prospecto.vendedor_telefono, r.prospecto.vendedor_nombre], ["+56987654321", "Pedro Soto"]);
+  assert.equal((await ve(U.c1.token, "prospectos.contacto", { id: p.id, telefono: "12" })).error, "telefono_invalido");
+  assert.equal((await ve(U.c1.token, "prospectos.contacto", { id: p.id })).error, "sin_cambios");
+  assert.equal((await ve(U.v1.token, "prospectos.contacto", { id: p.id, telefono: "9 1111 2222" })).status, 403);
+  assert.equal((await ve(U.c2.token, "prospectos.contacto", { id: p.id, telefono: "9 1111 2222" })).status, 404);
+  const borrado = await ve(U.c1.token, "prospectos.contacto", { id: p.id, telefono: "" });
+  assert.equal(borrado.prospecto.vendedor_telefono, null);
+  await ve(U.c1.token, "prospectos.contacto", { id: p.id, telefono: "9 8765 4321" });
+  assert.ok(db.tablas.bitacora.some((b) => b.accion === "prospectos.contacto"));
 });
 
 test("Estado y notas: contactado, respondió, descartado; «convertido» no se puede poner a mano", async () => {

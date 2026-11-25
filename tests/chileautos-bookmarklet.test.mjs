@@ -22,7 +22,7 @@ test("extrae año, versión, precio, km, id y enlace de una tarjeta real", () =>
     id: "CP-AD-8561346", titulo: "2019 Toyota Yaris", version: "1.5 GLI 4X2 MT 4P",
     transmision: "Manual", combustible: "Bencina",
     anio: 2019, km: 84000, precio: 8200000, destacado: false,
-    vendedorTipo: "automotora", vendedorNombre: "Automotora X", condicion: "",
+    vendedorTipo: "automotora", vendedorNombre: "Automotora X", telefono: "", condicion: "",
     href: "/vehiculos/detalles/2019-toyota-yaris-1-5-gli-4x2-mt-4p/CP-AD-8561346/",
   });
   assert.equal(r.sinResultados, false);
@@ -130,4 +130,15 @@ test("el marcador, armado como código, sigue sin comentarios ni referencias ext
   const href = decodeURIComponent(buildBookmarkletHref().replace(/^javascript:/, ""));
   assert.ok(href.includes("vendedorTipo"));
   assert.ok(!/\/\/ /.test(href.replace(/https?:\/\//g, "")), "sin comentarios // dentro del código");
+});
+
+test("lee el teléfono / WhatsApp del aviso: de un enlace wa.me o tel:, o del texto de la tarjeta", () => {
+  const conEnlace = tarjeta({ texto: T1, href: H1 });
+  conEnlace.parentElement.querySelectorAll = () => [{ getAttribute: () => "https://wa.me/56987654321?text=Hola" }];
+  assert.equal(extractChileautosListings(doc([conEnlace]), loc).listings[0].telefono, "56987654321");
+  const conTel = tarjeta({ texto: T1, href: H1 });
+  conTel.parentElement.querySelectorAll = () => [{ getAttribute: () => "tel:+56912345678" }];
+  assert.equal(extractChileautosListings(doc([conTel]), loc).listings[0].telefono, "56912345678");
+  const enTexto = tarjeta({ texto: T1.replace("Santiago", "Santiago\n+56 9 8123 4567"), href: H1 });
+  assert.equal(extractChileautosListings(doc([enTexto]), loc).listings[0].telefono, "56981234567");
 });

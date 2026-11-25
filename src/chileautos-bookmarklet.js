@@ -70,6 +70,17 @@ export function extractChileautosListings(doc, loc) {
       if (mv) { vendedorTipo = "automotora"; vendedorNombre = mv[1].slice(0, 60); condicion = mv[2]; continue; }
       if (/^(?:Automotora|Concesionari[oa]|Comercial|Tienda|Importadora|Distribuidora)\b/i.test(p) && p.length < 80) { vendedorTipo = "automotora"; vendedorNombre = p.slice(0, 60); }
     }
+    let telefono = "";
+    const enlaces = card && card.querySelectorAll ? card.querySelectorAll("a[href*='wa.me'], a[href*='whatsapp.com'], a[href^='tel:']") : [];
+    for (let k = 0; k < enlaces.length && !telefono; k++) {
+      const h2 = enlaces[k].getAttribute("href") || "";
+      const dg = (h2.match(/(?:wa\.me\/|phone=|tel:)\+?(\d{8,15})/) || [])[1];
+      if (dg) telefono = dg;
+    }
+    if (!telefono) {
+      const mt = text.match(/(?:\+?56\s?)?9[\s-]?\d{4}[\s-]?\d{4}\b/);
+      if (mt) telefono = mt[0].replace(/[^\d]/g, "");
+    }
     const anioTxt = (ti >= 0 && titulo.match(/^((?:19|20)\d{2})/)) || slug.match(/(?:^|-)((?:19|20)\d{2})(?:-|$)/);
     const ranking = href.match(/rankingType=([A-Za-z]+)/);
     listings.push({
@@ -84,6 +95,7 @@ export function extractChileautosListings(doc, loc) {
       destacado: !!ranking,
       vendedorTipo: vendedorTipo,
       vendedorNombre: vendedorNombre,
+      telefono: telefono,
       condicion: condicion,
       href: href.split("?")[0],
     });

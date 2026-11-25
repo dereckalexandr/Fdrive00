@@ -6,7 +6,7 @@
  *    (precio, año, kilometraje, tipo de vendedor, «más barato que el promedio»).
  * 3) Los que interesan se guardan como prospectos. Se contacta al dueño por «Contactar vendedor» de Chileautos y, cuando
  *    responde y entrega sus datos, el prospecto se convierte en un lead de compra.
- * El CRM no consulta Chileautos (bloquea los servidores) y nunca guarda el nombre ni el teléfono de un particular que no los entregó.
+ * El CRM no consulta Chileautos (bloquea los servidores). Se guarda el teléfono / WhatsApp y el nombre públicos del aviso si el marcador los alcanza a leer, y se pueden anotar a mano.
  */
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { INPUT, BTN, BTN_PRIMARIO, Aviso, Cargando, Tarjeta, Campo, Modal, useCarga, mensajeError, clp, hace } from "./crm-ui.jsx";
@@ -15,7 +15,7 @@ import { buildBookmarkletHref } from "./chileautos-bookmarklet.js";
 import { parseAvisosPegados, TRANSMISIONES, COMBUSTIBLES } from "./compra-calc.js";
 import {
   filtrarAvisos, ORDENES_PROSPECTO, ESTADOS_PROSPECTO, estadoProspectoNombre, marcaModeloDeTitulo, vehiculoOfrecidoDeProspecto,
-  notasLeadDeProspecto, FUENTE_LEAD_CHILEAUTOS,
+  notasLeadDeProspecto, FUENTE_LEAD_CHILEAUTOS, enlaceWhatsappProspecto,
 } from "../supabase/functions/api/prospectos-core.js";
 
 const CHICO = "border border-stone-300 bg-white px-2 py-1 text-sm";
@@ -84,7 +84,7 @@ function Buscar({ api, guardados, onGuardado }) {
         <p className="text-xs text-stone-500 mt-2">El precio y el tipo de vendedor (particular o automotora) se filtran después, en la lista de abajo. Si la página de Chileautos no abre con tus filtros, ajústalos ahí mismo: lo importante es que muestre la lista de resultados.</p>
       </Tarjeta>
 
-      <Tarjeta titulo="2 · Copia los avisos con el marcador" ayuda="Chileautos no permite leer sus avisos desde un servidor, pero tu navegador sí. El marcador copia solo el aviso (auto, año, km, precio, tipo de vendedor y enlace) y no envía nada a ningún servidor.">
+      <Tarjeta titulo="2 · Copia los avisos con el marcador" ayuda="Chileautos no permite leer sus avisos desde un servidor, pero tu navegador sí. El marcador copia el aviso (auto, año, km, precio, tipo de vendedor, enlace y el teléfono / WhatsApp si la página lo muestra) y no envía nada a ningún servidor.">
         <ol className="text-xs text-stone-600 list-decimal pl-5 flex flex-col gap-1 mb-3">
           <li>Una sola vez: muestra la barra de favoritos (Ctrl+Shift+B) y <strong>arrastra este botón</strong> a ella.</li>
           <li>En la página de resultados de Chileautos, pulsa ese favorito: muestra «N avisos copiados». Si hay varias páginas de resultados, repite en cada una.</li>
@@ -115,7 +115,7 @@ function Buscar({ api, guardados, onGuardado }) {
               <table className="w-full text-sm">
                 <thead><tr className="text-left text-[11px] uppercase tracking-wide text-stone-500 border-b border-stone-200">
                   <th className="py-1.5 pr-2 w-8"><input type="checkbox" onChange={todos} checked={elegibles.length > 0 && elegibles.every((a) => sel.has(a.id))} aria-label="Elegir todos" /></th>
-                  <th className="py-1.5 pr-2">Auto</th><th className="py-1.5 pr-2">Año</th><th className="py-1.5 pr-2 text-right">Km</th><th className="py-1.5 pr-2 text-right">Precio</th><th className="py-1.5 pr-2 text-right">Vs. promedio</th><th className="py-1.5 pr-2">Vendedor</th>
+                  <th className="py-1.5 pr-2">Auto</th><th className="py-1.5 pr-2">Año</th><th className="py-1.5 pr-2 text-right">Km</th><th className="py-1.5 pr-2 text-right">Precio</th><th className="py-1.5 pr-2 text-right">Vs. promedio</th><th className="py-1.5 pr-2">Vendedor</th><th className="py-1.5 pr-2">Teléfono</th>
                 </tr></thead>
                 <tbody>
                   {lista.map((a) => {
@@ -130,6 +130,7 @@ function Buscar({ api, guardados, onGuardado }) {
                         <td className="py-1.5 pr-2 text-right font-mono">{clp(a.precio)}</td>
                         <td className="py-1.5 pr-2 text-right font-mono"><Diferencia pct={a.vsMediana} /></td>
                         <td className="py-1.5 pr-2"><Etiqueta vendedor={a.vendedorTipo} nombre={a.vendedorNombre} /></td>
+                        <td className="py-1.5 pr-2 font-mono text-xs">{a.telefono ? a.telefono : <span className="text-stone-300">—</span>}</td>
                       </tr>
                     );
                   })}
@@ -150,7 +151,7 @@ function Buscar({ api, guardados, onGuardado }) {
 /* ---------- Convertir un prospecto en lead de compra ---------- */
 function Convertir({ api, p, onCerrar, onListo }) {
   const sugerido = marcaModeloDeTitulo(p.titulo);
-  const [f, setF] = useState({ nombre: "", telefono: "", email: "", patente: "", marca: sugerido.marca, modelo: sugerido.modelo });
+  const [f, setF] = useState({ nombre: p.vendedor_nombre || "", telefono: p.vendedor_telefono || "", email: "", patente: "", marca: sugerido.marca, modelo: sugerido.modelo });
   const [msg, setMsg] = useState("");
   const [ocupado, setOcupado] = useState(false);
   const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
@@ -170,7 +171,7 @@ function Convertir({ api, p, onCerrar, onListo }) {
       <div className="flex flex-col gap-3">
         <p className="text-sm text-stone-600">Hazlo cuando el dueño respondió por Chileautos y te dio sus datos. <b>{p.titulo}</b> · {p.anio || "—"} · {clp(p.precio)}</p>
         <div className="grid sm:grid-cols-2 gap-3">
-          <Campo etiqueta="Nombre del dueño"><input value={f.nombre} onChange={(e) => set("nombre", e.target.value)} className={INPUT} /></Campo>
+          <Campo etiqueta="Nombre del dueño" ayuda={p.vendedor_telefono ? "Traído del aviso: confírmalo con el dueño." : undefined}><input value={f.nombre} onChange={(e) => set("nombre", e.target.value)} className={INPUT} /></Campo>
           <Campo etiqueta="Teléfono"><input value={f.telefono} onChange={(e) => set("telefono", e.target.value)} placeholder="9 1234 5678" className={INPUT} /></Campo>
           <Campo etiqueta="Correo (opcional)"><input value={f.email} onChange={(e) => set("email", e.target.value)} className={INPUT} /></Campo>
           <Campo etiqueta="Patente del auto" ayuda="El aviso no la trae: pídesela al dueño."><input value={f.patente} onChange={(e) => set("patente", e.target.value.toUpperCase())} placeholder="ABCD12" className={`${INPUT} font-mono`} /></Campo>
@@ -189,12 +190,34 @@ function Convertir({ api, p, onCerrar, onListo }) {
 }
 
 /* ---------- 2 · Los prospectos guardados ---------- */
+function Telefono({ p, cambiarContacto }) {
+  const [editando, setEditando] = useState(false);
+  const [v, setV] = useState(p.vendedor_telefono || "");
+  const wa = enlaceWhatsappProspecto(p);
+  if (editando) {
+    return (
+      <span className="flex items-center gap-1">
+        <input autoFocus value={v} onChange={(e) => setV(e.target.value)} placeholder="9 1234 5678" className={`${CHICO} w-36 font-mono`} />
+        <button type="button" className={BTN} onClick={async () => { await cambiarContacto(p, { telefono: v }); setEditando(false); }}>Guardar</button>
+        <button type="button" className="text-xs text-stone-500 hover:underline" onClick={() => { setV(p.vendedor_telefono || ""); setEditando(false); }}>Cancelar</button>
+      </span>
+    );
+  }
+  return (
+    <span className="flex items-center gap-2 text-xs">
+      {p.vendedor_telefono ? <><span className="font-mono">{p.vendedor_telefono}</span>{wa && <a href={wa} target="_blank" rel="noopener noreferrer" className="px-2 py-0.5 bg-emerald-600 text-white hover:bg-emerald-700">Escribir por WhatsApp</a>}<button type="button" className="text-sky-700 hover:underline" onClick={() => setEditando(true)}>Editar</button></>
+        : <button type="button" className="text-sky-700 hover:underline" onClick={() => setEditando(true)}>+ Anotar teléfono (míralo en el aviso)</button>}
+    </span>
+  );
+}
+
 function MisProspectos({ api, version, onCambio, abrirLead }) {
   const [estado, setEstado] = useState("");
   const { cargando, error, datos, recargar } = useCarga(() => api("prospectos.lista", { estado }), [api, estado, version]);
   const [convertir, setConvertir] = useState(null);
   const [msg, setMsg] = useState("");
   const cambiar = async (p, parche) => { setMsg(""); try { await api("prospectos.estado", { id: p.id, estado: p.estado, notas: p.notas || "", ...parche }); await recargar(); } catch (e) { setMsg(mensajeError(e)); } };
+  const cambiarContacto = async (p, parche) => { setMsg(""); try { await api("prospectos.contacto", { id: p.id, ...parche }); await recargar(); } catch (e) { setMsg(mensajeError(e)); } };
   if (cargando && !datos) return <Cargando />;
   if (error && !datos) return <Aviso>{error}</Aviso>;
   const lista = datos.prospectos;
@@ -218,6 +241,7 @@ function MisProspectos({ api, version, onCambio, abrirLead }) {
                 <span className="font-mono font-semibold">{clp(p.precio)}</span>
                 <Etiqueta vendedor={p.vendedor_tipo} nombre={p.vendedor_nombre} />
               </div>
+              <Telefono key={p.id + (p.vendedor_telefono || "")} p={p} cambiarContacto={cambiarContacto} />
               <div className="flex flex-wrap items-center gap-2">
                 {p.estado === "convertido"
                   ? <><span className="text-xs px-2 py-0.5 bg-emerald-100 text-emerald-800">Convertido en lead</span>{p.lead_id && abrirLead && <button type="button" onClick={() => abrirLead(p.lead_id)} className="text-xs text-sky-700 hover:underline">Ver el lead</button>}</>

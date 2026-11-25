@@ -11,11 +11,15 @@ import { buildChileautosUrl } from "../src/compra-calc.js";
 
 const aviso = (extra = {}) => ({ id: "CL-AD-1234567", titulo: "2019 Toyota Yaris", version: "1.5 SE", transmision: "Automática", combustible: "Bencina", anio: 2019, km: 60000, precio: 8_500_000, destacado: false, vendedorTipo: "particular", vendedorNombre: "", condicion: "", href: "/vehiculos/detalles/toyota-yaris-2019/CL-AD-1234567/?rankingType=Spot", ...extra });
 
-test("Aviso: se queda solo con lo del aviso y nunca guarda datos personales de un particular", () => {
+test("Aviso: guarda lo del aviso, incluido el teléfono y nombre públicos del vendedor, y nada más (sin correo ni RUT)", () => {
   const v = validarAviso(aviso({ telefono: "+56 9 1111 2222", nombre: "Juan Pérez", email: "j@x.cl", vendedorNombre: "Juan Pérez (dueño)", rut: "1-9" }));
-  assert.deepEqual(v, { aviso_id: "CL-AD-1234567", titulo: "2019 Toyota Yaris", version: "1.5 SE", anio: 2019, km: 60000, precio: 8_500_000, transmision: "Automática", combustible: "Bencina", vendedor_tipo: "particular", vendedor_nombre: null, destacado: false, href: "/vehiculos/detalles/toyota-yaris-2019/CL-AD-1234567/" });
+  assert.deepEqual(v, { aviso_id: "CL-AD-1234567", titulo: "2019 Toyota Yaris", version: "1.5 SE", anio: 2019, km: 60000, precio: 8_500_000, transmision: "Automática", combustible: "Bencina", vendedor_tipo: "particular", vendedor_nombre: "Juan Pérez (dueño)", vendedor_telefono: "+56911112222", destacado: false, href: "/vehiculos/detalles/toyota-yaris-2019/CL-AD-1234567/" });
   const txt = JSON.stringify(v);
-  for (const dato of ["1111", "Juan", "j@x.cl", "1-9"]) assert.ok(!txt.includes(dato), `no debe guardar «${dato}»`);
+  for (const dato of ["j@x.cl", "1-9"]) assert.ok(!txt.includes(dato), `no debe guardar «${dato}»`);
+  assert.equal(validarAviso(aviso({ telefono: "9 8765 4321" })).vendedor_telefono, "+56987654321");
+  assert.equal(validarAviso(aviso({ telefono: "56987654321" })).vendedor_telefono, "+56987654321");
+  assert.equal(validarAviso(aviso({ telefono: "123" })).vendedor_telefono, null);
+  assert.equal(validarAviso(aviso()).vendedor_telefono, null);
   // El nombre de una automotora (un negocio) sí se guarda.
   assert.equal(validarAviso(aviso({ vendedorTipo: "automotora", vendedorNombre: "Autos del Sur" })).vendedor_nombre, "Autos del Sur");
   assert.equal(validarAviso(aviso({ vendedorTipo: "otro" })).vendedor_tipo, null);
