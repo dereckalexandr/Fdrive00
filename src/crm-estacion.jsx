@@ -58,7 +58,7 @@ export function LoginPersonal({ onEntrar }) {
         <input type="password" value={clave} onChange={(e) => setClave(e.target.value)} autoComplete="current-password" className={INPUT} />
       </label>
       {error && <p className="text-sm text-rose-600">{error}</p>}
-      <button type="submit" disabled={enviando} className="bg-stone-900 text-white px-5 py-2.5 text-sm font-medium hover:bg-stone-700 disabled:opacity-60 shadow-suave">{enviando ? "Ingresando…" : "Ingresar"}</button>
+      <button type="submit" disabled={enviando} className="bg-[#FF6B1A] text-[#0E1B2C] px-5 py-2.5 text-sm font-semibold hover:bg-[#ff8340] disabled:opacity-60 shadow-suave">{enviando ? "Ingresando…" : "Ingresar"}</button>
     </form>
   );
 }

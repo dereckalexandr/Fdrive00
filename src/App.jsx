@@ -16,6 +16,7 @@ import { ModuloInspecciones, Miniatura as MiniaturaEquipo, fotoKeyInspeccion, gu
 import { resumirInspeccion, MAX_FOTOS_INSPECCION } from "../supabase/functions/api/inspecciones-core.js";
 import { useGuardado, mensajeError as mensajeCrm } from "./crm-ui.jsx";
 import { LoginPersonal, CambioClaveObligatorio, EstacionTrabajo } from "./crm-estacion.jsx";
+import { LogotipoPista, IsotipoPista, ESLOGAN_PISTA, FUENTE_TITULOS, PISTA } from "./marca-pista.jsx";
 import { photoKey, makePhotoId, compressImage, collectPhotoIds, diffIds, MAX_PHOTOS_PER_ITEM, MAX_PHOTOS_PER_TASACION } from "./photos.js";
 
 const clp = (n) =>
@@ -1634,12 +1635,13 @@ function AdminDashboard({ onExit }) {
 ========================================================= */
 function Landing({ onEnterAdmin, onEnterPersonal }) {
   return (
-    <div className="min-h-screen flex items-start md:items-center justify-center px-4 py-10" style={{ background: "linear-gradient(180deg, #0f172a 0, #1e293b 300px, #f1f5f9 300px)" }}>
+    <div className="min-h-screen flex items-start md:items-center justify-center px-4 py-10" style={{ background: `linear-gradient(180deg, ${PISTA.noche} 0, ${PISTA.asfalto} 300px, ${PISTA.marfil} 300px)` }}>
       <div className="max-w-md w-full">
-        <div className="text-center mb-7 text-white">
-          <div className="mx-auto mb-3 w-12 h-12 rounded-2xl bg-amber-500 text-stone-900 font-bold text-lg flex items-center justify-center shadow-elevada">DF</div>
-          <h1 className="font-serif text-3xl">Drive Futuro</h1>
-          <p className="text-sm text-stone-300 mt-1">Plataforma de gestión automotriz</p>
+        <div className="text-center mb-7 text-white flex flex-col items-center">
+          <IsotipoPista tam={52} className="mb-4" />
+          <h1 className="sr-only">Pista</h1>
+          <LogotipoPista tono="marfil" alto={34} />
+          <p className="text-sm text-stone-300 mt-2" style={{ fontFamily: FUENTE_TITULOS }}>{ESLOGAN_PISTA}</p>
         </div>
         <LoginPersonal onEntrar={onEnterPersonal} />
         <div className="mt-4 text-center">

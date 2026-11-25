@@ -7,25 +7,12 @@
  * ----------------------------------------------------------------
  */
 import React, { useEffect } from "react";
+import { LogotipoPista, ponerIconosPista, FUENTE_TITULOS } from "./marca-pista.jsx";
 
 export const URL_APP_PISTA = "https://app.pistacrm.com";
 const CORREO = "contacto@pistacrm.com";
 const MAILTO_DEMO = `mailto:${CORREO}?subject=${encodeURIComponent("Quiero una demo de Pista")}&body=${encodeURIComponent("Hola, quiero conocer Pista para mi automotora.\n\nNombre:\nAutomotora:\nCiudad:\nTeléfono:\n")}`;
-
-/** Monograma de Pista: una «P» dentro de un cuadrado naranjo. */
-export function LogoPista({ claro = false, alto = 32 }) {
-  return (
-    <span className="inline-flex items-center gap-2" aria-label="Pista CRM">
-      <svg height={alto} width={alto} viewBox="0 0 56 56" aria-hidden="true">
-        <rect width="56" height="56" rx="14" fill="#FF6B1A" />
-        <path d="M18 46 V14 h14 a10 10 0 0 1 0 20 h-14" fill="none" stroke="#0E1B2C" strokeWidth="7" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-      <span className={`font-bold tracking-tight ${claro ? "text-white" : "text-[#0E1B2C]"}`} style={{ fontSize: alto * 0.72 }}>
-        Pista<span className="font-normal opacity-60"> CRM</span>
-      </span>
-    </span>
-  );
-}
+const T = { fontFamily: FUENTE_TITULOS };
 
 const MODULOS = [
   { t: "Todos tus leads en un solo lugar", d: "Los contactos de Chileautos, WhatsApp, tu sitio web y tus campañas llegan solos al CRM y se reparten entre tus vendedores." },
@@ -44,9 +31,8 @@ const PASOS = [
 
 export default function SitioPista() {
   useEffect(() => {
-    document.title = "Pista · CRM para automotoras";
-    const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute("content", "#0E1B2C");
+    document.title = "Pista · De lead a llaves. CRM para automotoras";
+    ponerIconosPista();
   }, []);
 
   const BTN = "inline-block px-6 py-3 rounded-lg bg-[#FF6B1A] text-[#0E1B2C] font-semibold hover:bg-[#ff8340] transition-colors";
@@ -56,7 +42,7 @@ export default function SitioPista() {
     <div className="min-h-screen bg-white text-[#0E1B2C]" style={{ fontFamily: "Inter, system-ui, sans-serif" }}>
       <header className="bg-[#0E1B2C]">
         <div className="max-w-6xl mx-auto px-5 py-4 flex items-center justify-between gap-4">
-          <LogoPista claro />
+          <a href="/" aria-label="Pista, inicio"><LogotipoPista tono="marfil" alto={30} /></a>
           <nav className="flex items-center gap-3 text-sm">
             <a href="#funciones" className="hidden sm:inline text-white/80 hover:text-white px-2">Funciones</a>
             <a href="#como" className="hidden sm:inline text-white/80 hover:text-white px-2">Cómo empezar</a>
@@ -69,8 +55,8 @@ export default function SitioPista() {
         <div className="absolute left-0 right-0 bottom-16 border-t-[6px] border-dashed border-[#FF6B1A]/25" aria-hidden="true" />
         <div className="max-w-6xl mx-auto px-5 pt-16 pb-28 relative">
           <p className="text-[#FF6B1A] font-semibold mb-4">CRM para automotoras</p>
-          <h1 className="text-4xl sm:text-6xl font-bold leading-tight max-w-3xl">Ningún lead se queda en los pits.</h1>
-          <p className="mt-6 text-lg text-white/80 max-w-2xl">Pista reúne tus leads, tu WhatsApp, tu inventario y tus ventas en una sola plataforma hecha para cómo se venden autos en Chile.</p>
+          <h1 style={T} className="text-5xl sm:text-7xl font-bold leading-none tracking-tight max-w-3xl">De lead a <span className="text-[#FF6B1A]">llaves</span>.</h1>
+          <p className="mt-6 text-lg text-white/80 max-w-2xl">Ningún lead se queda en los pits. Pista reúne tus leads, tu WhatsApp, tu inventario y tus ventas en una sola plataforma hecha para cómo se venden autos en Chile.</p>
           <div className="mt-10 flex flex-wrap gap-3">
             <a href={MAILTO_DEMO} className={BTN}>Agenda una demo</a>
             <a href="#funciones" className={BTN_2}>Ver funciones</a>
@@ -79,13 +65,13 @@ export default function SitioPista() {
       </section>
 
       <section id="funciones" className="max-w-6xl mx-auto px-5 py-20">
-        <h2 className="text-3xl font-bold mb-3">Todo lo que tu automotora necesita para vender</h2>
+        <h2 style={T} className="text-3xl font-bold mb-3">Todo lo que tu automotora necesita para vender</h2>
         <p className="text-slate-600 max-w-2xl mb-12">Desde que entra el lead hasta que entregas las llaves, sin planillas ni mensajes perdidos.</p>
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
           {MODULOS.map((m) => (
             <div key={m.t} className="border border-slate-200 rounded-xl p-6">
               <div className="w-10 h-1.5 bg-[#FF6B1A] rounded mb-4" aria-hidden="true" />
-              <h3 className="font-semibold text-lg mb-2">{m.t}</h3>
+              <h3 style={T} className="font-semibold text-lg mb-2">{m.t}</h3>
               <p className="text-slate-600 text-sm leading-relaxed">{m.d}</p>
             </div>
           ))}
@@ -94,12 +80,12 @@ export default function SitioPista() {
 
       <section id="como" className="bg-slate-50 border-y border-slate-200">
         <div className="max-w-6xl mx-auto px-5 py-20">
-          <h2 className="text-3xl font-bold mb-12">Cómo empezar</h2>
+          <h2 style={T} className="text-3xl font-bold mb-12">Cómo empezar</h2>
           <div className="grid md:grid-cols-3 gap-8">
             {PASOS.map((p) => (
               <div key={p.n}>
                 <div className="w-10 h-10 rounded-lg bg-[#0E1B2C] text-[#FF6B1A] font-bold flex items-center justify-center mb-4">{p.n}</div>
-                <h3 className="font-semibold text-lg mb-2">{p.t}</h3>
+                <h3 style={T} className="font-semibold text-lg mb-2">{p.t}</h3>
                 <p className="text-slate-600 text-sm leading-relaxed">{p.d}</p>
               </div>
             ))}
@@ -110,7 +96,7 @@ export default function SitioPista() {
       <section className="max-w-6xl mx-auto px-5 py-20">
         <div className="bg-[#0E1B2C] text-white rounded-2xl p-10 sm:p-14 flex flex-col md:flex-row md:items-center md:justify-between gap-8">
           <div>
-            <h2 className="text-3xl font-bold mb-3">Pon a tu equipo en la pole</h2>
+            <h2 style={T} className="text-3xl font-bold mb-3">Pon a tu equipo en la pole</h2>
             <p className="text-white/80 max-w-xl">Escríbenos y te mostramos Pista funcionando con el día a día de tu automotora.</p>
           </div>
           <a href={MAILTO_DEMO} className={`${BTN} whitespace-nowrap`}>Agenda una demo</a>
@@ -119,7 +105,10 @@ export default function SitioPista() {
 
       <footer className="border-t border-slate-200">
         <div className="max-w-6xl mx-auto px-5 py-8 flex flex-col sm:flex-row gap-4 sm:items-center sm:justify-between text-sm text-slate-500">
-          <LogoPista alto={24} />
+          <div className="flex items-center gap-3">
+            <LogotipoPista tono="noche" alto={22} />
+            <span style={T} className="font-bold text-[#0E1B2C]">De lead a llaves.</span>
+          </div>
           <p>
             <a href={`mailto:${CORREO}`} className="hover:text-[#0E1B2C]">{CORREO}</a>
             {" · "}

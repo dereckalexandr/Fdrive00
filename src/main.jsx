@@ -50,6 +50,11 @@ function esPlataforma() {
   return esAppPista() || ruta === "/plataforma" || ruta.startsWith("/plataforma/");
 }
 
+// El CRM y la presentación de Pista llevan el favicon de Pista; el sitio de la automotora queda como está.
+if (esSitioPista() || (!esSitioInspecciones() && esPlataforma())) {
+  import("./marca-pista.jsx").then((m) => { m.ponerIconosPista(); if (esPlataforma() && !esSitioPista()) document.title = "Pista · Plataforma"; });
+}
+
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <ErrorBoundary>
