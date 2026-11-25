@@ -38,8 +38,12 @@ const srv = http.createServer(async (req, res) => {
     });
     const j = await r.json();
     if (!j.refresh_token) return fin(`No llegó el token de acceso (${j.error || r.status}${j.error_description ? ": " + j.error_description : ""}). Revisa la URI de redireccionamiento y vuelve a intentar.`, 1);
-    const s = spawnSync("npx.cmd", ["supabase", "secrets", "set", `GOOGLE_ADS_REFRESH_TOKEN=${j.refresh_token}`, "--project-ref", REF], { stdio: ["ignore", "ignore", "inherit"], shell: true });
-    if (s.status !== 0) return fin("Obtuve el token pero no pude guardarlo en Supabase (¿hiciste el login con el token de Supabase?).", 1);
+    const s = spawnSync("npx.cmd", ["--yes", "supabase", "secrets", "set", `GOOGLE_ADS_REFRESH_TOKEN=${j.refresh_token}`, "--project-ref", REF, "--yes"], { stdio: ["ignore", "pipe", "pipe"], shell: true, encoding: "utf8", env: { ...process.env, SUPABASE_YES: "1" } });
+    if (s.status !== 0) {
+      const detalle = String(s.stderr || s.stdout || "").split("\n").filter((l) => l.trim() && !/WARN|deprecated/i.test(l)).slice(-6).join("\n").replace(new RegExp(j.refresh_token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"), "***");
+      console.error("No pude guardar el token en Supabase. Detalle:\n" + detalle);
+      return fin("Obtuve el token pero no pude guardarlo en Supabase: mira el detalle en la terminal.", 1);
+    }
     console.log("Listo: GOOGLE_ADS_REFRESH_TOKEN guardado en Supabase.");
     fin("Listo. Ya puedes cerrar esta pestaña y volver a la terminal.");
   } catch (e) { fin(`Error: ${e.message}`, 1); }
