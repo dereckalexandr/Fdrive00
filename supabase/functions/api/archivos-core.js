@@ -40,7 +40,7 @@ export function rutaArchivo(key, espacio = ESPACIO_INICIAL) {
 
 /** «data:image/jpeg;base64,AAAA…» -> { mime, bytes } (o null si no es una dirección data: en base64). */
 export function leerDataUrl(valor) {
-  const m = /^data:([\w/+.-]+)(?:;[\w=.+-]+)*;base64,([A-Za-z0-9+/=\s]*)$/s.exec(String(valor || ""));
+  const m = /^data:([\w/+.-]+)(?:;\s*[\w=.+-]+)*;\s*base64,([A-Za-z0-9+/=\s]*)$/s.exec(String(valor || ""));
   if (!m) return null;
   let bin;
   try { bin = atob(m[2].replace(/\s+/g, "")); } catch { return null; }

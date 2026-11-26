@@ -53,6 +53,10 @@ test("data: se lee a bytes y vuelve igual; lo que no es base64 se rechaza", () =
   // Con parámetros del tipo («audio/ogg; codecs=opus») se queda con el tipo base.
   assert.equal(leerDataUrl("data:audio/ogg;codecs=opus;base64,AAEC").mime, "audio/ogg");
   assert.equal(aDataUrl(bytes, "audio/ogg; codecs=opus").slice(0, 21), "data:audio/ogg;base64");
+  // Formato antiguo de las notas de voz de WhatsApp, con espacio después del punto y coma (hay una así en producción).
+  const viejo = leerDataUrl("data:audio/ogg; codecs=opus;base64,T2dnUwACAAAA");
+  assert.equal(viejo.mime, "audio/ogg");
+  assert.deepEqual([...viejo.bytes.slice(0, 4)], [79, 103, 103, 83]);
 });
 
 test("Un archivo grande no rompe la conversión (por trozos)", () => {
