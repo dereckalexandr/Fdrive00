@@ -2,6 +2,7 @@
 //   GET ?catalogo=meta-vehiculos | meta-productos  → CSV con los autos disponibles (Meta lo lee solo, cada hora o cada día)
 //   GET ?vfoto=<vehículo>&f=<foto>                  → la foto del auto (solo de autos visibles en el sitio web)
 // No expone costos ni datos internos: lo mismo que ya muestra el sitio web. Opcional: SITIO_URL (por defecto https://fdrive02.vercel.app).
+import { leerArchivo } from "./archivos.ts";
 import { armarCatalogo, FORMATOS_CATALOGO } from "./catalogo-core.js";
 import { visibleEnCatalogo } from "./publico-core.js";
 
@@ -34,8 +35,7 @@ export async function catalogoGet(req: Request, sb: any): Promise<Response> {
     if (!/^[0-9a-f-]{36}$/.test(vid) || !/^[\w-]{3,60}$/.test(fid)) return new Response("not found", { status: 404 });
     const q = await sb.from("vehiculos").select("id, activo, estado, precio_lista, fotos").eq("id", vid).maybeSingle();
     if (!q.data || !visibleEnCatalogo(q.data) || !(q.data.fotos ?? []).includes(fid)) return new Response("not found", { status: 404 });
-    const r = await sb.from("kv_store").select("value").eq("key", `vfoto::${vid}::${fid}`).maybeSingle();
-    const m = /^data:([\w/+.-]+);base64,(.+)$/s.exec(String((r.data && r.data.value) || ""));
+    const m = /^data:([\w/+.-]+);base64,(.+)$/s.exec(String((await leerArchivo(sb, `vfoto::${vid}::${fid}`)) || ""));
     if (!m) return new Response("not found", { status: 404 });
     const bin = atob(m[2]);
     const bytes = new Uint8Array(bin.length);

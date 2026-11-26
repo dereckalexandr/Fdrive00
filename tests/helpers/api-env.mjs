@@ -145,7 +145,29 @@ export function crearBaseFalsa() {
     }
     return b;
   }
-  return { tablas, consultas, cliente: { from: builder } };
+  // Storage falso: los objetos viven en memoria (ruta -> { bytes, type }). fallarSubida / fallarBajada simulan caídas.
+  const objetos = new Map();
+  const fallos = { subida: false, bajada: false };
+  const storage = {
+    from(bucket) {
+      return {
+        async upload(ruta, cuerpo, opts) {
+          if (fallos.subida) return { data: null, error: { message: "storage caído" } };
+          if (objetos.has(bucket + "/" + ruta) && !(opts && opts.upsert)) return { data: null, error: { message: "ya existe" } };
+          objetos.set(bucket + "/" + ruta, { bytes: new Uint8Array(cuerpo), type: (opts && opts.contentType) || "application/octet-stream" });
+          return { data: { path: ruta }, error: null };
+        },
+        async download(ruta) {
+          if (fallos.bajada) return { data: null, error: { message: "storage caído" } };
+          const o = objetos.get(bucket + "/" + ruta);
+          if (!o) return { data: null, error: { message: "Object not found" } };
+          return { data: new Blob([o.bytes], { type: o.type }), error: null };
+        },
+        async remove(rutas) { for (const r of rutas) objetos.delete(bucket + "/" + r); return { data: rutas, error: null }; },
+      };
+    },
+  };
+  return { tablas, consultas, objetos, fallos, cliente: { from: builder, storage } };
 }
 
 /* ---------- carga de la función real ---------- */
@@ -241,7 +263,7 @@ export const iniciarFuncion = async () => {
   };
   const core = pathToFileURL(resolve("supabase/functions/api/crm-core.js")).href;
   let src = readFileSync("supabase/functions/api/index.ts", "utf8");
-  src = src.replace("npm:@supabase/supabase-js@2", pathToFileURL(fake).href).replace("./crm-core.js", core).replace("./ventas.ts", pathToFileURL(resolve("supabase/functions/api/ventas.ts")).href).replace("./publico.ts", pathToFileURL(resolve("supabase/functions/api/publico.ts")).href).replace("./alertas.ts", pathToFileURL(resolve("supabase/functions/api/alertas.ts")).href).replace("./patentes-core.js", pathToFileURL(resolve("supabase/functions/api/patentes-core.js")).href).replace("./whatsapp.ts", pathToFileURL(resolve("supabase/functions/api/whatsapp.ts")).href).replace("./ads.ts", pathToFileURL(resolve("supabase/functions/api/ads.ts")).href).replace("./leads-ads.ts", pathToFileURL(resolve("supabase/functions/api/leads-ads.ts")).href).replace("./catalogo.ts", pathToFileURL(resolve("supabase/functions/api/catalogo.ts")).href).replace("./claude.ts", pathToFileURL(fakeClaude).href);
+  src = src.replace("npm:@supabase/supabase-js@2", pathToFileURL(fake).href).replace("./crm-core.js", core).replace("./ventas.ts", pathToFileURL(resolve("supabase/functions/api/ventas.ts")).href).replace("./publico.ts", pathToFileURL(resolve("supabase/functions/api/publico.ts")).href).replace("./alertas.ts", pathToFileURL(resolve("supabase/functions/api/alertas.ts")).href).replace("./patentes-core.js", pathToFileURL(resolve("supabase/functions/api/patentes-core.js")).href).replace("./whatsapp.ts", pathToFileURL(resolve("supabase/functions/api/whatsapp.ts")).href).replace("./ads.ts", pathToFileURL(resolve("supabase/functions/api/ads.ts")).href).replace("./leads-ads.ts", pathToFileURL(resolve("supabase/functions/api/leads-ads.ts")).href).replace("./catalogo.ts", pathToFileURL(resolve("supabase/functions/api/catalogo.ts")).href).replace("./archivos.ts", pathToFileURL(resolve("supabase/functions/api/archivos.ts")).href).replace("./archivos-core.js", pathToFileURL(resolve("supabase/functions/api/archivos-core.js")).href).replace("./claude.ts", pathToFileURL(fakeClaude).href);
   const archivo = join(dir, "index.mts");
   writeFileSync(archivo, src);
   globalThis.__baseFalsa = db;

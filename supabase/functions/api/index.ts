@@ -26,6 +26,8 @@ import { llamarClaude, claudeConfigurado, modeloClaude } from "./claude.ts";
 import { sincronizarCampanias } from "./ads.ts";
 import { avisoPaginaMeta, webhookLeadsGoogle } from "./leads-ads.ts";
 import { catalogoGet } from "./catalogo.ts";
+import { guardarArchivo, valorDeArchivo, borrarArchivo, estadoMigracion, migrarLote } from "./archivos.ts";
+import { esClaveArchivo } from "./archivos-core.js";
 
 const sb = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -134,9 +136,11 @@ async function fail(ip: string, bucket: string) {
 async function dbGet(key: string): Promise<string | null> {
   const { data, error } = await sb.from(TABLE).select("value").eq("key", key).maybeSingle();
   if (error) throw error;
-  return data ? (data.value as string) : null;
+  // Las fotos y documentos viven en Storage: aquí se devuelven como siempre (dirección data:).
+  return data ? (esClaveArchivo(key) ? await valorDeArchivo(sb, data.value as string) : (data.value as string)) : null;
 }
 async function dbSet(key: string, value: string, shared = true) {
+  if (esClaveArchivo(key)) { await guardarArchivo(sb, key, value, shared); return; }
   const { error } = await sb.from(TABLE).upsert({ key, value, shared, updated_at: new Date().toISOString() }, { onConflict: "key" });
   if (error) throw error;
 }
@@ -294,6 +298,19 @@ async function crmOp(s: Session, body: any): Promise<Response> {
     if (e?.code === "23505") return json({ error: "duplicado" }, 409);
     throw e;
   };
+
+  /* --- archivos pesados: de la base a Supabase Storage --- */
+  if (op === "archivos.estado") {
+    try { return json(await estadoMigracion(sb)); } catch (e) { return dbFail(e); }
+  }
+  if (op === "archivos.migrar") {
+    const limite = Math.min(20, Math.max(1, Math.floor(Number(body.limite) || 8)));
+    try {
+      const r = await migrarLote(sb, limite);
+      if (r.movidos > 0 || r.fallos.length > 0) await audit(actor, "archivos.migrar", "archivos", undefined, { movidos: r.movidos, bytes: r.bytes, fallos: r.fallos.length });
+      return json(r);
+    } catch (e) { return dbFail(e); }
+  }
 
   /* --- locales --- */
   if (op === "locales.list") {
@@ -809,6 +826,7 @@ Deno.serve(async (req) => {
         return json({ ok: true });
       }
       if (op === "delete") {
+        if (esClaveArchivo(key)) { await borrarArchivo(sb, key); return json({ ok: true }); }
         const { error } = await sb.from(TABLE).delete().eq("key", key);
         if (error) throw error;
         return json({ ok: true });

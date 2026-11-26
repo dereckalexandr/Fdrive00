@@ -7,6 +7,8 @@
 //   - leads.asignar                       -> supervisor: ve, modifica y reasigna todo el local
 //   - cuenta maestra (admin)              -> todo; elige el local con `localId`
 // Cada persona está acotada a su local. Los cambios importantes quedan en la bitácora.
+import { borrarArchivo } from "./archivos.ts";
+import { esClaveArchivo } from "./archivos-core.js";
 import { cargaDelEquipo } from "./alertas-leads-core.js";
 import { permisosEfectivos, configCompleta, limpiarExtra } from "./crm-core.js";
 import {
@@ -2244,7 +2246,7 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       if (!g.data) return err("no_existe", 404);
       let ficha: any = {};
       try { ficha = JSON.parse(g.data.value); } catch { /* ficha ilegible: igual se elimina */ }
-      const borrar = async (k: string) => { const d = await sb.from("kv_store").delete().eq("key", k); if (d.error) throw d.error; };
+      const borrar = async (k: string) => { if (esClaveArchivo(k)) { await borrarArchivo(sb, k); return; } const d = await sb.from("kv_store").delete().eq("key", k); if (d.error) throw d.error; };
       let folio: string | null = null;
       if (tipoFicha === "inspeccion") {
         // Sus fotos y, si estaba registrada como solicitud o inspección espontánea, ese registro (sin la ficha ya no tiene qué mostrar).

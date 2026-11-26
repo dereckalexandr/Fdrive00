@@ -7,6 +7,7 @@
 //
 // Secretos (supabase secrets set ...): WA_TOKEN (token permanente de usuario del sistema), WA_PHONE_NUMBER_ID, WA_WABA_ID,
 // WA_APP_SECRET (firma de los avisos), WA_VERIFY_TOKEN (verificación del webhook). Opcional: WA_GRAPH_VERSION.
+import { guardarArchivo, leerArchivo } from "./archivos.ts";
 import {
   telefonoWa, mismoTelefono, nombreDesdePerfil, estadoSiguiente, parsearWebhook, ventanaAbierta, venceVentana, validarTextoWa,
   resumenMensaje, plantillasUsables, armarPlantilla, validarArchivoWa, telefonoVisible, FUENTE_WHATSAPP, MAX_BYTES_MEDIA,
@@ -86,8 +87,8 @@ async function guardarMediaEntrante(sb: any, msg: any) {
     if (bytes.length > MAX_BYTES_MEDIA) { await sb.from("wa_mensajes").update({ media: { ...media, tam: bytes.length, muy_grande: true } }).eq("id", msg.id); return; }
     // Meta manda «audio/ogg; codecs=opus»: la dirección data: queda sin parámetros (con espacios los navegadores no la leen).
     const mime = String(media.mime || info.data.mime_type || "application/octet-stream").split(";")[0].trim().toLowerCase();
-    const up = await sb.from("kv_store").upsert({ key: claveMedia(msg.conversacion_id, msg.id), value: `data:${mime};base64,${aBase64(bytes)}`, shared: false, updated_at: new Date().toISOString() }, { onConflict: "key" });
-    if (up.error) { console.error("whatsapp media: guardar", up.error.message); return; }
+    try { await guardarArchivo(sb, claveMedia(msg.conversacion_id, msg.id), `data:${mime};base64,${aBase64(bytes)}`, false); }
+    catch (e) { console.error("whatsapp media: guardar", String((e as any)?.message ?? e)); return; }
     await sb.from("wa_mensajes").update({ media: { ...media, mime, tam: bytes.length, guardado: true } }).eq("id", msg.id);
   } catch (e) { console.error("whatsapp media:", String((e as any)?.message ?? e)); }
 }
@@ -578,13 +579,13 @@ export async function whatsappOp(h: HerramientasWa, op: string, body: any): Prom
     const a = await acceso(conv);
     if (!a.ver) return err("no_existe", 404);
     if (m.media && m.media.muy_grande) return err("archivo_muy_grande");
-    let g = await sb.from("kv_store").select("value").eq("key", claveMedia(conv.id, m.id)).maybeSingle();
-    if (!(g.data && g.data.value) && m.direccion === "entrante" && m.media && m.media.id && waConfigurado()) {
+    let archivo = await leerArchivo(sb, claveMedia(conv.id, m.id));
+    if (!archivo && m.direccion === "entrante" && m.media && m.media.id && waConfigurado()) {
       await guardarMediaEntrante(sb, { ...m, media: { ...m.media, guardado: false } });
-      g = await sb.from("kv_store").select("value").eq("key", claveMedia(conv.id, m.id)).maybeSingle();
+      archivo = await leerArchivo(sb, claveMedia(conv.id, m.id));
     }
-    if (!(g.data && g.data.value)) return err("sin_archivo", 404);
-    return json({ dataUrl: g.data.value, nombre: (m.media && m.media.nombre) || "", mime: (m.media && m.media.mime) || "" });
+    if (!archivo) return err("sin_archivo", 404);
+    return json({ dataUrl: archivo, nombre: (m.media && m.media.nombre) || "", mime: (m.media && m.media.mime) || "" });
   }
 
   if (op === "wa.enviar") {
@@ -654,7 +655,7 @@ export async function whatsappOp(h: HerramientasWa, op: string, body: any): Prom
     fila.wamid = String((((r.data || {}).messages || [])[0] || {}).id || "") || null;
     const ins = await sb.from("wa_mensajes").insert(fila).select().single();
     if (ins.error) return fallo(ins.error);
-    if (archivoGuardar) await sb.from("kv_store").upsert({ key: claveMedia(conv.id, ins.data.id), value: archivoGuardar, shared: false, updated_at: new Date().toISOString() }, { onConflict: "key" });
+    if (archivoGuardar) await guardarArchivo(sb, claveMedia(conv.id, ins.data.id), archivoGuardar, false);
     const ahora = new Date().toISOString();
     await sb.from("wa_conversaciones").update({ ultimo_mensaje_en: ahora, ultimo_texto: resumenMensaje(fila), ultima_direccion: "saliente", no_leidos: 0, actualizado_en: ahora }).eq("id", conv.id);
     // Escribirle al cliente cuenta como contacto: el lead nuevo pasa a «Contactado».

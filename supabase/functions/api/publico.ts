@@ -3,6 +3,7 @@
 // Lo llama index.ts con la acción "public". Aquí NO hay sesión: por eso todo lo que sale pasa por una lista cerrada de campos
 // (nunca la patente, el costo ni las notas internas) y todo lo que entra se valida, se limita por IP y por teléfono y crea
 // leads normales del CRM con la fuente «Sitio web», que se reparten solos entre los ejecutivos habilitados.
+import { leerArchivo } from "./archivos.ts";
 import { permisosEfectivos, configCompleta } from "./crm-core.js";
 import { elegirAsignado } from "./ventas-core.js";
 import { permisoDeTipo, grupoDeReparto } from "./compras-core.js";
@@ -287,9 +288,7 @@ export async function publicOp(ctx: CtxPublico, body: any): Promise<Response> {
       const fotoId = String(body.fotoId ?? "");
       if (!(origen.fotos ?? []).includes(fotoId)) return err("no_existe", 404);
       const fichaId = String(origen.inspeccion_key).split("::").pop();
-      const r = await sb.from("kv_store").select("value").eq("key", `ifoto::${fichaId}::${fotoId}`).maybeSingle();
-      if (r.error) throw r.error;
-      return json({ value: r.data ? r.data.value : null });
+      return json({ value: await leerArchivo(sb, `ifoto::${fichaId}::${fotoId}`) });
     }
     const g = await sb.from("kv_store").select("value").eq("key", fila.inspeccion_key).maybeSingle();
     if (g.error) throw g.error;
@@ -309,9 +308,7 @@ export async function publicOp(ctx: CtxPublico, body: any): Promise<Response> {
     if (q.error) return fallo(q.error);
     const fotoId = String(body.fotoId ?? "");
     if (!q.data || !visibleEnCatalogo(q.data) || !(q.data.fotos ?? []).includes(fotoId)) return err("no_existe", 404);
-    const r = await sb.from("kv_store").select("value").eq("key", `vfoto::${q.data.id}::${fotoId}`).maybeSingle();
-    if (r.error) throw r.error;
-    return json({ value: r.data ? r.data.value : null });
+    return json({ value: await leerArchivo(sb, `vfoto::${q.data.id}::${fotoId}`) });
   }
 
   /* ---------- solicitud de un visitante ---------- */

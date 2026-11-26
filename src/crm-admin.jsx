@@ -690,6 +690,49 @@ const URL_SALUD = import.meta.env.VITE_SUPABASE_URL ? `${import.meta.env.VITE_SU
 const dias = (iso) => Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
 const NOMBRES_TABLA = { usuarios: "Usuarios", locales: "Locales", clientes: "Clientes", leads: "Leads", vehiculos: "Vehículos", cierres: "Ventas cerradas", kv_store: "Fichas y fotos (almacén)" };
 
+/* Fotos y documentos: de la base de datos a Supabase Storage. Los archivos nuevos ya van a Storage solos; esto mueve los que ya existían. */
+function ArchivosCard() {
+  const [v, setV] = useState(0);
+  const { cargando, error, datos } = useCarga(() => crm("archivos.estado"), [v]);
+  const [corriendo, setCorriendo] = useState(false);
+  const [info, setInfo] = useState({ movidos: 0, mb: 0, fallos: [], listo: false });
+  const mover = async () => {
+    setCorriendo(true); setInfo({ movidos: 0, mb: 0, fallos: [], listo: false });
+    let movidos = 0, bytes = 0, fallos = [];
+    try {
+      for (let vuelta = 0; vuelta < 400; vuelta++) {
+        const r = await crm("archivos.migrar", { limite: 8 });
+        movidos += r.movidos; bytes += r.bytes; fallos = [...new Set([...fallos, ...r.fallos])];
+        setInfo({ movidos, mb: bytes / 1048576, fallos, listo: false });
+        if (r.movidos === 0) break;
+      }
+      setInfo({ movidos, mb: bytes / 1048576, fallos, listo: true });
+    } catch (e) { setInfo((x) => ({ ...x, fallos: [...x.fallos, mensajeCrm(e)], listo: false })); }
+    setCorriendo(false); setV((n) => n + 1);
+  };
+  if (error && !datos) return <Aviso>{error}</Aviso>;
+  if (!datos) return <Cargando />;
+  const pendientes = datos.enLaBase;
+  return (
+    <Tarjeta>
+      <div className="flex items-start gap-3">
+        <span className={`mt-1 inline-block w-3 h-3 rounded-full shrink-0 ${pendientes === 0 ? "bg-emerald-500" : "bg-amber-500"}`} />
+        <div className="min-w-0 flex-1">
+          <div className="font-medium text-stone-900">Fotos y documentos</div>
+          <div className="text-sm text-stone-600 mt-1 flex flex-col gap-1">
+            <span>En Storage: <b>{datos.enStorage.toLocaleString("es-CL")}</b> archivos · aún dentro de la base de datos: <b>{pendientes.toLocaleString("es-CL")}</b>.</span>
+            <span className="text-xs text-stone-500">Las fotos y documentos nuevos ya se guardan solos en Storage. Mover los antiguos libera espacio en la base y la deja más rápida. Cada archivo se copia, se comprueba que quedó igual y recién entonces se quita de la base; si algo falla, queda donde estaba.</span>
+            {pendientes > 0 && <div><button type="button" disabled={corriendo} onClick={mover} className={BTN_PRIMARIO}>{corriendo ? `Moviendo… (${info.movidos} listos)` : `Mover ${pendientes.toLocaleString("es-CL")} archivos a Storage`}</button></div>}
+            {info.listo && <span className="text-emerald-700">Listo: se movieron {info.movidos} archivos ({info.mb.toFixed(1)} MB).{info.fallos.length ? " Algunos no se pudieron mover; siguen en la base." : ""}</span>}
+            {info.fallos.length > 0 && <span className="text-xs text-rose-700 break-words">{info.fallos.slice(0, 5).join(" · ")}</span>}
+            <div><button type="button" onClick={() => setV((n) => n + 1)} disabled={cargando || corriendo} className={BTN}>Actualizar</button></div>
+          </div>
+        </div>
+      </div>
+    </Tarjeta>
+  );
+}
+
 function EstadoTab() {
   const [v, setV] = useState(0);
   const { cargando, error, datos } = useCarga(() => crm("sistema.estado"), [v]);
@@ -730,6 +773,7 @@ function EstadoTab() {
           {datos.patentes.activa && datos.patentes.usadasHoy >= datos.patentes.limite && <span className="text-amber-700">Se agotó el cupo de hoy: se pide marca, modelo y año a mano hasta mañana.</span>}
         </Fila>
       )}
+      <ArchivosCard />
       <Tarjeta>
         <div className="font-medium text-stone-900 mb-2">Datos guardados</div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
