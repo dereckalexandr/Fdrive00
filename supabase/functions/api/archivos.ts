@@ -81,15 +81,16 @@ export async function estadoMigracion(sb: any) {
  * y recién entonces se reemplaza por el marcador. Si algo no coincide, el archivo se deja intacto en la base.
  */
 export async function migrarLote(sb: any, limite = 8) {
-  let movidos = 0, bytes = 0; const fallos: string[] = [];
+  let movidos = 0, bytes = 0, omitidos = 0; const fallos: string[] = [];
   for (const p of PREFIJOS_ARCHIVO) {
     if (movidos + fallos.length >= limite) break;
     const q = await sb.from(TABLE).select("key").like("key", p + "::%").ilike("value", "data:%").limit(limite);
     if (q.error) throw q.error;
     for (const { key } of q.data ?? []) {
       if (movidos + fallos.length >= limite) break;
-      const g = await sb.from(TABLE).select("value").eq("key", key).maybeSingle();
+      const g = await sb.from(TABLE).select("value, updated_at").eq("key", key).maybeSingle();
       const valor = g.data ? (g.data.value as string) : null;
+      const version = g.data ? (g.data.updated_at as string | null) : null;
       if (!valor || !archivoEnLaBase(key, valor)) continue;
       const d = leerDataUrl(valor);
       if (!d || d.bytes.length === 0 || d.bytes.length > MAX_BYTES_ARCHIVO) { fallos.push(key + ": no es un archivo válido o es muy grande"); continue; }
@@ -100,11 +101,20 @@ export async function migrarLote(sb: any, limite = 8) {
         const dl = await sb.storage.from(BUCKET_ARCHIVOS).download(ruta);
         const tam = dl.data ? (await dl.data.arrayBuffer()).byteLength : -1;
         if (dl.error || tam !== d.bytes.length) { fallos.push(key + ": la copia en Storage no coincide"); continue; }
-        const u = await sb.from(TABLE).update({ value: marcadorDe(ruta) }).eq("key", key).eq("value", valor);
+        // Nunca se compara el contenido en el filtro (iría dentro de la dirección de la consulta y no cabe): solo la clave, que siga sin moverse y su versión.
+        let act = sb.from(TABLE).update({ value: marcadorDe(ruta) }).eq("key", key).ilike("value", "data:%");
+        if (version) act = act.eq("updated_at", version);
+        const u = await act.select("key");
         if (u.error) { fallos.push(key + ": " + u.error.message); continue; }
+        if (!u.data || u.data.length === 0) {
+          // Cambió mientras se movía (alguien la volvió a subir o ya se había movido): no se pisa y se descarta la copia sobrante.
+          omitidos++;
+          try { await sb.storage.from(BUCKET_ARCHIVOS).remove([ruta]); } catch { /* queda sin referencias: se ignora */ }
+          continue;
+        }
         movidos++; bytes += d.bytes.length;
       } catch (e) { fallos.push(key + ": " + String((e as any)?.message ?? e).slice(0, 120)); }
     }
   }
-  return { movidos, bytes, fallos };
+  return { movidos, bytes, omitidos, fallos };
 }

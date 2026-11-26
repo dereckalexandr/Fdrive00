@@ -151,3 +151,25 @@ test("La foto pública del catálogo se sirve desde Storage", async () => {
   assert.equal(r.headers.get("content-type"), "image/jpeg");
   assert.deepEqual([...new Uint8Array(await r.arrayBuffer())], [0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4, 5]);
 });
+
+test("Migración de un archivo GRANDE: el contenido nunca viaja dentro de la dirección de la consulta", async () => {
+  const grande = new Uint8Array(200_000).map((_, i) => i % 251);
+  const url = `data:image/jpeg;base64,${Buffer.from(grande).toString("base64")}`;
+  db.tablas.kv_store.push({ key: "ifoto::fg::a", value: url, shared: true, updated_at: "2026-11-01T10:00:00.000Z" });
+  const r = await crm(admin, "archivos.migrar", { limite: 3 });
+  assert.deepEqual(r.fallos, []);
+  assert.equal(r.movidos, 1);
+  assert.equal(fila("ifoto::fg::a").value, "@archivo:df/ifoto/fg/a");
+  assert.equal((await kv(admin, "get", { key: "ifoto::fg::a" })).value, url);
+  // Si alguien volvió a subir esa foto mientras se movía (cambió su versión), no se pisa con el marcador.
+  db.tablas.kv_store.push({ key: "ifoto::fg::b", value: url, shared: true, updated_at: "2026-11-01T10:00:00.000Z" });
+  const antes = db.tablas.kv_store.find((f) => f.key === "ifoto::fg::b");
+  const orig = db.objetos.set.bind(db.objetos);
+  db.objetos.set = (k, v) => { antes.updated_at = "2026-11-02T10:00:00.000Z"; antes.value = foto(7, 7); return orig(k, v); };
+  const r2 = await crm(admin, "archivos.migrar", { limite: 3 });
+  db.objetos.set = orig;
+  assert.equal(antes.value, foto(7, 7), "lo que la persona subió después se conserva");
+  assert.equal(r2.movidos, 0);
+  assert.equal(r2.omitidos, 1);
+  assert.equal(db.objetos.has("archivos/df/ifoto/fg/b"), false, "la copia sobrante se descarta");
+});

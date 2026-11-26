@@ -86,7 +86,8 @@ export function crearBaseFalsa() {
       update(p) { st.op = "update"; st.payload = p; return b; },
       upsert(p, o) { st.op = "upsert"; st.payload = p; st.upsertOn = o && o.onConflict; return b; },
       delete() { st.op = "delete"; return b; },
-      eq(c, v) { st.filtros.push([c, v]); return b; },
+      // Como la base real: el filtro viaja en la dirección de la consulta, que no admite valores enormes (una foto en base64).
+      eq(c, v) { if (typeof v === "string" && v.length > 8000) st.uriLarga = true; st.filtros.push([c, v]); return b; },
       neq(c, v) { st.filtros.push([c, (x) => x !== v]); return b; },
       in(c, arr) { st.filtros.push([c, (x) => arr.includes(x)]); return b; },
       limit(n) { st.limite = n; return b; },
@@ -108,6 +109,7 @@ export function crearBaseFalsa() {
     const coincide = (f) => st.filtros.every(([c, v]) => (typeof v === "function" ? v(f[c]) : f[c] === v));
     function ejecutar() {
       consultas.push({ tabla: nombre, op: st.op });
+      if (st.uriLarga) return { data: null, error: { message: "414 Request-URI Too Large: el filtro es demasiado largo" } };
       const T = tablas[nombre];
       if (!T) return { data: null, error: { code: "42P01", message: `relation "${nombre}" does not exist` } };
       let filas = [];
