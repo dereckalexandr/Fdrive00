@@ -140,3 +140,32 @@ test("Guarda contra «Illegal invocation»: el reloj por defecto no usa el setTi
   assert.ok(!/reloj\s*=\s*\{\s*setTimeout\s*\}/.test(src), "en el navegador `{ setTimeout }.setTimeout(...)` lanza «Illegal invocation» y deja las pestañas sin navegar");
   assert.match(src, /reloj = \{ setTimeout: \(f, t\) => setTimeout\(f, t\) \}/);
 });
+
+test("Las lecturas con nombre propio son de verdad lecturas: ninguna escribe datos (si una llegara a escribir, la caché la dejaría sin ejecutar)", async () => {
+  const { readdirSync, readFileSync } = await import("node:fs");
+  const { LECTURAS_NOMBRADAS } = await import("../src/cache-cliente.js");
+  const dir = new URL("../supabase/functions/api/", import.meta.url);
+  const ESCRIBE = /\.(insert|update|upsert|delete)\(|guardarArchivo|borrarArchivo|audit\(|dbSet\(|migrarLote|crearValidacion|\.rpc\(/;
+  const archivos = readdirSync(dir).filter((f) => f.endsWith(".ts")).map((f) => readFileSync(new URL(f, dir), "utf8").replace(/\r\n/g, "\n"));
+  const problemas = [];
+  for (const nombre of LECTURAS_NOMBRADAS) {
+    let encontrada = false;
+    for (const s of archivos) {
+      const i = s.indexOf(`op === "${nombre}"`);
+      if (i < 0) continue;
+      encontrada = true;
+      const resto = s.slice(i + 10);
+      const sig = resto.search(/\n\s*(?:\}\s*)?if \((?:\[|op === ")/);
+      const bloque = s.slice(i, i + 10 + (sig > 0 ? Math.min(sig, 3500) : 1500));
+      const mala = bloque.split("\n").find((l) => ESCRIBE.test(l));
+      if (mala) problemas.push(`${nombre}: ${mala.trim().slice(0, 100)}`);
+    }
+    if (!encontrada) problemas.push(`${nombre}: ya no existe en el servidor (quítala de LECTURAS_NOMBRADAS)`);
+  }
+  assert.deepEqual(problemas, []);
+});
+
+test("Las lecturas que antes vaciaban la caché ahora se reconocen (leads.hoy es la pantalla de entrada); los cambios parecidos, no", () => {
+  for (const op of ["leads.hoy", "reservas.por_validar", "equipo.carga", "equipo.habilitaciones", "marketing.ads.estado", "marketing.leads.estado"]) assert.equal(esLecturaCacheable(op), true, op);
+  for (const op of ["equipo.habilitar", "leads.create", "reservas.extender", "cierres.aprobar", "locales.update", "wa.plantilla_borrar", "wa.respuestas_guardar", "validacion.quitar", "marketing.ads.activar", "marketing.leads.reintentar"]) assert.equal(esLecturaCacheable(op), false, op);
+});

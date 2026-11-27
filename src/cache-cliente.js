@@ -16,7 +16,14 @@ export const MAX_ENTRADAS = 300;
 // Lista CONSERVADORA (la misma que ya usan los reintentos de lectura, más `lista` y dos lecturas con nombre propio): tratar por error un
 // cambio como si fuera una lectura lo dejaría sin ejecutar, así que jamás se usan terminaciones ambiguas como «estado».
 const LECTURA = /(^|\.)(list|lista|get|cola|resumen|equipo|pendientes|mios|mias|catalogos)$/;
-const LECTURA_NOMBRADA = /^(gestion\.embudo|marketing\.resultados)$/;
+// Lecturas con nombre propio (revisadas una a una: ninguna escribe). La prueba tests/cache-cliente.test.mjs vigila que siga siendo así.
+export const LECTURAS_NOMBRADAS = [
+  "gestion.embudo", "marketing.resultados", "leads.hoy", "reservas.por_validar", "equipo.carga", "equipo.habilitaciones",
+  "marketing.ads.estado", "marketing.ads.externas", "marketing.ads.google_sugerencias", "marketing.leads.estado",
+  "inspecciones.lugares", "inspecciones.informes", "inspecciones.fichas_equipo", "tasaciones.inspecciones",
+  "cierres.pagos", "compras.pagos", "compras.tasaciones", "usuarios.impacto", "anuncios.catalogo",
+];
+const LECTURA_NOMBRADA = { test: (op) => LECTURAS_NOMBRADAS.includes(op) };
 const SIEMPRE_FRESCO = /^(wa|whatsapp|sistema|archivos)\./;
 export const esLecturaCacheable = (op) => typeof op === "string" && (LECTURA.test(op) || LECTURA_NOMBRADA.test(op)) && !SIEMPRE_FRESCO.test(op);
 // Lecturas VIVAS: cambian solas y la pantalla las repite cada pocos segundos (WhatsApp, estado). Nunca se guardan, pero tampoco vacían la caché
