@@ -1,6 +1,6 @@
 // Vista «Lista» de leads: filtros, orden, selección múltiple, reasignación en lote (Jefe Local) y exportar a CSV.
 import React, { useEffect, useMemo, useState } from "react";
-import { INPUT, BTN, BTN_AMBAR, clp, Aviso, Tarjeta, useCarga, mensajeError } from "./crm-ui.jsx";
+import { INPUT, BTN, BTN_AMBAR, clp, Aviso, Tarjeta, useCarga, mensajeError, alPasar } from "./crm-ui.jsx";
 import { Miniatura } from "./crm-inventario.jsx";
 import { cuando } from "./crm-hoy.jsx";
 import { armarFilaLead, filtrarFilas, ordenarFilas, filasACsv, ORDENES_LISTA } from "../supabase/functions/api/leads-lista-core.js";
@@ -118,7 +118,7 @@ export function ListaLeads({ api, datos, mapas, catalogos, todos, abrirLead, rec
               <tr key={r.id} className="border-b border-stone-100 hover:bg-stone-50">
                 {datos.puedeAsignar && <td className="py-2.5 px-3"><input type="checkbox" disabled={!r.abierto} checked={marcados.includes(r.id)} onChange={() => alternar(r.id)} aria-label={`Seleccionar a ${r.cliente}`} /></td>}
                 <td className="py-2.5 px-3">
-                  <button onClick={() => abrirLead(r.id)} className="text-stone-900 underline decoration-dotted text-left">{r.cliente || "Cliente"}</button>
+                  <button {...alPasar(r.id)} onClick={() => abrirLead(r.id)} className="text-stone-900 underline decoration-dotted text-left">{r.cliente || "Cliente"}</button>
                   <div className="text-xs text-stone-500">{r.tipoNombre}{r.fuente ? ` · ${r.fuente}` : ""}{r.porAtender ? " · por atender" : ""}</div>
                 </td>
                 <td className="py-2.5 px-3 text-stone-700">

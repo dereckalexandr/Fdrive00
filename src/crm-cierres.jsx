@@ -15,7 +15,7 @@ import { calcularCotizacion, validarCierre, cierreNombre, mesChile, FINANCIERAS 
 import { Aprobaciones, topeTasado } from "./crm-cotizaciones.jsx";
 import { buildContratoCompraventaPdf, buildNotaVentaPdf } from "./pdf-report.js";
 import { PagosVenta, CuentasEmpresa, ReservasPorValidar, DatosEmpresa } from "./crm-pagos.jsx";
-import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, fechaCorta, hace, Aviso, Cargando, Tarjeta, Campo, Modal, useCarga, mensajeError } from "./crm-ui.jsx";
+import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, fechaCorta, hace, Aviso, Cargando, Tarjeta, Campo, Modal, useCarga, mensajeError, alPasar } from "./crm-ui.jsx";
 
 export const folioVenta = (n) => `VTA-${String(n || 0).padStart(6, "0")}`;
 const COLOR_CIERRE = { pendiente: "bg-amber-100 text-amber-800", aprobada: "bg-emerald-100 text-emerald-800", rechazada: "bg-rose-100 text-rose-800", anulada: "bg-stone-200 text-stone-600" };
@@ -230,7 +230,7 @@ function CierresPorAprobar({ api, version, abrirLead, onCambio }) {
           <div key={c.id} className="bg-white border border-amber-300 p-4 text-sm flex flex-col gap-2">
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-mono text-xs text-stone-500">{c.folio}</span>
-              <button onClick={() => abrirLead(c.lead_id)} className="text-stone-900 font-medium underline decoration-dotted">{c.cliente}</button>
+              <button {...alPasar(c.lead_id)} onClick={() => abrirLead(c.lead_id)} className="text-stone-900 font-medium underline decoration-dotted">{c.cliente}</button>
               <span className="text-stone-600">· {snap.marca} {snap.modelo} {snap.anio} ({snap.patente})</span>
               <span className="ml-auto text-xs text-stone-500">Pide {c.ejecutivo || c.solicitado_por} · {hace(c.creado_en)}</span>
             </div>
@@ -434,7 +434,7 @@ export function Ventas({ api, catalogos, abrirLead, version, onCambio }) {
                 <React.Fragment key={c.id}>
                   <tr className="border-b border-stone-100 align-top">
                     <td className="py-2.5 px-4 font-mono text-xs text-stone-500 whitespace-nowrap">{c.folio}<div className="text-[11px] text-stone-400">{fechaCorta(c.aprobado_en || c.creado_en)}</div></td>
-                    <td className="py-2.5 px-4"><button onClick={() => abrirLead(c.lead_id)} className="text-stone-900 underline decoration-dotted text-left">{c.cliente}</button><div className="text-xs text-stone-500">{snap.marca} {snap.modelo} {snap.anio} · {snap.patente}</div></td>
+                    <td className="py-2.5 px-4"><button {...alPasar(c.lead_id)} onClick={() => abrirLead(c.lead_id)} className="text-stone-900 underline decoration-dotted text-left">{c.cliente}</button><div className="text-xs text-stone-500">{snap.marca} {snap.modelo} {snap.anio} · {snap.patente}</div></td>
                     {verEquipo && <td className="py-2.5 px-4 text-stone-700">{c.ejecutivo}</td>}
                     <td className="py-2.5 px-4 text-right font-mono">{clp(c.precio_final)}</td>
                     <td className="py-2.5 px-4 text-right font-mono">{c.margen == null ? "—" : clp(c.margen)}</td>

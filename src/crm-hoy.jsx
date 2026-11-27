@@ -10,7 +10,7 @@ import React, { useState } from "react";
 import { GRUPOS_HOY, TIPOS_TAREA, TIPOS_CONTACTO } from "../supabase/functions/api/ventas-core.js";
 import { etapaNombre } from "../supabase/functions/api/ventas-core.js";
 import { etapaDeOperacion } from "../supabase/functions/api/compras-core.js";
-import { mensajeInvitacion, INPUT, BTN, BTN_AMBAR, BTN_PRIMARIO, Aviso, Cargando, Campo, Modal, useCarga, mensajeError, apiPorDefecto, hace } from "./crm-ui.jsx";
+import { mensajeInvitacion, INPUT, BTN, BTN_AMBAR, BTN_PRIMARIO, Aviso, Cargando, Campo, Modal, useCarga, mensajeError, apiPorDefecto, hace, alPasar } from "./crm-ui.jsx";
 
 const soloDigitos = (s) => String(s || "").replace(/\D/g, "");
 const waNumero = (tel) => { const d = soloDigitos(tel); return d.length === 9 ? `56${d}` : d; };
@@ -143,7 +143,7 @@ function FilaHoy({ l, mostrarAsignado, onAbrir, onContacto, onHecha, onAgendar }
   const tel = l.cliente.telefono;
   return (
     <div className={`bg-white border border-stone-200 border-l-4 ${est.barra} rounded-xl p-3 flex flex-col md:flex-row md:items-center gap-3 hover:shadow-suave`}>
-      <button type="button" onClick={onAbrir} className="text-left min-w-0 md:w-[34%]">
+      <button type="button" {...alPasar(l.id)} onClick={onAbrir} className="text-left min-w-0 md:w-[34%]">
         <p className="font-medium text-stone-900 truncate">{l.cliente.nombre}{l.tipo !== "venta" && <span className="ml-2 text-[10px] uppercase bg-stone-900 text-white px-1.5 py-0.5 align-middle rounded">{l.tipo === "compra" ? "Compra" : "Consignación"}</span>}</p>
         <p className="text-xs text-stone-500 truncate">{l.vehiculo || "Sin vehículo definido"}</p>
         <p className="text-[11px] text-stone-400 truncate">

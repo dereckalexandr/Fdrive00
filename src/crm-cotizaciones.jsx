@@ -13,7 +13,7 @@ import { calcularCotizacion, validarCotizacion, validarReserva, cotizacionNombre
 import { buildCotizacionPdf } from "./pdf-report.js";
 import { medioDe, medioNombre } from "../supabase/functions/api/pagos-core.js";
 import { CamposPago, PagoReserva, subirRespaldos, limpiarRespaldos, metaRespaldos } from "./crm-pagos.jsx";
-import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, hace, Aviso, Cargando, Tarjeta, Campo, Modal, useCarga, mensajeError } from "./crm-ui.jsx";
+import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, hace, Aviso, Cargando, Tarjeta, Campo, Modal, useCarga, mensajeError, alPasar } from "./crm-ui.jsx";
 
 const COLOR_COT = {
   vigente: "bg-emerald-100 text-emerald-800", pendiente: "bg-amber-100 text-amber-800", rechazada: "bg-rose-100 text-rose-800",
@@ -322,7 +322,7 @@ export function Aprobaciones({ api, version, abrirLead, onCambio }) {
           <div key={c.id} className="bg-white border border-amber-300 p-4 text-sm flex flex-col gap-2">
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-mono text-xs text-stone-500">{folio(c.numero)}</span>
-              <button onClick={() => abrirLead(c.lead_id)} className="text-stone-900 font-medium underline decoration-dotted">{c.cliente}</button>
+              <button {...alPasar(c.lead_id)} onClick={() => abrirLead(c.lead_id)} className="text-stone-900 font-medium underline decoration-dotted">{c.cliente}</button>
               <span className="text-stone-600">· {snap.marca} {snap.modelo} {snap.anio} ({snap.patente})</span>
               <span className="ml-auto text-xs text-stone-500">Pide {c.ejecutivo || c.solicitado_por || "—"} · {hace(c.actualizado_en || c.creado_en)}</span>
             </div>

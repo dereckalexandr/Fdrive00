@@ -9,7 +9,7 @@
  */
 import React, { useState } from "react";
 import { mesChile, edadTexto, textoVencimiento, etapaNombre } from "../supabase/functions/api/ventas-core.js";
-import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, useCarga, mensajeError } from "./crm-ui.jsx";
+import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, useCarga, mensajeError, alPasar } from "./crm-ui.jsx";
 
 /* =========================================================
    AVISO AL EJECUTIVO
@@ -62,7 +62,7 @@ export function AvisosDelSupervisor({ api, version, abrirLead }) {
             <p className="text-stone-900">{a.texto}</p>
             <p className="text-xs text-stone-500 mt-1">{a.de_nombre} · {fechaHora(a.creado_en)}{a.cliente ? ` · lead de ${a.cliente}` : ""}</p>
           </div>
-          {a.lead_id && <button onClick={() => abrirLead(a.lead_id)} className={BTN}>Abrir lead</button>}
+          {a.lead_id && <button {...alPasar(a.lead_id)} onClick={() => abrirLead(a.lead_id)} className={BTN}>Abrir lead</button>}
           <button disabled={ocupado === a.id} onClick={() => leer(a.id)} className={BTN_PRIMARIO}>Entendido</button>
         </div>
       ))}
@@ -184,7 +184,7 @@ function Alertas({ api, abrirLead, version, onCambio }) {
             {esLeads && lista.map((l) => (
               <tr key={l.id} className="border-b border-stone-100">
                 <td className="py-2.5 px-3"><input type="checkbox" checked={sel.includes(l.id)} onChange={() => alternar(l.id)} aria-label="Seleccionar" /></td>
-                <td className="py-2.5 px-3"><button onClick={() => abrirLead(l.id)} className="text-stone-900 underline decoration-dotted text-left">{l.cliente}</button><div className="text-xs text-stone-500">{l.fuente || "Sin fuente"}</div></td>
+                <td className="py-2.5 px-3"><button {...alPasar(l.id)} onClick={() => abrirLead(l.id)} className="text-stone-900 underline decoration-dotted text-left">{l.cliente}</button><div className="text-xs text-stone-500">{l.fuente || "Sin fuente"}</div></td>
                 <td className={`py-2.5 px-3 ${l.ejecutivo ? "text-stone-700" : "text-rose-600"}`}>{l.ejecutivo || "Sin asignar"}</td>
                 <td className="py-2.5 px-3 text-stone-700">{etapaNombre(l.etapa)}</td>
                 <td className="py-2.5 px-3 text-stone-600 whitespace-nowrap">{edadTexto(tipo === "detenidos" ? l.ultima_actividad : l.creado_en)}</td>
@@ -196,7 +196,7 @@ function Alertas({ api, abrirLead, version, onCambio }) {
                 <td className="py-2.5 px-3 text-stone-900">{t.titulo}</td><td className="py-2.5 px-3 text-stone-700">{t.cliente}</td>
                 <td className="py-2.5 px-3 text-stone-700">{t.ejecutivo}</td><td className="py-2.5 px-3 text-rose-700 whitespace-nowrap">{fechaHora(t.vence_en)}</td>
                 <td className="py-2.5 px-3 text-right whitespace-nowrap">
-                  <button onClick={() => abrirLead(t.lead_id)} className={BTN}>Abrir lead</button>{" "}
+                  <button {...alPasar(t.lead_id)} onClick={() => abrirLead(t.lead_id)} className={BTN}>Abrir lead</button>{" "}
                   {t.asignado_a && <button onClick={() => setAvisar({ para: t.asignado_a, leadId: t.lead_id, cliente: t.cliente })} className={BTN}>Avisar</button>}
                 </td>
               </tr>
@@ -210,14 +210,14 @@ function Alertas({ api, abrirLead, version, onCambio }) {
             {tipo === "comprasPorAprobar" && lista.map((x) => (
               <tr key={x.id} className="border-b border-stone-100">
                 <td className="py-2.5 px-3 font-mono text-xs text-stone-500">{x.folio}</td><td className="py-2.5 px-3 text-stone-900">{x.vehiculo}</td><td className="py-2.5 px-3 font-mono">{clp(x.monto_final)}</td><td className="py-2.5 px-3 text-stone-700">{x.solicitado_por}</td>
-                <td className="py-2.5 px-3 text-right"><button onClick={() => abrirLead(x.lead_id)} className={BTN}>Abrir lead</button></td>
+                <td className="py-2.5 px-3 text-right"><button {...alPasar(x.lead_id)} onClick={() => abrirLead(x.lead_id)} className={BTN}>Abrir lead</button></td>
               </tr>
             ))}
             {tipo === "consignacionesPorVencer" && lista.map((x) => (
               <tr key={x.id} className="border-b border-stone-100">
                 <td className="py-2.5 px-3 font-mono text-xs text-stone-500">{x.folio}</td><td className="py-2.5 px-3 text-stone-900">{x.vehiculo}</td>
                 <td className={`py-2.5 px-3 ${x.dias < 0 ? "text-rose-700" : "text-amber-700"}`}>{x.dias < 0 ? `Venció hace ${-x.dias} día(s)` : `En ${x.dias} día(s)`} · {String(x.vence_en).slice(0, 10)}</td>
-                <td className="py-2.5 px-3 text-right"><button onClick={() => abrirLead(x.lead_id)} className={BTN}>Abrir lead</button></td>
+                <td className="py-2.5 px-3 text-right"><button {...alPasar(x.lead_id)} onClick={() => abrirLead(x.lead_id)} className={BTN}>Abrir lead</button></td>
               </tr>
             ))}
             {tipo === "campaniasPorAprobar" && lista.map((x) => (
@@ -249,7 +249,7 @@ function Alertas({ api, abrirLead, version, onCambio }) {
               <tr key={r.id} className="border-b border-stone-100">
                 <td className="py-2.5 px-3 text-stone-900">{r.vehiculo}</td><td className="py-2.5 px-3 text-stone-700">{r.cliente}</td><td className="py-2.5 px-3 text-stone-700">{r.ejecutivo}</td>
                 <td className="py-2.5 px-3 whitespace-nowrap"><span className="font-mono">{clp(r.monto)}</span> · <span className="text-sky-700">{textoVencimiento(r.vence_en)}</span></td>
-                <td className="py-2.5 px-3 text-right"><button onClick={() => abrirLead(r.lead_id)} className={BTN}>Abrir lead</button></td>
+                <td className="py-2.5 px-3 text-right"><button {...alPasar(r.lead_id)} onClick={() => abrirLead(r.lead_id)} className={BTN}>Abrir lead</button></td>
               </tr>
             ))}
           </tbody>

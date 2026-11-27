@@ -1,7 +1,8 @@
 /**
  * Piezas de interfaz compartidas por los módulos del CRM (comercial, inventario…).
  */
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { cachePantallas, cacheApi, claveDeCarga, estable, empezarAAprender, lecturasAprendidas } from "./cache-cliente.js";
 import { TRANSMISIONES, COMBUSTIBLES } from "../supabase/functions/api/ventas-core.js";
 import { InputDinero } from "./campo-dinero.jsx";
 import { BANCOS_CHILE, TIPOS_CUENTA } from "../supabase/functions/api/validaciones-core.js";
@@ -385,24 +386,39 @@ export function Modal({ titulo, onCerrar, children, ancho = "max-w-2xl" }) {
 }
 
 /** Carga de datos con estado de espera y error. `recargar()` vuelve a pedirlos. */
+/**
+ * Carga los datos de una pantalla con «stale-while-revalidate» (como Spotify: nunca se espera a la red si ya se conoce la respuesta):
+ *  - Si esta pantalla ya se vio antes (misma consulta y mismos filtros), se dibuja AL INSTANTE con lo último que había (`datos` ya viene
+ *    con valor, así que `if (cargando && !datos)` no muestra «Cargando…») y por detrás se pide lo nuevo. `cargando` queda en true
+ *    mientras se actualiza, para quien quiera mostrar «Actualizando…».
+ *  - Si lo nuevo es idéntico a lo mostrado no se reemplaza (no se pisa un formulario que la persona ya empezó a llenar).
+ *  - `recargar()` (botón Actualizar o tras guardar) siempre va a la red.
+ * Los datos se guardan solo en memoria y se borran al cerrar sesión o al cambiar algo (ver cache-cliente.js).
+ */
 export function useCarga(fn, deps) {
-  const [estado, setEstado] = useState({ cargando: true, error: "", datos: null });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const clave = useMemo(() => claveDeCarga(fn, deps), deps);
+  const [estado, setEstado] = useState(() => { const h = cachePantallas.get(clave); return { cargando: true, error: "", datos: h ? h.valor : null }; });
   const ultima = useRef(0);
   const montado = useRef(true);
   useEffect(() => { montado.current = true; return () => { montado.current = false; }; }, []);
-  const recargar = useCallback(async () => {
+  const cargar = useCallback(async (forzar) => {
     const mia = ++ultima.current;
-    setEstado((e) => ({ ...e, cargando: true, error: "" }));
+    if (forzar) cacheApi.limpiar();
+    const h = forzar ? null : cachePantallas.get(clave);
+    setEstado((e) => ({ cargando: true, error: "", datos: h ? (e.datos && estable(e.datos) === estable(h.valor) ? e.datos : h.valor) : e.datos }));
     try {
       const datos = await fn();
+      cachePantallas.set(clave, datos);
       // Si ya se pidió otra cosa (o la pantalla se cerró), esta respuesta se descarta.
-      if (mia === ultima.current && montado.current) setEstado({ cargando: false, error: "", datos });
+      if (mia === ultima.current && montado.current) setEstado((p) => ({ cargando: false, error: "", datos: p.datos && estable(p.datos) === estable(datos) ? p.datos : datos }));
     } catch (e) {
       if (mia === ultima.current && montado.current) setEstado((p) => ({ cargando: false, error: mensajeError(e), datos: p.datos }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
-  useEffect(() => { recargar(); }, [recargar]);
+  useEffect(() => { cargar(false); }, [cargar]);
+  const recargar = useCallback(() => cargar(true), [cargar]);
   return { ...estado, recargar };
 }
 
@@ -418,11 +434,25 @@ export function useGuardado(clave, inicial, validos) {
 }
 
 /** Pestañas horizontales con el estilo del panel. */
+/** Deja lista (en segundo plano) una lectura del servidor antes de que se pida. No hace nada si no hay sesión o ya está lista. */
+export const precargar = (op, params, accion) => { try { if (window.auth && window.auth.precargar) window.auth.precargar(op, params, accion); } catch (e) { /* precargar nunca molesta */ } };
+/** Precarga el lead al pasar el cursor, enfocar o tocar su botón: cuando se hace clic, ya está listo. Uso: <button {...alPasar(id)} …>. */
+export const alPasar = (leadId) => { const p = () => { if (leadId) precargar("leads.get", { id: leadId }); }; return { onMouseEnter: p, onFocus: p, onTouchStart: p }; };
+/** Pestañas y menús: al abrir una sección anotan qué pide; la próxima vez que se pase el cursor por ella, ya la dejan lista. */
+const aprenderDe = (opciones, valor) => {
+  const ns = opciones.map((o) => o[0]).join(",");
+  return {
+    // Aprender nunca puede impedir una navegación: si algo falla, se ignora.
+    alAbrir: (id) => { try { empezarAAprender(`${ns}:${id}`); } catch (e) { /* sin aprendizaje */ } },
+    alPasar: (id) => { if (id === valor) return; for (const l of lecturasAprendidas(`${ns}:${id}`)) precargar(l.op, l.params, l.accion); },
+  };
+};
 export function Pestanas({ valor, onCambio, opciones }) {
+  const ap = aprenderDe(opciones, valor);
   return (
     <div className="pestanas-scroll flex gap-1 overflow-x-auto whitespace-nowrap p-1 bg-white border border-stone-200 rounded-xl shadow-suave">
       {opciones.map(([id, texto, extra]) => (
-        <button key={id} onClick={() => onCambio(id)} aria-current={valor === id ? "page" : undefined}
+        <button key={id} onClick={() => { ap.alAbrir(id); onCambio(id); }} onMouseEnter={() => ap.alPasar(id)} onFocus={() => ap.alPasar(id)} onTouchStart={() => ap.alPasar(id)} aria-current={valor === id ? "page" : undefined}
           className={`px-3.5 py-2 text-sm rounded-lg shrink-0 ${valor === id ? "bg-stone-900 text-white font-medium shadow-suave" : "text-stone-600 hover:text-stone-900 hover:bg-stone-100"}`}>
           {texto}{extra ? <span className={`ml-1.5 text-xs px-1.5 py-0.5 rounded-full ${valor === id ? "bg-amber-400 text-stone-900" : "bg-amber-100 text-amber-800"}`}>{extra}</span> : null}
         </button>
@@ -433,6 +463,7 @@ export function Pestanas({ valor, onCambio, opciones }) {
 
 /** Menú lateral agrupado (pantallas anchas). `grupos`: [{ titulo, ids }] ordenados; las opciones que no estén en ningún grupo van al final. */
 export function NavegacionLateral({ valor, onCambio, opciones, grupos }) {
+  const ap = aprenderDe(opciones, valor);
   const porId = Object.fromEntries(opciones.map((o) => [o[0], o]));
   const usados = new Set();
   const bloques = grupos.map((g) => ({ titulo: g.titulo, items: g.ids.filter((id) => porId[id]).map((id) => { usados.add(id); return porId[id]; }) })).filter((b) => b.items.length);
@@ -444,7 +475,7 @@ export function NavegacionLateral({ valor, onCambio, opciones, grupos }) {
         <div key={b.titulo}>
           <p className="px-3 pt-1 pb-1 text-[11px] font-semibold uppercase tracking-wider text-stone-400">{b.titulo}</p>
           {b.items.map(([id, texto, extra]) => (
-            <button key={id} onClick={() => onCambio(id)} aria-current={valor === id ? "page" : undefined}
+            <button key={id} onClick={() => { ap.alAbrir(id); onCambio(id); }} onMouseEnter={() => ap.alPasar(id)} onFocus={() => ap.alPasar(id)} onTouchStart={() => ap.alPasar(id)} aria-current={valor === id ? "page" : undefined}
               className={`w-full text-left flex items-center justify-between gap-2 px-3 py-2 text-sm rounded-lg ${valor === id ? "bg-stone-900 text-white font-medium shadow-suave" : "text-stone-600 hover:text-stone-900 hover:bg-stone-100"}`}>
               <span className="truncate">{texto}</span>
               {extra ? <span className={`text-xs px-1.5 py-0.5 rounded-full ${valor === id ? "bg-amber-400 text-stone-900" : "bg-amber-100 text-amber-800"}`}>{extra}</span> : null}

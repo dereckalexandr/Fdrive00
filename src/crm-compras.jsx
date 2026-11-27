@@ -20,7 +20,7 @@ import { topeDeOferta } from "../supabase/functions/api/tasaciones-core.js";
 import { ValidacionDetalle } from "./crm-validaciones.jsx";
 import { buildNotaCompraPdf, buildComprobanteConsignacionPdf, buildContratoConsignacionPdf } from "./pdf-report.js";
 import { PagosCompra } from "./crm-pagos.jsx";
-import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, hace, Aviso, Cargando, Tarjeta, Campo, Pestanas, useCarga, mensajeError, DatosDelDueno, CuentaBancaria } from "./crm-ui.jsx";
+import { INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, hace, Aviso, Cargando, Tarjeta, Campo, Pestanas, useCarga, mensajeError, DatosDelDueno, CuentaBancaria, alPasar } from "./crm-ui.jsx";
 
 const COLOR_COMPRA = { oferta: "bg-amber-100 text-amber-800", aceptada: "bg-sky-100 text-sky-800", pago_pendiente: "bg-violet-100 text-violet-800", comprada: "bg-emerald-100 text-emerald-800", rechazada: "bg-stone-200 text-stone-600", anulada: "bg-stone-200 text-stone-600", cancelada: "bg-stone-200 text-stone-600" };
 const COLOR_CONS = { en_validacion: "bg-amber-100 text-amber-800", vigente: "bg-emerald-100 text-emerald-800", vendida: "bg-sky-100 text-sky-800", devuelta: "bg-stone-200 text-stone-600", cancelada: "bg-stone-200 text-stone-600" };
@@ -498,7 +498,7 @@ function ListaCompras({ api, vista, version, abrirLead, onCambio, puedeAprobar }
                 <td className="py-2.5 px-4 text-stone-900">{nombreVeh(c.vehiculo)}</td><td className="py-2.5 px-4 text-stone-700">{c.cliente}</td><td className="py-2.5 px-4 text-stone-700">{c.ejecutivo}</td>
                 <td className="py-2.5 px-4 text-right font-mono">{clp(c.estado === "comprada" || c.estado === "pago_pendiente" ? c.monto_final : c.monto_oferta)}</td>
                 <td className="py-2.5 px-4"><Etiqueta clases={COLOR_COMPRA[c.estado]} texto={compraNombre(c.estado)} /></td>
-                <td className="py-2.5 px-4 text-right whitespace-nowrap">{puedeAprobar && c.estado === "pago_pendiente" && <button onClick={() => aprobar(c)} className={BTN_AMBAR}>Aprobar</button>}{" "}<button onClick={() => abrirLead(c.lead_id)} className={BTN}>Abrir lead</button></td>
+                <td className="py-2.5 px-4 text-right whitespace-nowrap">{puedeAprobar && c.estado === "pago_pendiente" && <button onClick={() => aprobar(c)} className={BTN_AMBAR}>Aprobar</button>}{" "}<button {...alPasar(c.lead_id)} onClick={() => abrirLead(c.lead_id)} className={BTN}>Abrir lead</button></td>
               </tr>
             ))}
           </tbody>
@@ -530,7 +530,7 @@ function ListaConsignaciones({ api, vista, version, abrirLead }) {
                 <td className="py-2.5 px-4 text-right font-mono text-xs">{clp(c.precio_piso)}<div className="text-stone-500">{clp(c.precio_publicacion)}</div></td>
                 <td className={`py-2.5 px-4 text-xs ${c.vencida ? "text-rose-700" : c.diasRestantes !== null && c.diasRestantes <= 7 ? "text-amber-700" : "text-stone-600"}`}>{c.estado === "vigente" ? (c.vencida ? `Venció hace ${-c.diasRestantes} d` : `${c.diasRestantes} d`) : "—"}</td>
                 <td className="py-2.5 px-4"><Etiqueta clases={COLOR_CONS[c.estado]} texto={consignacionNombre(c.estado)} /></td>
-                <td className="py-2.5 px-4 text-right"><button onClick={() => abrirLead(c.lead_id)} className={BTN}>Abrir lead</button></td>
+                <td className="py-2.5 px-4 text-right"><button {...alPasar(c.lead_id)} onClick={() => abrirLead(c.lead_id)} className={BTN}>Abrir lead</button></td>
               </tr>
             ))}
           </tbody>

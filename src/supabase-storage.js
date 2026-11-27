@@ -12,6 +12,8 @@
  * recargar la página hay que volver a ingresar.
  * ----------------------------------------------------------------
  */
+import { conCache, limpiarTodo, anotarLectura, olvidarAprendido, esLecturaCacheable, estaLista } from "./cache-cliente.js";
+
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
@@ -27,6 +29,7 @@ const CLAVE_SESION = "df-sesion";
 const guardarSesion = (datos) => { try { sessionStorage.setItem(CLAVE_SESION, JSON.stringify(datos)); } catch (e) { /* modo privado o sin almacenamiento: se pide ingresar de nuevo al recargar */ } };
 const leerSesion = () => { try { return JSON.parse(sessionStorage.getItem(CLAVE_SESION) || "null"); } catch (e) { return null; } };
 export function olvidarSesion() {
+  limpiarTodo(); olvidarAprendido();
   try { sessionStorage.removeItem(CLAVE_SESION); sessionStorage.removeItem("df-pantalla"); Object.keys(sessionStorage).filter((k) => k.startsWith("df-tab-")).forEach((k) => sessionStorage.removeItem(k)); } catch (e) { /* nada que borrar */ }
 }
 
@@ -115,6 +118,33 @@ const supabaseStorage = {
   },
 };
 
+// Llamadas reales al servidor (sin caché). Las del objeto de abajo pasan primero por la caché del navegador (cache-cliente.js).
+const crmDirecto = async (op, params = {}) => {
+    try {
+      return await call({ action: "crm", token: sessionToken, op, ...params });
+    } catch (e) {
+      if (e.status === 401) { olvidarSesion(); window.dispatchEvent(new Event("df-session-expired")); }
+      throw e;
+    }
+};
+const ventasDirecto = async (op, params = {}) => {
+    try {
+      // Las consultas de solo lectura se reintentan si la conexión se corta (por ejemplo, cuando la función se está reiniciando).
+      const esLectura = /(^|\.)(list|get|cola|resumen|equipo|pendientes|mios|catalogos|mias)$/.test(op);
+      for (let intento = 0; ; intento++) {
+        try { return await call({ action: "ventas", token: sessionToken, op, ...params }); }
+        catch (e) {
+          const sinRespuesta = e && !e.status && /failed to fetch|load failed|networkerror|timeout/i.test(String(e.message));
+          if (!(esLectura && sinRespuesta && intento < 2)) throw e;
+          await new Promise((r) => setTimeout(r, 700 * (intento + 1)));
+        }
+      }
+    } catch (e) {
+      if (e.status === 401) { olvidarSesion(); window.dispatchEvent(new Event("df-session-expired")); }
+      throw e;
+    }
+};
+
 // Operaciones de autenticación. Las que fallan lanzan Error con `message`
 // = código del servidor (invalid_credentials, invalid_code, too_many_attempts…).
 const supabaseAuth = {
@@ -123,6 +153,7 @@ const supabaseAuth = {
   },
   async adminLogin(email, password) {
     const { token } = await call({ action: "adminLogin", email, password });
+    limpiarTodo(); olvidarAprendido();
     sessionToken = token;
     guardarSesion({ tipo: "admin", token });
   },
@@ -139,6 +170,7 @@ const supabaseAuth = {
   // No se guarda la clave para reingresar en silencio: si la sesión vence, se avisa.
   async userLogin(rut, password) {
     const { token, me } = await call({ action: "userLogin", rut, password });
+    limpiarTodo(); olvidarAprendido();
     sessionToken = token;
     guardarSesion({ tipo: "user", token });
     return me;
@@ -171,32 +203,14 @@ const supabaseAuth = {
     return (await call({ action: "userChangePassword", token: sessionToken, actual, nueva })).me;
   },
   // Operaciones del panel de administración del CRM (solo cuenta maestra).
-  async crm(op, params = {}) {
-    try {
-      return await call({ action: "crm", token: sessionToken, op, ...params });
-    } catch (e) {
-      if (e.status === 401) { olvidarSesion(); window.dispatchEvent(new Event("df-session-expired")); }
-      throw e;
-    }
+  // Lecturas: se guardan unos segundos y se comparten. Cambios: se ejecutan siempre y vacían la caché.
+  async crm(op, params = {}) { return conCache("crm", op, params, () => crmDirecto(op, params), { registrar: anotarLectura }); },
+  // Precarga: deja lista una lectura antes de que la pantalla la pida (por ejemplo, al pasar el cursor por un lead). Nunca falla ni molesta.
+  precargar(op, params = {}, accion = "ventas") {
+    if (!esLecturaCacheable(op) || estaLista(accion, op, params) || !sessionToken) return;
+    Promise.resolve().then(() => supabaseAuth[accion](op, params)).catch(() => {});
   },
-  // Módulo comercial (inventario, clientes, leads, tareas). Cuenta maestra o persona del CRM.
-  async ventas(op, params = {}) {
-    try {
-      // Las consultas de solo lectura se reintentan si la conexión se corta (por ejemplo, cuando la función se está reiniciando).
-      const esLectura = /(^|\.)(list|get|cola|resumen|equipo|pendientes|mios|catalogos|mias)$/.test(op);
-      for (let intento = 0; ; intento++) {
-        try { return await call({ action: "ventas", token: sessionToken, op, ...params }); }
-        catch (e) {
-          const sinRespuesta = e && !e.status && /failed to fetch|load failed|networkerror|timeout/i.test(String(e.message));
-          if (!(esLectura && sinRespuesta && intento < 2)) throw e;
-          await new Promise((r) => setTimeout(r, 700 * (intento + 1)));
-        }
-      }
-    } catch (e) {
-      if (e.status === 401) { olvidarSesion(); window.dispatchEvent(new Event("df-session-expired")); }
-      throw e;
-    }
-  },
+  async ventas(op, params = {}) { return conCache("ventas", op, params, () => ventasDirecto(op, params), { registrar: anotarLectura }); },
   logout() { sessionToken = null; olvidarSesion(); },
 };
 

@@ -34,8 +34,7 @@ import { ModuloProspeccion } from "./crm-prospeccion.jsx";
 import { ModuloFinanzas } from "./crm-finanzas.jsx";
 import { etapaDeOperacion, etapasDeTipo, ayudaDeEtapa, tipoLeadNombre, TIPOS_LEAD, validarVehiculoOfrecido } from "../supabase/functions/api/compras-core.js";
 import {
-  INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, mensajeInvitacion, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, NavegacionLateral, useGuardado, DatosDelDueno, CamposCondiciones, useCarga, mensajeError, CamposVehiculo, aVehiculoForm,
-} from "./crm-ui.jsx";
+  INPUT, BTN, BTN_PRIMARIO, BTN_AMBAR, clp, fechaHora, mensajeInvitacion, hace, Aviso, Cargando, Tarjeta, Campo, Modal, Pestanas, NavegacionLateral, useGuardado, DatosDelDueno, CamposCondiciones, useCarga, mensajeError, CamposVehiculo, aVehiculoForm, alPasar } from "./crm-ui.jsx";
 
 const COLOR_ETAPA = {
   nuevo: "border-t-sky-500", contactado: "border-t-amber-500", seguimiento: "border-t-violet-500", tasacion: "border-t-indigo-500", contrato: "border-t-fuchsia-500",
@@ -60,9 +59,13 @@ function TareaFila({ api, t, puedeEditar, accion, clienteConCorreo = true, subti
   const [cuando, setCuando] = useState(() => aInputFecha(new Date(t.vence_en)));
   const [motivo, setMotivo] = useState("");
   const [aviso, setAviso] = useState(null);
+  // Cambio optimista: al marcar la tarea, el visto aparece al instante; la confirmación del servidor llega después (si falla, vuelve atrás).
+  const [hechaLocal, setHechaLocal] = useState(null);
+  const hecha = hechaLocal === null ? !!t.hecha : hechaLocal;
+  const marcar = async (v) => { setHechaLocal(v); try { await accion(() => api("tareas.hecha", { id: t.id, hecha: v })); } finally { setHechaLocal(null); } };
   const abierta = !t.hecha && !t.cancelada;
   const esVisita = t.tipo === "visita";
-  const color = t.cancelada || t.hecha ? "text-stone-400" : claseTarea(t.vence_en) === "vencida" ? "text-rose-700" : "text-stone-800";
+  const color = t.cancelada || hecha ? "text-stone-400" : claseTarea(t.vence_en) === "vencida" ? "text-rose-700" : "text-stone-800";
   const ejecutar = (op, extra, modoInv) => accion(async () => {
     setAviso(null);
     const r = await api(op, { id: t.id, ...extra });
@@ -75,13 +78,13 @@ function TareaFila({ api, t, puedeEditar, accion, clienteConCorreo = true, subti
   return (
     <li className="flex flex-col gap-1.5 py-1">
       <div className={`flex flex-wrap items-center gap-x-3 gap-y-1 text-sm ${color}`}>
-        <input type="checkbox" checked={!!t.hecha && !t.cancelada} disabled={!!t.cancelada || !puedeEditar} onChange={(e) => accion(() => api("tareas.hecha", { id: t.id, hecha: e.target.checked }))} aria-label="Marcar como hecha" />
+        <input type="checkbox" checked={hecha && !t.cancelada} disabled={!!t.cancelada || !puedeEditar} onChange={(e) => marcar(e.target.checked)} aria-label="Marcar como hecha" />
         {onAbrir ? (
           <button type="button" onClick={onAbrir} className="flex-1 min-w-[8rem] text-left">
             <span className="block">{t.titulo}</span>
             {subtitulo && <span className="block text-xs text-stone-500">{subtitulo}</span>}
           </button>
-        ) : <span className={`flex-1 min-w-[8rem] ${t.hecha || t.cancelada ? "line-through" : ""}`}>{t.titulo}</span>}
+        ) : <span className={`flex-1 min-w-[8rem] ${hecha || t.cancelada ? "line-through" : ""}`}>{t.titulo}</span>}
         {t.cancelada && <span className="text-[11px] px-1.5 py-0.5 bg-stone-200 text-stone-600 no-underline" title={t.motivo_cancelacion || ""}>Cancelada</span>}
         {t.reprogramada_en && abierta && <span className="text-[11px] text-sky-700">Reprogramada</span>}
         <span className="text-xs whitespace-nowrap">{fechaHora(t.vence_en)}</span>
@@ -860,7 +863,7 @@ function Inicio({ api, catalogos, abrirLead, irA, version, onCambio }) {
         <Tarjeta titulo="Reservas activas" ayuda="Cuando una reserva vence, el vehículo vuelve solo a estar disponible.">
           <ul className="flex flex-col divide-y divide-stone-100">
             {r.reservas.map((x) => (
-              <li key={x.id}><button onClick={() => abrirLead(x.lead_id)} className="w-full text-left py-2 text-sm hover:bg-amber-50 px-1 flex flex-wrap gap-x-3">
+              <li key={x.id}><button {...alPasar(x.lead_id)} onClick={() => abrirLead(x.lead_id)} className="w-full text-left py-2 text-sm hover:bg-amber-50 px-1 flex flex-wrap gap-x-3">
                 <span className="text-stone-900">{x.cliente}</span><span className="text-stone-600">{x.vehiculo}</span>
                 <span className="font-mono text-stone-700">{clp(x.monto)}</span><span className={Date.parse(x.vence_en) - Date.now() < 86400000 ? "text-rose-700" : "text-stone-500"}>{textoVencimiento(x.vence_en)}</span>
               </button></li>
@@ -874,7 +877,7 @@ function Inicio({ api, catalogos, abrirLead, irA, version, onCambio }) {
           {porAtender.length === 0 ? <p className="text-sm text-stone-500">No tienes leads nuevos pendientes. 👌</p> : (
             <ul className="flex flex-col divide-y divide-stone-100">
               {porAtender.slice(0, 6).map((x) => (
-                <li key={x.id}><button onClick={() => abrirLead(x.id)} className="w-full text-left py-2 text-sm hover:bg-amber-50 px-1">
+                <li key={x.id}><button {...alPasar(x.id)} onClick={() => abrirLead(x.id)} className="w-full text-left py-2 text-sm hover:bg-amber-50 px-1">
                   <span className="text-stone-900">{cliente(x.cliente_id)}</span><span className="text-xs text-stone-500"> · {x.fuente || "—"} · {hace(x.creado_en)}</span>
                 </button></li>
               ))}
