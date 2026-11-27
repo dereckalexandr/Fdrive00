@@ -829,7 +829,6 @@ export function BandejaWhatsapp({ api, abrirLead, locales, onCambio = () => {} }
   const [q, setQ] = useState("");
   const [soloNoLeidos, setSoloNoLeidos] = useState(false);
   const [etiqueta, setEtiqueta] = useState("");
-  const [vista, setVista] = useState("conversaciones"); // conversaciones | plantillas
   const alCambiar = useCallback(() => { recargar(); onCambio(); }, [recargar, onCambio]);
 
   const lista = useMemo(() => {
@@ -848,17 +847,6 @@ export function BandejaWhatsapp({ api, abrirLead, locales, onCambio = () => {} }
 
   return (
     <div className="flex flex-col gap-4">
-      <ConfigWhatsapp api={api} locales={locales} />
-      <ConfigAsistente api={api} />
-      <ConfigBienvenida api={api} />
-      {(datos.puedePlantillas || datos.puedeRespuestas) && (
-        <div className="flex border border-stone-300 self-start">
-          <button type="button" onClick={() => setVista("conversaciones")} className={`px-3 py-1.5 text-sm ${vista === "conversaciones" ? "bg-stone-900 text-white" : "bg-white text-stone-700"}`}>Conversaciones</button>
-          {datos.puedeRespuestas && <button type="button" onClick={() => setVista("respuestas")} className={`px-3 py-1.5 text-sm ${vista === "respuestas" ? "bg-stone-900 text-white" : "bg-white text-stone-700"}`}>Respuestas rápidas</button>}
-          {datos.puedePlantillas && <button type="button" onClick={() => setVista("plantillas")} className={`px-3 py-1.5 text-sm ${vista === "plantillas" ? "bg-stone-900 text-white" : "bg-white text-stone-700"}`}>Plantillas</button>}
-        </div>
-      )}
-      {vista === "respuestas" && datos.puedeRespuestas ? <AdminRespuestas api={api} /> : vista === "plantillas" && datos.puedePlantillas ? <AdminPlantillas api={api} /> : <>
       {!datos.configurado && <Aviso tipo="info">WhatsApp aún no está conectado: cuando el Administrador cargue las credenciales de Meta, aquí aparecerán las conversaciones.</Aviso>}
       <div className="grid grid-cols-1 lg:grid-cols-[20rem_minmax(0,1fr)] gap-4 items-start">
         <div className={`bg-white border border-stone-200 flex flex-col ${actual ? "hidden lg:flex" : ""}`}>
@@ -903,7 +891,31 @@ export function BandejaWhatsapp({ api, abrirLead, locales, onCambio = () => {} }
           ) : <div className="bg-white border border-stone-200 p-8 text-center text-sm text-stone-500">Elige una conversación.</div>}
         </div>
       </div>
-      </>}
+    </div>
+  );
+}
+
+/** Todo lo que se configura de WhatsApp, fuera de la bandeja: conexión, asistente, bienvenida, respuestas rápidas y plantillas. */
+export function AjustesWhatsapp({ api, locales }) {
+  const { cargando, error, datos } = useCarga(() => api("wa.list", {}), [api]);
+  const [vista, setVista] = useState("general"); // general | respuestas | plantillas
+  if (cargando && !datos) return <Cargando />;
+  if (error && !datos) return <Aviso>{error}</Aviso>;
+  const secciones = [["general", "Conexión y asistente"], datos.puedeRespuestas && ["respuestas", "Respuestas rápidas"], datos.puedePlantillas && ["plantillas", "Plantillas"]].filter(Boolean);
+  return (
+    <div className="flex flex-col gap-4">
+      {secciones.length > 1 && (
+        <div className="flex border border-stone-300 self-start">
+          {secciones.map(([id, t]) => <button key={id} type="button" onClick={() => setVista(id)} className={`px-3 py-1.5 text-sm ${vista === id ? "bg-stone-900 text-white" : "bg-white text-stone-700"}`}>{t}</button>)}
+        </div>
+      )}
+      {vista === "respuestas" && datos.puedeRespuestas ? <AdminRespuestas api={api} />
+        : vista === "plantillas" && datos.puedePlantillas ? <AdminPlantillas api={api} />
+        : <>
+          <ConfigWhatsapp api={api} locales={locales} />
+          <ConfigAsistente api={api} />
+          <ConfigBienvenida api={api} />
+        </>}
     </div>
   );
 }

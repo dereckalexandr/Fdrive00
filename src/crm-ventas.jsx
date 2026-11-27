@@ -29,7 +29,7 @@ import { Hoy, ProximaAccionModal, RegistrarContactoModal, cuando as cuandoTexto 
 import { Miniatura as MiniaturaVehiculo } from "./crm-inventario.jsx";
 import { ListaLeads } from "./crm-leads-lista.jsx";
 import { SeccionCompra, SeccionConsignacion, ModuloCompras } from "./crm-compras.jsx";
-import { BandejaWhatsapp, SeccionWhatsapp, useCadaTanto } from "./crm-whatsapp.jsx";
+import { BandejaWhatsapp, AjustesWhatsapp, SeccionWhatsapp, useCadaTanto } from "./crm-whatsapp.jsx";
 import { ModuloProspeccion } from "./crm-prospeccion.jsx";
 import { ModuloFinanzas } from "./crm-finanzas.jsx";
 import { etapaDeOperacion, etapasDeTipo, ayudaDeEtapa, tipoLeadNombre, TIPOS_LEAD, validarVehiculoOfrecido } from "../supabase/functions/api/compras-core.js";
@@ -919,7 +919,7 @@ export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador, 
   const can = (p) => esAdmin || permisos.includes(p);
   const usaLeads = can("leads.propios") || can("leads.local") || can("leads.asignar");
   const [localSel, setLocalSel] = useState("");
-  const [tab, setTab] = useGuardado(esAdmin ? "ventas-admin" : "ventas", usaLeads ? "hoy" : "inventario", ["hoy", "inicio", "leads", "whatsapp", "agenda", "ventas", "gestion", "tasaciones", "aprobaciones", "compras", "prospeccion", "inspecciones", "fichas", "equipo", "validaciones", "anuncios", "marketing", "finanzas", "inventario", "clientes"]);
+  const [tab, setTab] = useGuardado(esAdmin ? "ventas-admin" : "ventas", usaLeads ? "hoy" : "inventario", ["hoy", "inicio", "leads", "whatsapp", "wa-ajustes", "agenda", "ventas", "gestion", "tasaciones", "aprobaciones", "compras", "prospeccion", "inspecciones", "fichas", "equipo", "validaciones", "anuncios", "marketing", "finanzas", "inventario", "clientes"]);
   const [version, setVersion] = useState(0);
   const [leadAbierto, setLeadAbierto] = useState(null);
   const [leadEditando, setLeadEditando] = useState(null);
@@ -961,7 +961,7 @@ export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador, 
   if (puedeAprobar && renderFichas) opciones.push(["fichas", "Fichas de inspectores"]);
   if (puedeAprobar) opciones.push(["equipo", "Equipo"]);
   if (puedeAprobar) opciones.push(["validaciones", "Validaciones"], ["anuncios", "Avisos"], ["marketing", "Marketing"]);
-  if (puedeAprobar) opciones.push(["finanzas", "Finanzas"]);
+  if (puedeAprobar) opciones.push(["finanzas", "Finanzas"], ["wa-ajustes", "Ajustes de WhatsApp"]);
   opciones.push(["inventario", "Inventario"]);
   if (usaLeads) opciones.push(["clientes", "Clientes"]);
 
@@ -971,7 +971,7 @@ export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador, 
     { titulo: "Trabajo diario", ids: ["hoy", "inicio", "leads", "whatsapp", "agenda", "clientes", "inventario"] },
     { titulo: "Comercial", ids: ["ventas", "gestion", "aprobaciones", "compras", "prospeccion", "tasaciones", "inspecciones", "fichas", "equipo"] },
     { titulo: "Operación", ids: ["validaciones", "anuncios", "marketing"] },
-    { titulo: "Administración", ids: ["finanzas"] },
+    { titulo: "Administración", ids: ["finanzas", "wa-ajustes"] },
   ];
 
   return (
@@ -991,6 +991,7 @@ export function ModuloVentas({ permisos = [], esAdmin = false, renderEstimador, 
         </button>
       )}
       {tabVigente === "whatsapp" && <BandejaWhatsapp api={api} abrirLead={setLeadAbierto} locales={locales} onCambio={waNoLeidos.recargar} />}
+      {tabVigente === "wa-ajustes" && <AjustesWhatsapp api={api} locales={locales} />}
       {tabVigente === "hoy" && <Hoy api={api} catalogos={catalogos} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
       {tabVigente === "inicio" && <Inicio api={api} catalogos={catalogos} abrirLead={setLeadAbierto} irA={setTab} version={version} onCambio={subir} />}
       {tabVigente === "leads" && <Leads api={api} catalogos={catalogos} abrirLead={setLeadAbierto} version={version} onCambio={subir} />}
