@@ -1496,22 +1496,26 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       const [y, m] = mes.split("-").map(Number);
       const desde = new Date(Date.UTC(y, m - 1, 1) - 86_400_000).toISOString();
       const hasta = new Date(Date.UTC(y, m, 1) + 86_400_000).toISOString();
-      const lr = await scoped(sb.from("leads").select("*").gte("creado_en", desde).lt("creado_en", hasta));
+      // Ronda 1: todo lo que no depende de los leads del mes, a la vez. Ronda 2: lo que sí depende de ellos, también a la vez.
+      const [lr, cq, conCampania, pq] = await Promise.all([
+        scoped(sb.from("leads").select("*").gte("creado_en", desde).lt("creado_en", hasta)),
+        scoped(sb.from("campanias").select("*")),
+        leadsConCampania(),
+        scoped(sb.from("publicaciones_rrss").select("*")),
+      ]);
       if (lr.error) return fallar(lr.error);
+      if (cq.error) return fallar(cq.error);
       const cohorte: any[] = (lr.data ?? []).filter((l: any) => mesChile(l.creado_en) === mes);
       const ids = cohorte.map((l) => l.id);
-      const cot = (await enLotes("cotizaciones", "lead_id", ids)).filter((c: any) => c.estado !== "anulada");
-      const res = await enLotes("reservas", "lead_id", ids);
-      const cie = (await enLotes("cierres", "lead_id", ids)).filter((c: any) => c.estado === "aprobada");
+      const [cotAll, res, cieAll] = await Promise.all([enLotes("cotizaciones", "lead_id", ids), enLotes("reservas", "lead_id", ids), enLotes("cierres", "lead_id", ids)]);
+      const cot = cotAll.filter((c: any) => c.estado !== "anulada");
+      const cie = cieAll.filter((c: any) => c.estado === "aprobada");
       const conjuntos = { cotizados: new Set<string>(cot.map((c: any) => c.lead_id)), reservados: new Set<string>(res.map((r: any) => r.lead_id)), vendidos: new Set<string>(cie.map((c: any) => c.lead_id)) };
       const ventasMap = new Map<string, { monto: number; margen: number | null }>(cie.map((c: any) => [c.lead_id, { monto: Number(c.precio_final), margen: null }]));
       const fuentes = rendimientoPorFuente(cohorte, conjuntos, ventasMap).map(({ margen, margenCompleto, ...f }: any) => f);
 
-      const cq = await scoped(sb.from("campanias").select("*"));
-      if (cq.error) return fallar(cq.error);
-      const camps = conMetricas((cq.data ?? []).filter((c: any) => c.estado === "aprobada" || c.estado === "finalizada"), await leadsConCampania())
+      const camps = conMetricas((cq.data ?? []).filter((c: any) => c.estado === "aprobada" || c.estado === "finalizada"), conCampania)
         .sort((a: any, b: any) => b.metricas.leads - a.metricas.leads || b.gasto - a.gasto);
-      const pq = await scoped(sb.from("publicaciones_rrss").select("*"));
       const pubs: any[] = pq.error ? [] : (pq.data ?? []).filter((p: any) => p.fecha_programada && mesChile(p.fecha_programada) === mes);
       return json({
         mes, nombreMes: nombreMes(mes), fuentes, campanias: camps.slice(0, 50),
@@ -1581,8 +1585,9 @@ export async function ventasOp(ctx: Ctx, body: any): Promise<Response> {
       await Promise.all(Array.from(new Set(libres.map((v) => v.local_id))).map(async (lid) => { exigeLocal[lid] = await hayValidadores(lid); }));
       let vals: any[] = [];
       if (libres.some((v) => exigeLocal[v.local_id])) {
-        const r = await sb.from("validaciones").select("id").limit(1);
-        if (!r.error) vals = (await enLotes("validaciones", "vehiculo_id", libres.map((v) => v.id))).filter((x: any) => x.tipo === "vehiculo" && x.estado !== "cancelada");
+        // Sin una consulta previa de prueba (era una ronda de más): si la tabla de validaciones aún no existe, queda sin validaciones.
+        try { vals = (await enLotes("validaciones", "vehiculo_id", libres.map((v) => v.id))).filter((x: any) => x.tipo === "vehiculo" && x.estado !== "cancelada"); }
+        catch (e) { console.error("anuncios.cola: validaciones no disponibles:", String((e as any)?.message ?? e)); }
       }
       const filas = [];
       let creadas = 0;

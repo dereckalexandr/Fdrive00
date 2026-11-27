@@ -108,7 +108,7 @@ export function crearBaseFalsa() {
     };
     const coincide = (f) => st.filtros.every(([c, v]) => (typeof v === "function" ? v(f[c]) : f[c] === v));
     function ejecutar() {
-      consultas.push({ tabla: nombre, op: st.op });
+      consultas.push({ tabla: nombre, op: st.op, t: performance.now() });
       if (st.uriLarga) return { data: null, error: { message: "414 Request-URI Too Large: el filtro es demasiado largo" } };
       const T = tablas[nombre];
       if (!T) return { data: null, error: { code: "42P01", message: `relation "${nombre}" does not exist` } };

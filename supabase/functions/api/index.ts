@@ -241,11 +241,14 @@ const dropLiveCache = () => { liveUsers.clear(); rolesCache = null; };
 async function liveUser(id: string) {
   const hit = liveUsers.get(id);
   if (hit && Date.now() - hit.at < LIVE_CACHE_MS) return hit.value;
-  const { data, error } = await sb.from("usuarios").select("activo, roles, permisos_extra, nombre, local_id").eq("id", id).maybeSingle();
+  // La persona y los permisos de rol se piden a la vez (antes eran dos viajes seguidos a la base en cada petición).
+  const [{ data, error }, overrides] = await Promise.all([
+    sb.from("usuarios").select("activo, roles, permisos_extra, nombre, local_id").eq("id", id).maybeSingle(),
+    rolePermOverrides(),
+  ]);
   if (error) throw error;
   let value: VivoUsuario | null = null;
   if (data && data.activo) {
-    const overrides = await rolePermOverrides();
     value = { activo: true, roles: data.roles ?? [], permisos: permisosEfectivos(data.roles ?? [], overrides, data.permisos_extra), nombre: data.nombre, localId: data.local_id ?? null };
   }
   liveUsers.set(id, { at: Date.now(), value });

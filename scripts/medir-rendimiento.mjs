@@ -43,7 +43,7 @@ const casos = [
   ["val", "validacion.list", { vista: "cola" }], ["jefe", "inspecciones.resumen"], ["jefe", "validacion.resumen"],
 ];
 const lead = (await ve("e1", "leads.list", {})).leads[0];
-console.log("operación".padEnd(40), "consultas", "ms (35 ms por consulta)");
+console.log("operación".padEnd(40), "consultas", "rondas", "ms (35 ms por consulta)");
 const filas = [];
 for (const [u, op, extra] of casos) {
   const e2 = op === "leads.get" ? { id: lead.id } : extra || {};
@@ -55,9 +55,12 @@ for (const [u, op, extra] of casos) {
   const n = db.consultas.length;
   const porTabla = {};
   for (const c of db.consultas) porTabla[c.tabla] = (porTabla[c.tabla] || 0) + 1;
-  filas.push({ op: `${u}:${op}`, n, ms, status: r.status, tablas: Object.entries(porTabla).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([t, c]) => `${t}×${c}`).join(" ") });
+  // Rondas: consultas que arrancan casi a la vez (en paralelo) cuentan como una sola; cada espera por la anterior suma una ronda.
+  const ts = db.consultas.map((c) => c.t).sort((a, b) => a - b); let rondas = 0, ult = -1e9;
+  for (const t of ts) { if (t - ult >= 25) { rondas++; ult = t; } }
+  filas.push({ op: `${u}:${op}`, n, rondas, ms, status: r.status, tablas: Object.entries(porTabla).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([t, c]) => `${t}×${c}`).join(" ") });
 }
-for (const f of filas.sort((a, b) => b.n - a.n)) console.log(f.op.padEnd(40), String(f.n).padStart(6), String(f.ms).padStart(6), f.status === 200 ? "" : `[${f.status}]`, f.tablas);
+for (const f of filas.sort((a, b) => b.rondas - a.rondas || b.n - a.n)) console.log(f.op.padEnd(40), String(f.n).padStart(6), String(f.rondas).padStart(6), String(f.ms).padStart(6), f.status === 200 ? "" : `[${f.status}]`, f.tablas);
 // Escenario "entrar al módulo de Ventas": lo que dispara la pantalla de inicio de un jefe
 db.consultas.length = 0;
 const t1 = performance.now();
