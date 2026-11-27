@@ -10,7 +10,7 @@ import React, { useState, useEffect, useMemo, useCallback, lazy, Suspense } from
 // La gráfica pesa mucho: se carga recién cuando se abre el resumen.
 const GraficoActividad = lazy(() => import("./charts.jsx").then((m) => ({ default: m.GraficoActividad })));
 import { ModuloVentas } from "./crm-ventas.jsx";
-import { Modal } from "./crm-ui.jsx";
+import { Modal, useCarga as useCargaBase } from "./crm-ui.jsx";
 import { TramosEditor } from "./crm-tramos.jsx";
 import { tramosAUi, uiAComision, errorDeTramos } from "../supabase/functions/api/comisiones-core.js";
 import {
@@ -65,17 +65,8 @@ const Tarjeta = ({ titulo, ayuda, children }) => (
   </div>
 );
 
-function useCarga(fn, deps) {
-  const [estado, setEstado] = useState({ cargando: true, error: "", datos: null });
-  const recargar = useCallback(async () => {
-    setEstado((e) => ({ ...e, cargando: true, error: "" }));
-    try { setEstado({ cargando: false, error: "", datos: await fn() }); }
-    catch (e) { setEstado({ cargando: false, error: mensajeCrm(e), datos: null }); }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps);
-  useEffect(() => { recargar(); }, [recargar]);
-  return { ...estado, recargar };
-}
+// Misma carga con caché que el resto del CRM (se dibuja al instante lo ya visto y se actualiza por detrás), con los mensajes de error del panel.
+const useCarga = (fn, deps) => useCargaBase(fn, deps, { mensaje: mensajeCrm });
 
 /* =========================================================
    USUARIOS

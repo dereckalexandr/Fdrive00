@@ -532,22 +532,25 @@ async function crmOp(s: Session, body: any): Promise<Response> {
     const ping = await sb.from("config_negocio").select("clave").limit(1);
     const dbMs = Date.now() - t0;
     if (ping.error && !isMissingTable(ping.error)) return dbFail(ping.error);
-    const conteos: Record<string, number | null> = {};
-    for (const t of ["usuarios", "locales", "clientes", "leads", "vehiculos", "cierres", "kv_store"]) {
-      const r = await sb.from(t).select("*", { count: "exact", head: true });
-      conteos[t] = r.error ? null : (r.count ?? 0);
-    }
-    const resp = await sb.from("bitacora").select("creado_en, detalle").eq("accion", "respaldo.realizado").order("creado_en", { ascending: false }).limit(1);
     const hace7 = new Date(Date.now() - 7 * 86_400_000).toISOString();
-    const fall = await sb.from("bitacora").select("creado_en, detalle").eq("accion", "aviso.fallido").gte("creado_en", hace7).order("creado_en", { ascending: false }).limit(50);
-    const omit = await sb.from("bitacora").select("id").eq("accion", "aviso.omitido").gte("creado_en", hace7);
+    const dia = new Date().toLocaleDateString("en-CA", { timeZone: "America/Santiago" });
+    const TABLAS = ["usuarios", "locales", "clientes", "leads", "vehiculos", "cierres", "kv_store"];
+    // Todo lo demás se pide a la vez (antes eran ~16 consultas una tras otra: la pantalla de Estado tardaba varios segundos).
+    const [cuentas, resp, fall, omit, usoWeb, guardadas, usoHoy] = await Promise.all([
+      Promise.all(TABLAS.map((t) => sb.from(t).select("*", { count: "exact", head: true }))),
+      sb.from("bitacora").select("creado_en, detalle").eq("accion", "respaldo.realizado").order("creado_en", { ascending: false }).limit(1),
+      sb.from("bitacora").select("creado_en, detalle").eq("accion", "aviso.fallido").gte("creado_en", hace7).order("creado_en", { ascending: false }).limit(50),
+      sb.from("bitacora").select("id").eq("accion", "aviso.omitido").gte("creado_en", hace7),
+      dbGet(`patente_uso_web::${dia}`).catch(() => null),
+      Promise.resolve(sb.from("patentes_consultadas").select("patente", { count: "exact", head: true })).catch(() => ({ error: true, count: null })),
+      dbGet(`patente_uso::${dia}`).catch(() => null),
+    ]);
+    const conteos: Record<string, number | null> = {};
+    TABLAS.forEach((t, i) => { const r: any = cuentas[i]; conteos[t] = r.error ? null : (r.count ?? 0); });
     const fallidos = fall.data ?? [];
-    let patentesWebHoy = 0;
-    let patentesGuardadas: number | null = null;
-    try { patentesWebHoy = Number.parseInt((await dbGet(`patente_uso_web::${new Date().toLocaleDateString("en-CA", { timeZone: "America/Santiago" })}`)) ?? "0", 10) || 0; } catch { /* sin dato */ }
-    try { const g = await sb.from("patentes_consultadas").select("patente", { count: "exact", head: true }); patentesGuardadas = g.error ? null : (g.count ?? 0); } catch { /* tabla aún no creada */ }
-    let patentesHoy = 0;
-    try { patentesHoy = Number.parseInt((await dbGet(`patente_uso::${new Date().toLocaleDateString("en-CA", { timeZone: "America/Santiago" })}`)) ?? "0", 10) || 0; } catch { /* sin dato */ }
+    const patentesWebHoy = Number.parseInt(usoWeb ?? "0", 10) || 0;
+    const patentesGuardadas: number | null = (guardadas as any).error ? null : ((guardadas as any).count ?? 0);
+    const patentesHoy = Number.parseInt(usoHoy ?? "0", 10) || 0;
     return json({
       patentes: { activa: !!Deno.env.get("BOOSTR_API_KEY"), usadasHoy: patentesHoy, usadasWebHoy: patentesWebHoy, limite: limiteDiario(Deno.env.get("BOOSTR_LIMITE_DIARIO")), limiteWeb: limiteWeb(limiteDiario(Deno.env.get("BOOSTR_LIMITE_DIARIO"))), guardadas: patentesGuardadas },
       ahora: new Date().toISOString(), dbMs, conteos,

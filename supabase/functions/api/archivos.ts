@@ -64,15 +64,13 @@ export async function borrarArchivo(sb: any, key: string): Promise<void> {
 
 /** Cuántos archivos hay de cada tipo: los que aún viven como texto dentro de kv_store y los que ya están en Storage. Nunca trae el contenido. */
 export async function estadoMigracion(sb: any) {
+  // Las 10 consultas (5 prefijos × 2) salen a la vez: una sola ronda a la base.
+  const resp = await Promise.all(PREFIJOS_ARCHIVO.flatMap((p) => [
+    sb.from(TABLE).select("key", { count: "exact" }).like("key", p + "::%").ilike("value", "data:%").limit(1),
+    sb.from(TABLE).select("key", { count: "exact" }).like("key", p + "::%").like("value", MARCADOR + "%").limit(1),
+  ]));
   let enLaBase = 0, enStorage = 0;
-  for (const p of PREFIJOS_ARCHIVO) {
-    const a = await sb.from(TABLE).select("key", { count: "exact" }).like("key", p + "::%").ilike("value", "data:%").limit(1);
-    if (a.error) throw a.error;
-    enLaBase += a.count ?? 0;
-    const b = await sb.from(TABLE).select("key", { count: "exact" }).like("key", p + "::%").like("value", MARCADOR + "%").limit(1);
-    if (b.error) throw b.error;
-    enStorage += b.count ?? 0;
-  }
+  resp.forEach((r: any, i: number) => { if (r.error) throw r.error; if (i % 2 === 0) enLaBase += r.count ?? 0; else enStorage += r.count ?? 0; });
   return { enLaBase, enStorage };
 }
 

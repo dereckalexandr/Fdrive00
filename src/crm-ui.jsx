@@ -395,7 +395,7 @@ export function Modal({ titulo, onCerrar, children, ancho = "max-w-2xl" }) {
  *  - `recargar()` (botón Actualizar o tras guardar) siempre va a la red.
  * Los datos se guardan solo en memoria y se borran al cerrar sesión o al cambiar algo (ver cache-cliente.js).
  */
-export function useCarga(fn, deps) {
+export function useCarga(fn, deps, opciones = {}) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const clave = useMemo(() => claveDeCarga(fn, deps), deps);
   const [estado, setEstado] = useState(() => { const h = cachePantallas.get(clave); return { cargando: true, error: "", datos: h ? h.valor : null }; });
@@ -413,7 +413,7 @@ export function useCarga(fn, deps) {
       // Si ya se pidió otra cosa (o la pantalla se cerró), esta respuesta se descarta.
       if (mia === ultima.current && montado.current) setEstado((p) => ({ cargando: false, error: "", datos: p.datos && estable(p.datos) === estable(datos) ? p.datos : datos }));
     } catch (e) {
-      if (mia === ultima.current && montado.current) setEstado((p) => ({ cargando: false, error: mensajeError(e), datos: p.datos }));
+      if (mia === ultima.current && montado.current) setEstado((p) => ({ cargando: false, error: (opciones.mensaje || mensajeError)(e), datos: p.datos }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
