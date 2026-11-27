@@ -55,7 +55,8 @@ export default function SitioPista() {
         <div className="absolute left-0 right-0 bottom-16 border-t-[6px] border-dashed border-[#FF6B1A]/25" aria-hidden="true" />
         <div className="max-w-6xl mx-auto px-5 pt-16 pb-28 relative">
           <p className="text-[#FF6B1A] font-semibold mb-4">CRM para automotoras</p>
-          <h1 style={T} className="text-5xl sm:text-7xl font-bold leading-none tracking-tight max-w-3xl">De lead a <span className="text-[#FF6B1A]">llaves</span>.</h1>
+          <h1 className="m-0"><LogotipoPista tono="marfil" alto={null} className="h-20 sm:h-32 w-auto" /></h1>
+          <p style={T} className="mt-6 text-3xl sm:text-5xl font-bold leading-tight tracking-tight max-w-3xl">De lead a <span className="text-[#FF6B1A]">llaves</span>.</p>
           <p className="mt-6 text-lg text-white/80 max-w-2xl">Ningún lead se queda en los pits. Pista reúne tus leads, tu WhatsApp, tu inventario y tus ventas en una sola plataforma hecha para cómo se venden autos en Chile.</p>
           <div className="mt-10 flex flex-wrap gap-3">
             <a href={MAILTO_DEMO} className={BTN}>Agenda una demo</a>

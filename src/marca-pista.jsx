@@ -14,9 +14,10 @@ export const PISTA = { noche: "#0E1B2C", naranja: "#FF6B1A", marfil: "#FAF7F2", 
 export const ESLOGAN_PISTA = "De lead a llaves.";
 export const FUENTE_TITULOS = "'Space Grotesk', Inter, system-ui, sans-serif";
 
-/** Logotipo «pista». tono: "marfil" (sobre fondo oscuro), "noche" (sobre fondo claro) o "naranja". */
+/** Logotipo «pista». tono: "marfil" (sobre fondo oscuro), "noche" (sobre fondo claro) o "naranja".
+ *  alto en px; con alto={null} el tamaño lo dan las clases (p. ej. responsivo «h-20 sm:h-32»). */
 export function LogotipoPista({ tono = "noche", alto = 28, className = "" }) {
-  return <img src={`/marca/pista-logotipo-${tono}.svg`} alt="Pista" style={{ height: alto, width: "auto" }} className={className} />;
+  return <img src={`/marca/pista-logotipo-${tono}.svg`} alt="Pista" style={alto ? { height: alto, width: "auto" } : undefined} className={className} />;
 }
 
 /** Isotipo «A · Curva de pista». Bajo 32 px usa la versión simplificada (sin línea central). */
